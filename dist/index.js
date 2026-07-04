@@ -1427,14 +1427,16 @@ function summarizeRaw(value) {
 
 // src/resource.ts
 var ResourceClient = class {
-  constructor(http, endpoints, raw) {
+  constructor(http, endpoints, raw, validateRaw = validateRawResponse) {
     this.http = http;
     this.endpoints = endpoints;
     this.raw = raw;
+    this.validateRaw = validateRaw;
   }
   http;
   endpoints;
   raw;
+  validateRaw;
   async query(spec, params) {
     const raw = spec.resource ? await this.raw.query(spec.resource(params)) : await this.http.request(
       spec.method ?? "GET",
@@ -1442,11 +1444,11 @@ var ResourceClient = class {
       spec.body?.(params),
       spec.query?.(params)
     );
-    const validatedRaw = spec.schemaName ? validateRawResponse(spec.schemaName, raw) : raw;
+    const validatedRaw = spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw;
     return spec.normalize(validatedRaw, params);
   }
   stream(spec, params) {
-    return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params))).map((raw) => spec.normalize(spec.schemaName ? validateRawResponse(spec.schemaName, raw) : raw, params));
+    return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params))).map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
   }
 };
 function requiredEndpoint(spec) {
@@ -1501,9 +1503,11 @@ var TradeRepublicClient = class _TradeRepublicClient {
   http;
   endpoints;
   resources;
+  validateRaw;
   constructor(options = {}) {
     this.session = options.session;
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
+    this.validateRaw = options.rawSchemaValidation === false ? skipRawSchemaValidation : validateRawResponse;
     this.endpoints = new EndpointResolver(options.endpoints);
     this.http = new HttpClient({
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
@@ -1522,22 +1526,22 @@ var TradeRepublicClient = class _TradeRepublicClient {
       options.websocketFactory ?? defaultWebSocketFactory,
       () => this.session
     );
-    this.account = new AccountApi(this.http, this.endpoints);
-    this.boards = new BoardsApi(this.http, this.endpoints);
-    this.resources = new ResourceClient(this.http, this.endpoints, this.raw);
-    this.assets = new AssetsApi(this.raw);
-    this.derivatives = new DerivativesApi(this.raw);
-    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
-    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.account = new AccountApi(this.http, this.endpoints, this.validateRaw);
+    this.boards = new BoardsApi(this.http, this.endpoints, this.validateRaw);
+    this.resources = new ResourceClient(this.http, this.endpoints, this.raw, this.validateRaw);
+    this.assets = new AssetsApi(this.raw, this.validateRaw);
+    this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
+    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
     this.market = new MarketApi(this.resources);
-    this.timeline = new TimelineApi(this.raw);
-    this.priceAlarms = new PriceAlarmsApi(this.raw);
-    this.instruments = new InstrumentsApi(this.raw);
-    this.trading = new TradingApi(this.http, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
-    this.discovery = new DiscoveryApi(this.http);
-    this.documents = new DocumentsApi(this.http);
-    this.tax = new TaxApi(this.http);
-    this.payments = new PaymentsApi(this.http);
+    this.timeline = new TimelineApi(this.raw, this.validateRaw);
+    this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
+    this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
+    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.discovery = new DiscoveryApi(this.http, this.validateRaw);
+    this.documents = new DocumentsApi(this.http, this.validateRaw);
+    this.tax = new TaxApi(this.http, this.validateRaw);
+    this.payments = new PaymentsApi(this.http, this.validateRaw);
     this.web = new WebApi(this.http, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
   }
   static create(options = {}) {
@@ -1574,12 +1578,14 @@ var TradeRepublicClient = class _TradeRepublicClient {
   }
 };
 var AssetsApi = class {
-  constructor(raw) {
+  constructor(raw, validateRaw) {
     this.raw = raw;
+    this.validateRaw = validateRaw;
   }
   raw;
+  validateRaw;
   async search(query, options = {}) {
-    const raw = await validated("assets.search", this.raw.query({
+    const raw = await validated(this.validateRaw, "assets.search", this.raw.query({
       type: "neonSearch",
       data: {
         q: query.trim(),
@@ -1591,11 +1597,11 @@ var AssetsApi = class {
     return arrayPayload(raw).map(normalizeAsset);
   }
   async get(assetId) {
-    return normalizeAssetDetail(await validated("assets.get", this.raw.query({ type: "instrument", id: assetId })));
+    return normalizeAssetDetail(await validated(this.validateRaw, "assets.get", this.raw.query({ type: "instrument", id: assetId })));
   }
   async listAll(options = {}) {
     const page = numberString(options.cursor) ?? 1;
-    const raw = await validated("assets.search", this.raw.query({
+    const raw = await validated(this.validateRaw, "assets.search", this.raw.query({
       type: "neonSearch",
       data: {
         q: "",
@@ -1608,53 +1614,59 @@ var AssetsApi = class {
   }
 };
 var AccountApi = class {
-  constructor(http, endpoints) {
+  constructor(http, endpoints, validateRaw) {
     this.http = http;
     this.endpoints = endpoints;
+    this.validateRaw = validateRaw;
   }
   http;
   endpoints;
+  validateRaw;
   current() {
-    return validated("auth.account", this.http.request("GET", this.endpoints.resolve("auth.account")));
+    return validated(this.validateRaw, "auth.account", this.http.request("GET", this.endpoints.resolve("auth.account")));
   }
   session() {
-    return validated("auth.session", this.http.request("GET", this.endpoints.resolve("auth.session")));
+    return validated(this.validateRaw, "auth.session", this.http.request("GET", this.endpoints.resolve("auth.session")));
   }
   accountSettings() {
     return this.current();
   }
   personalDetails() {
-    return validated("account.personalDetails", this.http.request("GET", "/api/v1/customer/personal-details"));
+    return validated(this.validateRaw, "account.personalDetails", this.http.request("GET", "/api/v1/customer/personal-details"));
   }
   relationships() {
-    return validated("account.relationships", this.http.request("GET", "/api/v1/customer/relationships/detailed"));
+    return validated(this.validateRaw, "account.relationships", this.http.request("GET", "/api/v1/customer/relationships/detailed"));
   }
   cardsHome() {
-    return validated("account.cardsHome", this.http.request("GET", "/api/v1/card/cards/home"));
+    return validated(this.validateRaw, "account.cardsHome", this.http.request("GET", "/api/v1/card/cards/home"));
   }
 };
 var BoardsApi = class {
-  constructor(http, endpoints) {
+  constructor(http, endpoints, validateRaw) {
     this.http = http;
     this.endpoints = endpoints;
+    this.validateRaw = validateRaw;
   }
   http;
   endpoints;
+  validateRaw;
   async list() {
-    const raw = await validated("boards.list", this.http.request("GET", this.endpoints.resolve("boards.list")));
+    const raw = await validated(this.validateRaw, "boards.list", this.http.request("GET", this.endpoints.resolve("boards.list")));
     return arrayPayload(raw).map(normalizeBoard);
   }
   async get(boardId) {
-    return normalizeBoard(await validated("boards.detail", this.http.request("GET", this.endpoints.resolve("boards.detail", { boardId }))));
+    return normalizeBoard(await validated(this.validateRaw, "boards.detail", this.http.request("GET", this.endpoints.resolve("boards.detail", { boardId }))));
   }
 };
 var DerivativesApi = class {
-  constructor(raw) {
+  constructor(raw, validateRaw) {
     this.raw = raw;
+    this.validateRaw = validateRaw;
   }
   raw;
+  validateRaw;
   async search(query, options = {}) {
-    const raw = await validated("derivatives.search", this.raw.query({
+    const raw = await validated(this.validateRaw, "derivatives.search", this.raw.query({
       type: "neonSearch",
       data: {
         q: query.trim(),
@@ -1669,7 +1681,7 @@ var DerivativesApi = class {
     return arrayPayload(raw).map(normalizeDerivative);
   }
   async listForUnderlying(underlyingId, options = {}) {
-    const raw = await validated("derivatives.listForUnderlying", this.raw.query({
+    const raw = await validated(this.validateRaw, "derivatives.listForUnderlying", this.raw.query({
       type: "derivatives",
       jurisdiction: "DE",
       lang: "en",
@@ -1681,20 +1693,22 @@ var DerivativesApi = class {
     return arrayPayload(raw).map(normalizeDerivative);
   }
   async get(derivativeId) {
-    return normalizeDerivative(await validated("assets.get", this.raw.query({ type: "instrument", id: derivativeId })));
+    return normalizeDerivative(await validated(this.validateRaw, "assets.get", this.raw.query({ type: "instrument", id: derivativeId })));
   }
 };
 var OrdersApi = class {
-  constructor(http, endpoints, raw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
     this.http = http;
     this.endpoints = endpoints;
     this.raw = raw;
+    this.validateRaw = validateRaw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
   }
   http;
   endpoints;
   raw;
+  validateRaw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
   async open(options = {}) {
@@ -1711,7 +1725,7 @@ var OrdersApi = class {
   async rawAll(options = {}) {
     const { filters, secAccNo: providedSecAccNo, ...rest } = options;
     const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
-    return validated("orders.all", this.http.request("GET", this.endpoints.resolve("orders.all"), void 0, {
+    return validated(this.validateRaw, "orders.all", this.http.request("GET", this.endpoints.resolve("orders.all"), void 0, {
       secAccNo,
       page: rest.page ?? numberString(rest.cursor) ?? 1,
       pageSize: rest.pageSize ?? rest.limit ?? 100,
@@ -1727,7 +1741,7 @@ var OrdersApi = class {
   }
   async rawMutualFunds(options = {}) {
     const { filters, ...rest } = options;
-    return validated("orders.mutualFunds", this.http.request("GET", this.endpoints.resolve("orders.mutualFunds"), void 0, {
+    return validated(this.validateRaw, "orders.mutualFunds", this.http.request("GET", this.endpoints.resolve("orders.mutualFunds"), void 0, {
       openOnly: false,
       excludeQuantityNull: false,
       page: 1,
@@ -1741,7 +1755,7 @@ var OrdersApi = class {
   }
   async rawPrivateMarkets(options = {}) {
     const { filters, ...rest } = options;
-    return validated("orders.privateMarkets", this.http.request("GET", this.endpoints.resolve("orders.privateMarkets"), void 0, {
+    return validated(this.validateRaw, "orders.privateMarkets", this.http.request("GET", this.endpoints.resolve("orders.privateMarkets"), void 0, {
       sortBy: "CREATED_AT",
       sortAscending: false,
       pageNumber: 1,
@@ -1754,11 +1768,11 @@ var OrdersApi = class {
     return toSubscription(this.raw.subscribeResource({
       type: "orderUpdates",
       selector: { case: "bySecAccNo", value: { accountNumber: secAccNo } }
-    })).map((raw) => validateRawResponse("orders.orderUpdates", raw));
+    })).map((raw) => this.validateRaw("orders.orderUpdates", raw));
   }
   async rawOrderUpdates(secAccNo) {
     const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
-    return validated("orders.orderUpdates", this.raw.query({
+    return validated(this.validateRaw, "orders.orderUpdates", this.raw.query({
       type: "orderUpdates",
       selector: { case: "bySecAccNo", value: { accountNumber } }
     }));
@@ -1769,56 +1783,58 @@ function isOpenOrder(order) {
   return status === "OPEN" || status === "OPENED" || status === "PARTIALLYFILLED" || status === "PARTIALLY_FILLED" || status === "RECEIVED";
 }
 var PortfolioApi = class {
-  constructor(http, endpoints, raw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
     this.http = http;
     this.endpoints = endpoints;
     this.raw = raw;
+    this.validateRaw = validateRaw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
   }
   http;
   endpoints;
   raw;
+  validateRaw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
   async current(options = {}) {
     const secAccNo = await this.resolveSecuritiesAccountNumber();
-    const raw = await validated("portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
+    const raw = await validated(this.validateRaw, "portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
     return normalizePortfolio(raw);
   }
   async cash() {
-    return normalizeCash(await validated("portfolio.cash", this.raw.query({ type: "availableCash" })));
+    return normalizeCash(await validated(this.validateRaw, "portfolio.cash", this.raw.query({ type: "availableCash" })));
   }
   async markToMarketValue() {
-    return normalizeCash(await validated("portfolio.markToMarketValue", this.raw.query({ type: "portfolioStatus" })));
+    return normalizeCash(await validated(this.validateRaw, "portfolio.markToMarketValue", this.raw.query({ type: "portfolioStatus" })));
   }
   async savingsPlans(secAccNo) {
     return arrayPayload(await this.rawSavingsPlans(secAccNo)).map(normalizeSavingsPlan);
   }
   async rawSavingsPlans(secAccNo) {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated("portfolio.savingsPlans", this.raw.query({ type: "savingsPlans", secAccNo: accountNumber }));
+    return validated(this.validateRaw, "portfolio.savingsPlans", this.raw.query({ type: "savingsPlans", secAccNo: accountNumber }));
   }
   async privateMarketsPositions(secAccNo) {
     return this.rawPrivateMarketsPositions(secAccNo);
   }
   async rawPrivateMarketsPositions(secAccNo) {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated("portfolio.privateMarketsPositions", this.raw.query({ type: "privateMarketsPositions", secAccNo: accountNumber }));
+    return validated(this.validateRaw, "portfolio.privateMarketsPositions", this.raw.query({ type: "privateMarketsPositions", secAccNo: accountNumber }));
   }
   async portfolioChart(secAccNo, range = "1y", options = {}) {
     return normalizePortfolioChart(await this.rawPortfolioChart(secAccNo, range, options));
   }
   async rawPortfolioChart(secAccNo, range = "1y", options = {}) {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated("portfolio.portfolioChart", this.http.request("GET", "/api-gateway/portfolio-chart/v2/chart", void 0, {
+    return validated(this.validateRaw, "portfolio.portfolioChart", this.http.request("GET", "/api-gateway/portfolio-chart/v2/chart", void 0, {
       secAccNo: accountNumber,
       range,
       ...options
     }));
   }
   async positionsForAccount(secAccNo, options = {}) {
-    const raw = await validated("portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
+    const raw = await validated(this.validateRaw, "portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
     return normalizePortfolio(raw);
   }
   async resolveSecuritiesAccountNumber() {
@@ -1872,8 +1888,11 @@ function neonSearchFilters(type, filters = {}) {
     ...Object.entries(filters).flatMap(([key, value]) => value === void 0 ? [] : [{ key, value }])
   ];
 }
-async function validated(schemaName, value) {
-  return validateRawResponse(schemaName, await value);
+async function validated(validateRaw, schemaName, value) {
+  return validateRaw(schemaName, await value);
+}
+function skipRawSchemaValidation(_schemaName, value) {
+  return value;
 }
 var MarketApi = class {
   constructor(resources) {
@@ -1909,47 +1928,51 @@ var MarketApi = class {
   }
 };
 var TimelineApi = class {
-  constructor(raw) {
+  constructor(raw, validateRaw) {
     this.raw = raw;
+    this.validateRaw = validateRaw;
   }
   raw;
+  validateRaw;
   async list(options = {}) {
     return arrayPayload(await this.rawList(options)).map(normalizeTimelineItem);
   }
   rawList(options = {}) {
     const { after } = options;
-    return validated("timeline.list", this.raw.query({ type: "timelineActivityLog", ...after ? { after } : {} }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "timeline.list", this.raw.query({ type: "timelineActivityLog", ...after ? { after } : {} }, pickTimeoutOptions(options)));
   }
   async actions(options = {}) {
     return arrayPayload(await this.rawActions(options)).map(normalizeTimelineAction);
   }
   rawActions(options = {}) {
-    return validated("timeline.actions", this.raw.query({ type: "timelineActionsV2" }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "timeline.actions", this.raw.query({ type: "timelineActionsV2" }, pickTimeoutOptions(options)));
   }
   async detail(id, kind = "timeline", options = {}) {
     return normalizeTimelineDetail(await this.rawDetail(id, kind, options));
   }
   rawDetail(id, kind = "timeline", options = {}) {
     const key = kind === "order" ? "orderId" : kind === "savingsPlan" ? "savingsPlanId" : "id";
-    return validated("timeline.detail", this.raw.query({ type: "timelineDetailV2", [key]: id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "timeline.detail", this.raw.query({ type: "timelineDetailV2", [key]: id }, pickTimeoutOptions(options)));
   }
 };
 var PriceAlarmsApi = class {
-  constructor(raw) {
+  constructor(raw, validateRaw) {
     this.raw = raw;
+    this.validateRaw = validateRaw;
   }
   raw;
+  validateRaw;
   async list(options = {}) {
     return arrayPayload(await this.rawList(options)).map(normalizePriceAlarm);
   }
   rawList(options = {}) {
-    return validated("priceAlarms.list", this.raw.query({ type: "priceAlarms" }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "priceAlarms.list", this.raw.query({ type: "priceAlarms" }, pickTimeoutOptions(options)));
   }
   async notifications(options = {}) {
     return arrayPayload(await this.rawNotifications(options)).map(normalizePriceAlarm);
   }
   rawNotifications(options = {}) {
-    return validated("priceAlarms.notifications", this.raw.query({ type: "priceAlarmNotifications" }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "priceAlarms.notifications", this.raw.query({ type: "priceAlarmNotifications" }, pickTimeoutOptions(options)));
   }
   create(options) {
     const { timeoutMs, currency = "EUR", price, ...rest } = options;
@@ -1957,245 +1980,257 @@ var PriceAlarmsApi = class {
     return this.rawCreate(payload, timeoutMs === void 0 ? {} : { timeoutMs });
   }
   rawCreate(payload, options = {}) {
-    return validated("priceAlarms.create", this.raw.query({ type: "createPriceAlarm", ...payload }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "priceAlarms.create", this.raw.query({ type: "createPriceAlarm", ...payload }, pickTimeoutOptions(options)));
   }
   cancel(id, options = {}) {
     return this.rawCancel(id, options);
   }
   rawCancel(id, options = {}) {
-    return validated("priceAlarms.cancel", this.raw.query({ type: "cancelPriceAlarm", id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "priceAlarms.cancel", this.raw.query({ type: "cancelPriceAlarm", id }, pickTimeoutOptions(options)));
   }
 };
 var InstrumentsApi = class {
-  constructor(raw) {
+  constructor(raw, validateRaw) {
     this.raw = raw;
+    this.validateRaw = validateRaw;
   }
   raw;
+  validateRaw;
   async news(isin, options = {}) {
     return arrayPayload(await this.rawNews(isin, options)).map(normalizeInstrumentNewsItem);
   }
   rawNews(isin, options = {}) {
-    return validated("instruments.news", this.raw.query({ type: "neonNews", isin }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.news", this.raw.query({ type: "neonNews", isin }, pickTimeoutOptions(options)));
   }
   etfDetails(id, options = {}) {
     return this.rawEtfDetails(id, options);
   }
   rawEtfDetails(id, options = {}) {
-    return validated("instruments.etfDetails", this.raw.query({ type: "etfDetails", id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.etfDetails", this.raw.query({ type: "etfDetails", id }, pickTimeoutOptions(options)));
   }
   etfComposition(id, after, options = {}) {
     return this.rawEtfComposition(id, after, options);
   }
   rawEtfComposition(id, after, options = {}) {
-    return validated("instruments.etfComposition", this.raw.query({ type: "etfComposition", id, ...after ? { after } : {} }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.etfComposition", this.raw.query({ type: "etfComposition", id, ...after ? { after } : {} }, pickTimeoutOptions(options)));
   }
   fundDetails(id, options = {}) {
     return this.rawFundDetails(id, options);
   }
   rawFundDetails(id, options = {}) {
-    return validated("instruments.fundDetails", this.raw.query({ type: "mutualFundDetails", id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.fundDetails", this.raw.query({ type: "mutualFundDetails", id }, pickTimeoutOptions(options)));
   }
   fundComposition(id, after, options = {}) {
     return this.rawFundComposition(id, after, options);
   }
   rawFundComposition(id, after, options = {}) {
-    return validated("instruments.fundComposition", this.raw.query({ type: "mutualFundComposition", id, ...after ? { after } : {} }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.fundComposition", this.raw.query({ type: "mutualFundComposition", id, ...after ? { after } : {} }, pickTimeoutOptions(options)));
   }
   cryptoDetails(id, options = {}) {
     return this.rawCryptoDetails(id, options);
   }
   rawCryptoDetails(id, options = {}) {
-    return validated("instruments.cryptoDetails", this.raw.query({ type: "cryptoDetails", id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.cryptoDetails", this.raw.query({ type: "cryptoDetails", id }, pickTimeoutOptions(options)));
   }
   yieldToMaturity(id, options = {}) {
     return this.rawYieldToMaturity(id, options);
   }
   rawYieldToMaturity(id, options = {}) {
-    return validated("instruments.yieldToMaturity", this.raw.query({ type: "yieldToMaturity", id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "instruments.yieldToMaturity", this.raw.query({ type: "yieldToMaturity", id }, pickTimeoutOptions(options)));
   }
 };
 var TradingApi = class {
-  constructor(http, raw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
     this.http = http;
     this.raw = raw;
+    this.validateRaw = validateRaw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
   }
   http;
   raw;
+  validateRaw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
   priceForOrder(options, queryOptions = {}) {
-    return validated("trading.priceForOrder", this.raw.query({ type: "priceForOrderV2", unit: "EUR", ...options }, pickTimeoutOptions(queryOptions)));
+    return validated(this.validateRaw, "trading.priceForOrder", this.raw.query({ type: "priceForOrderV2", unit: "EUR", ...options }, pickTimeoutOptions(queryOptions)));
   }
   async availableSize(instrumentId, secAccNo, options = {}) {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated("trading.availableSize", this.raw.query({ type: "availableSize", parameters: { instrumentId }, secAccNo: accountNumber }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, "trading.availableSize", this.raw.query({ type: "availableSize", parameters: { instrumentId }, secAccNo: accountNumber }, pickTimeoutOptions(options)));
   }
   async orderDestinations(isin, query = {}) {
     return arrayPayload(await this.rawOrderDestinations(isin, query)).map(normalizeOrderDestination);
   }
   rawOrderDestinations(isin, query = {}) {
-    return validated("trading.orderDestinations", this.http.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, void 0, query));
+    return validated(this.validateRaw, "trading.orderDestinations", this.http.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, void 0, query));
   }
   async trades(query = {}) {
     return arrayPayload(await this.rawTrades(query)).map(normalizeTrade);
   }
   rawTrades(query = {}) {
-    return validated("trading.trades", this.http.request("GET", "/web-trading-gateway/api/customer/v1/trades", void 0, query));
+    return validated(this.validateRaw, "trading.trades", this.http.request("GET", "/web-trading-gateway/api/customer/v1/trades", void 0, query));
   }
   dailyPnl(items) {
     return this.rawDailyPnl(items);
   }
   rawDailyPnl(items) {
-    return validated("trading.dailyPnl", this.http.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { items }));
+    return validated(this.validateRaw, "trading.dailyPnl", this.http.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { items }));
   }
   resolveSecuritiesAccountNumber() {
     return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
   }
 };
 var DiscoveryApi = class {
-  constructor(http) {
+  constructor(http, validateRaw) {
     this.http = http;
+    this.validateRaw = validateRaw;
   }
   http;
+  validateRaw;
   async exchangeDetails() {
     return arrayPayload(await this.rawExchangeDetails()).map(normalizeExchangeDetails);
   }
   rawExchangeDetails() {
-    return validated("discovery.exchangeDetails", this.http.request("GET", "/api-gateway/instrument-universe/api/v1/exchanges-details", void 0, { includeMaintenanceWindow: false }));
+    return validated(this.validateRaw, "discovery.exchangeDetails", this.http.request("GET", "/api-gateway/instrument-universe/api/v1/exchanges-details", void 0, { includeMaintenanceWindow: false }));
   }
   async exchangeSchedule(exchange) {
     return normalizeExchangeSchedule(await this.rawExchangeSchedule(exchange));
   }
   rawExchangeSchedule(exchange) {
-    return validated("discovery.exchangeSchedule", this.http.request("GET", `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`));
+    return validated(this.validateRaw, "discovery.exchangeSchedule", this.http.request("GET", `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`));
   }
   async instrumentStatus(isin, exchange) {
     return normalizeInstrumentStatus(await this.rawInstrumentStatus(isin, exchange));
   }
   rawInstrumentStatus(isin, exchange) {
-    return validated("discovery.instrumentStatus", this.http.request("GET", `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`));
+    return validated(this.validateRaw, "discovery.instrumentStatus", this.http.request("GET", `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`));
   }
   watchlists() {
     return this.rawWatchlists();
   }
   rawWatchlists() {
-    return validated("discovery.watchlists", this.http.request("GET", "/api-gateway/watchlists/api/v2/watchlists"));
+    return validated(this.validateRaw, "discovery.watchlists", this.http.request("GET", "/api-gateway/watchlists/api/v2/watchlists"));
   }
   createWatchlist(name) {
     return this.rawCreateWatchlist(name);
   }
   rawCreateWatchlist(name) {
-    return validated("discovery.watchlists.create", this.http.request("POST", "/api-gateway/watchlists/api/v2/watchlists", { name }));
+    return validated(this.validateRaw, "discovery.watchlists.create", this.http.request("POST", "/api-gateway/watchlists/api/v2/watchlists", { name }));
   }
   renameWatchlist(watchlistId, name) {
     return this.rawRenameWatchlist(watchlistId, name);
   }
   rawRenameWatchlist(watchlistId, name) {
-    return validated("discovery.watchlists.rename", this.http.request("PUT", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, { name }));
+    return validated(this.validateRaw, "discovery.watchlists.rename", this.http.request("PUT", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, { name }));
   }
   deleteWatchlist(watchlistId) {
     return this.rawDeleteWatchlist(watchlistId);
   }
   rawDeleteWatchlist(watchlistId) {
-    return validated("discovery.watchlists.delete", this.http.request("DELETE", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`));
+    return validated(this.validateRaw, "discovery.watchlists.delete", this.http.request("DELETE", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`));
   }
   addWatchlistItem(watchlistId, instrumentId, options = {}) {
     return this.rawAddWatchlistItem(watchlistId, instrumentId, options);
   }
   rawAddWatchlistItem(watchlistId, instrumentId, options = {}) {
-    return validated("discovery.watchlists.addItem", this.http.request("POST", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, { instrument_id: instrumentId, item_rank: -1, ...options }));
+    return validated(this.validateRaw, "discovery.watchlists.addItem", this.http.request("POST", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, { instrument_id: instrumentId, item_rank: -1, ...options }));
   }
   removeWatchlistItem(watchlistId, instrumentId) {
     return this.rawRemoveWatchlistItem(watchlistId, instrumentId);
   }
   rawRemoveWatchlistItem(watchlistId, instrumentId) {
-    return validated("discovery.watchlists.removeItem", this.http.request("DELETE", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`));
+    return validated(this.validateRaw, "discovery.watchlists.removeItem", this.http.request("DELETE", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`));
   }
   screeners() {
     return this.rawScreeners();
   }
   rawScreeners() {
-    return validated("discovery.screeners", this.http.request("GET", "/api-gateway/screeners/api/v2/screeners"));
+    return validated(this.validateRaw, "discovery.screeners", this.http.request("GET", "/api-gateway/screeners/api/v2/screeners"));
   }
   screenerOptions() {
     return this.rawScreenerOptions();
   }
   rawScreenerOptions() {
-    return validated("discovery.screenerOptions", this.http.request("GET", "/api-gateway/screeners/api/v2/screeners/options"));
+    return validated(this.validateRaw, "discovery.screenerOptions", this.http.request("GET", "/api-gateway/screeners/api/v2/screeners/options"));
   }
   userPreferences() {
     return this.rawUserPreferences();
   }
   rawUserPreferences() {
-    return validated("discovery.userPreferences", this.http.request("GET", "/api-gateway/pro-trading/api/v1/user-preferences"));
+    return validated(this.validateRaw, "discovery.userPreferences", this.http.request("GET", "/api-gateway/pro-trading/api/v1/user-preferences"));
   }
 };
 var DocumentsApi = class {
-  constructor(http) {
+  constructor(http, validateRaw) {
     this.http = http;
+    this.validateRaw = validateRaw;
   }
   http;
+  validateRaw;
   documents() {
     return this.rawDocuments();
   }
   rawDocuments() {
-    return validated("documents.documents", this.http.request("GET", "/api/v1/documents/all"));
+    return validated(this.validateRaw, "documents.documents", this.http.request("GET", "/api/v1/documents/all"));
   }
 };
 var TaxApi = class {
-  constructor(http) {
+  constructor(http, validateRaw) {
     this.http = http;
+    this.validateRaw = validateRaw;
   }
   http;
+  validateRaw;
   taxInformation() {
     return this.rawTaxInformation();
   }
   rawTaxInformation() {
-    return validated("tax.taxInformation", this.http.request("GET", "/api/v1/taxes/information"));
+    return validated(this.validateRaw, "tax.taxInformation", this.http.request("GET", "/api/v1/taxes/information"));
   }
   exemptionOrder() {
     return this.rawExemptionOrder();
   }
   rawExemptionOrder() {
-    return validated("tax.exemptionOrder", this.http.request("GET", "/api/v1/taxes/exemptionorders"));
+    return validated(this.validateRaw, "tax.exemptionOrder", this.http.request("GET", "/api/v1/taxes/exemptionorders"));
   }
   taxResidencies() {
     return this.rawTaxResidencies();
   }
   rawTaxResidencies() {
-    return validated("tax.taxResidencies", this.http.request("GET", "/api/v1/auth/account/change/taxresidencies"));
+    return validated(this.validateRaw, "tax.taxResidencies", this.http.request("GET", "/api/v1/auth/account/change/taxresidencies"));
   }
   taxResidencyCountries() {
     return this.rawTaxResidencyCountries();
   }
   rawTaxResidencyCountries() {
-    return validated("tax.taxResidencyCountries", this.http.request("GET", "/api/v1/country/taxresidency"));
+    return validated(this.validateRaw, "tax.taxResidencyCountries", this.http.request("GET", "/api/v1/country/taxresidency"));
   }
 };
 var PaymentsApi = class {
-  constructor(http) {
+  constructor(http, validateRaw) {
     this.http = http;
+    this.validateRaw = validateRaw;
   }
   http;
+  validateRaw;
   paymentMethods() {
     return this.rawPaymentMethods();
   }
   rawPaymentMethods() {
-    return validated("payments.paymentMethods", this.http.request("GET", "/api/v2/payment/methods"));
+    return validated(this.validateRaw, "payments.paymentMethods", this.http.request("GET", "/api/v2/payment/methods"));
   }
   iban() {
     return this.rawIban();
   }
   rawIban() {
-    return validated("payments.iban", this.http.request("GET", "/api/v1/auth/account/iban"));
+    return validated(this.validateRaw, "payments.iban", this.http.request("GET", "/api/v1/auth/account/iban"));
   }
   interestDetails() {
     return this.rawInterestDetails();
   }
   rawInterestDetails() {
-    return validated("payments.interestDetails", this.http.request("GET", "/api/v1/interest/details"));
+    return validated(this.validateRaw, "payments.interestDetails", this.http.request("GET", "/api/v1/interest/details"));
   }
 };
 var WebApi = class {

@@ -70,6 +70,7 @@ import type {
   TimelineItem,
   Trade,
   TradeRepublicClientOptions,
+  RawSchemaValidator,
 } from './types.js';
 
 const DEFAULT_API_BASE_URL = 'https://api.traderepublic.com';
@@ -103,10 +104,12 @@ export class TradeRepublicClient {
   private readonly http: HttpClient;
   private readonly endpoints: EndpointResolver;
   private readonly resources: ResourceClient;
+  private readonly validateRaw: RawSchemaValidator;
 
   constructor(options: TradeRepublicClientOptions = {}) {
     this.session = options.session;
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
+    this.validateRaw = options.rawSchemaValidation === false ? skipRawSchemaValidation : validateRawResponse;
     this.endpoints = new EndpointResolver(options.endpoints);
     this.http = new HttpClient({
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
@@ -126,22 +129,22 @@ export class TradeRepublicClient {
       options.websocketFactory ?? defaultWebSocketFactory,
       () => this.session,
     );
-    this.account = new AccountApi(this.http, this.endpoints);
-    this.boards = new BoardsApi(this.http, this.endpoints);
-    this.resources = new ResourceClient(this.http, this.endpoints, this.raw);
-    this.assets = new AssetsApi(this.raw);
-    this.derivatives = new DerivativesApi(this.raw);
-    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
-    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.account = new AccountApi(this.http, this.endpoints, this.validateRaw);
+    this.boards = new BoardsApi(this.http, this.endpoints, this.validateRaw);
+    this.resources = new ResourceClient(this.http, this.endpoints, this.raw, this.validateRaw);
+    this.assets = new AssetsApi(this.raw, this.validateRaw);
+    this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
+    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
     this.market = new MarketApi(this.resources);
-    this.timeline = new TimelineApi(this.raw);
-    this.priceAlarms = new PriceAlarmsApi(this.raw);
-    this.instruments = new InstrumentsApi(this.raw);
-    this.trading = new TradingApi(this.http, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
-    this.discovery = new DiscoveryApi(this.http);
-    this.documents = new DocumentsApi(this.http);
-    this.tax = new TaxApi(this.http);
-    this.payments = new PaymentsApi(this.http);
+    this.timeline = new TimelineApi(this.raw, this.validateRaw);
+    this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
+    this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
+    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.discovery = new DiscoveryApi(this.http, this.validateRaw);
+    this.documents = new DocumentsApi(this.http, this.validateRaw);
+    this.tax = new TaxApi(this.http, this.validateRaw);
+    this.payments = new PaymentsApi(this.http, this.validateRaw);
     this.web = new WebApi(this.http, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
   }
 
@@ -184,10 +187,13 @@ export class TradeRepublicClient {
 }
 
 export class AssetsApi {
-  constructor(private readonly raw: RawApi) {}
+  constructor(
+    private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async search(query: string, options: { limit?: number; page?: number; type?: string; filters?: Record<string, string | number | boolean | undefined> } = {}): Promise<Asset[]> {
-    const raw = await validated('assets.search', this.raw.query({
+    const raw = await validated(this.validateRaw, 'assets.search', this.raw.query({
       type: 'neonSearch',
       data: {
         q: query.trim(),
@@ -200,12 +206,12 @@ export class AssetsApi {
   }
 
   async get(assetId: string): Promise<AssetDetail> {
-    return normalizeAssetDetail(await validated('assets.get', this.raw.query({ type: 'instrument', id: assetId })));
+    return normalizeAssetDetail(await validated(this.validateRaw, 'assets.get', this.raw.query({ type: 'instrument', id: assetId })));
   }
 
   async listAll(options: { cursor?: string; limit?: number; type?: string; filters?: Record<string, string | number | boolean | undefined> } = {}): Promise<Asset[]> {
     const page = numberString(options.cursor) ?? 1;
-    const raw = await validated('assets.search', this.raw.query({
+    const raw = await validated(this.validateRaw, 'assets.search', this.raw.query({
       type: 'neonSearch',
       data: {
         q: '',
@@ -219,14 +225,18 @@ export class AssetsApi {
 }
 
 export class AccountApi {
-  constructor(private readonly http: HttpClient, private readonly endpoints: EndpointResolver) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly endpoints: EndpointResolver,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   current(): Promise<unknown> {
-    return validated('auth.account', this.http.request('GET', this.endpoints.resolve('auth.account')));
+    return validated(this.validateRaw, 'auth.account', this.http.request('GET', this.endpoints.resolve('auth.account')));
   }
 
   session(): Promise<unknown> {
-    return validated('auth.session', this.http.request('GET', this.endpoints.resolve('auth.session')));
+    return validated(this.validateRaw, 'auth.session', this.http.request('GET', this.endpoints.resolve('auth.session')));
   }
 
   accountSettings(): Promise<unknown> {
@@ -234,36 +244,43 @@ export class AccountApi {
   }
 
   personalDetails(): Promise<unknown> {
-    return validated('account.personalDetails', this.http.request('GET', '/api/v1/customer/personal-details'));
+    return validated(this.validateRaw, 'account.personalDetails', this.http.request('GET', '/api/v1/customer/personal-details'));
   }
 
   relationships(): Promise<unknown> {
-    return validated('account.relationships', this.http.request('GET', '/api/v1/customer/relationships/detailed'));
+    return validated(this.validateRaw, 'account.relationships', this.http.request('GET', '/api/v1/customer/relationships/detailed'));
   }
 
   cardsHome(): Promise<unknown> {
-    return validated('account.cardsHome', this.http.request('GET', '/api/v1/card/cards/home'));
+    return validated(this.validateRaw, 'account.cardsHome', this.http.request('GET', '/api/v1/card/cards/home'));
   }
 }
 
 export class BoardsApi {
-  constructor(private readonly http: HttpClient, private readonly endpoints: EndpointResolver) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly endpoints: EndpointResolver,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async list(): Promise<Board[]> {
-    const raw = await validated('boards.list', this.http.request<unknown>('GET', this.endpoints.resolve('boards.list')));
+    const raw = await validated(this.validateRaw, 'boards.list', this.http.request<unknown>('GET', this.endpoints.resolve('boards.list')));
     return arrayPayload(raw).map(normalizeBoard);
   }
 
   async get(boardId: string): Promise<Board> {
-    return normalizeBoard(await validated('boards.detail', this.http.request('GET', this.endpoints.resolve('boards.detail', { boardId }))));
+    return normalizeBoard(await validated(this.validateRaw, 'boards.detail', this.http.request('GET', this.endpoints.resolve('boards.detail', { boardId }))));
   }
 }
 
 export class DerivativesApi {
-  constructor(private readonly raw: RawApi) {}
+  constructor(
+    private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async search(query: string, options: { underlyingId?: string; direction?: 'long' | 'short'; limit?: number } = {}): Promise<Derivative[]> {
-    const raw = await validated('derivatives.search', this.raw.query({
+    const raw = await validated(this.validateRaw, 'derivatives.search', this.raw.query({
       type: 'neonSearch',
       data: {
         q: query.trim(),
@@ -279,7 +296,7 @@ export class DerivativesApi {
   }
 
   async listForUnderlying(underlyingId: string, options: { direction?: 'long' | 'short'; productType?: string; limit?: number } = {}): Promise<Derivative[]> {
-    const raw = await validated('derivatives.listForUnderlying', this.raw.query({
+    const raw = await validated(this.validateRaw, 'derivatives.listForUnderlying', this.raw.query({
       type: 'derivatives',
       jurisdiction: 'DE',
       lang: 'en',
@@ -292,7 +309,7 @@ export class DerivativesApi {
   }
 
   async get(derivativeId: string): Promise<Derivative> {
-    return normalizeDerivative(await validated('assets.get', this.raw.query({ type: 'instrument', id: derivativeId })));
+    return normalizeDerivative(await validated(this.validateRaw, 'assets.get', this.raw.query({ type: 'instrument', id: derivativeId })));
   }
 }
 
@@ -301,6 +318,7 @@ export class OrdersApi {
     private readonly http: HttpClient,
     private readonly endpoints: EndpointResolver,
     private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
   ) {}
@@ -322,7 +340,7 @@ export class OrdersApi {
   async rawAll(options: OrdersListOptions = {}): Promise<unknown> {
     const { filters, secAccNo: providedSecAccNo, ...rest } = options;
     const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
-    return validated('orders.all', this.http.request<unknown>('GET', this.endpoints.resolve('orders.all'), undefined, {
+    return validated(this.validateRaw, 'orders.all', this.http.request<unknown>('GET', this.endpoints.resolve('orders.all'), undefined, {
       secAccNo,
       page: rest.page ?? numberString(rest.cursor) ?? 1,
       pageSize: rest.pageSize ?? rest.limit ?? 100,
@@ -340,7 +358,7 @@ export class OrdersApi {
 
   async rawMutualFunds(options: MutualFundOrdersOptions = {}): Promise<unknown> {
     const { filters, ...rest } = options;
-    return validated('orders.mutualFunds', this.http.request('GET', this.endpoints.resolve('orders.mutualFunds'), undefined, {
+    return validated(this.validateRaw, 'orders.mutualFunds', this.http.request('GET', this.endpoints.resolve('orders.mutualFunds'), undefined, {
       openOnly: false,
       excludeQuantityNull: false,
       page: 1,
@@ -356,7 +374,7 @@ export class OrdersApi {
 
   async rawPrivateMarkets(options: PrivateMarketsOrdersOptions = {}): Promise<unknown> {
     const { filters, ...rest } = options;
-    return validated('orders.privateMarkets', this.http.request('GET', this.endpoints.resolve('orders.privateMarkets'), undefined, {
+    return validated(this.validateRaw, 'orders.privateMarkets', this.http.request('GET', this.endpoints.resolve('orders.privateMarkets'), undefined, {
       sortBy: 'CREATED_AT',
       sortAscending: false,
       pageNumber: 1,
@@ -370,12 +388,12 @@ export class OrdersApi {
     return toSubscription(this.raw.subscribeResource({
       type: 'orderUpdates',
       selector: { case: 'bySecAccNo', value: { accountNumber: secAccNo } },
-    })).map((raw) => validateRawResponse('orders.orderUpdates', raw));
+    })).map((raw) => this.validateRaw('orders.orderUpdates', raw));
   }
 
   async rawOrderUpdates(secAccNo?: string): Promise<unknown> {
     const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
-    return validated('orders.orderUpdates', this.raw.query({
+    return validated(this.validateRaw, 'orders.orderUpdates', this.raw.query({
       type: 'orderUpdates',
       selector: { case: 'bySecAccNo', value: { accountNumber } },
     }));
@@ -392,22 +410,23 @@ export class PortfolioApi {
     private readonly http: HttpClient,
     private readonly endpoints: EndpointResolver,
     private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
   ) {}
 
   async current(options: { timeoutMs?: number } = {}): Promise<Portfolio> {
     const secAccNo = await this.resolveSecuritiesAccountNumber();
-    const raw = await validated('portfolio.current', this.raw.query({ type: 'compactPortfolioByTypeV2', secAccNo }, pickTimeoutOptions(options)));
+    const raw = await validated(this.validateRaw, 'portfolio.current', this.raw.query({ type: 'compactPortfolioByTypeV2', secAccNo }, pickTimeoutOptions(options)));
     return normalizePortfolio(raw);
   }
 
   async cash(): Promise<CashSummary> {
-    return normalizeCash(await validated('portfolio.cash', this.raw.query({ type: 'availableCash' })));
+    return normalizeCash(await validated(this.validateRaw, 'portfolio.cash', this.raw.query({ type: 'availableCash' })));
   }
 
   async markToMarketValue(): Promise<CashSummary> {
-    return normalizeCash(await validated('portfolio.markToMarketValue', this.raw.query({ type: 'portfolioStatus' })));
+    return normalizeCash(await validated(this.validateRaw, 'portfolio.markToMarketValue', this.raw.query({ type: 'portfolioStatus' })));
   }
 
   async savingsPlans(secAccNo?: string): Promise<SavingsPlan[]> {
@@ -416,7 +435,7 @@ export class PortfolioApi {
 
   async rawSavingsPlans(secAccNo?: string): Promise<unknown> {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated('portfolio.savingsPlans', this.raw.query({ type: 'savingsPlans', secAccNo: accountNumber }));
+    return validated(this.validateRaw, 'portfolio.savingsPlans', this.raw.query({ type: 'savingsPlans', secAccNo: accountNumber }));
   }
 
   async privateMarketsPositions(secAccNo?: string): Promise<unknown> {
@@ -425,7 +444,7 @@ export class PortfolioApi {
 
   async rawPrivateMarketsPositions(secAccNo?: string): Promise<unknown> {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated('portfolio.privateMarketsPositions', this.raw.query({ type: 'privateMarketsPositions', secAccNo: accountNumber }));
+    return validated(this.validateRaw, 'portfolio.privateMarketsPositions', this.raw.query({ type: 'privateMarketsPositions', secAccNo: accountNumber }));
   }
 
   async portfolioChart(secAccNo?: string, range = '1y', options: { currency?: string; instrumentCategories?: string } = {}): Promise<PortfolioChart> {
@@ -434,7 +453,7 @@ export class PortfolioApi {
 
   async rawPortfolioChart(secAccNo?: string, range = '1y', options: { currency?: string; instrumentCategories?: string } = {}): Promise<unknown> {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated('portfolio.portfolioChart', this.http.request('GET', '/api-gateway/portfolio-chart/v2/chart', undefined, {
+    return validated(this.validateRaw, 'portfolio.portfolioChart', this.http.request('GET', '/api-gateway/portfolio-chart/v2/chart', undefined, {
       secAccNo: accountNumber,
       range,
       ...options,
@@ -442,7 +461,7 @@ export class PortfolioApi {
   }
 
   async positionsForAccount(secAccNo: string, options: { timeoutMs?: number } = {}): Promise<Portfolio> {
-    const raw = await validated('portfolio.current', this.raw.query({ type: 'compactPortfolioByTypeV2', secAccNo }, pickTimeoutOptions(options)));
+    const raw = await validated(this.validateRaw, 'portfolio.current', this.raw.query({ type: 'compactPortfolioByTypeV2', secAccNo }, pickTimeoutOptions(options)));
     return normalizePortfolio(raw);
   }
 
@@ -508,8 +527,12 @@ function neonSearchFilters(type: string, filters: Record<string, string | number
   ];
 }
 
-async function validated<T>(schemaName: string, value: Promise<T>): Promise<T> {
-  return validateRawResponse(schemaName, await value) as T;
+async function validated<T>(validateRaw: RawSchemaValidator, schemaName: string, value: Promise<T>): Promise<T> {
+  return validateRaw(schemaName, await value) as T;
+}
+
+function skipRawSchemaValidation(_schemaName: string, value: unknown): unknown {
+  return value;
 }
 
 export class MarketApi {
@@ -553,7 +576,10 @@ export class MarketApi {
 }
 
 export class TimelineApi {
-  constructor(private readonly raw: RawApi) {}
+  constructor(
+    private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async list(options: { after?: string; timeoutMs?: number } = {}): Promise<TimelineItem[]> {
     return arrayPayload(await this.rawList(options)).map(normalizeTimelineItem);
@@ -561,7 +587,7 @@ export class TimelineApi {
 
   rawList(options: { after?: string; timeoutMs?: number } = {}): Promise<unknown> {
     const { after } = options;
-    return validated('timeline.list', this.raw.query({ type: 'timelineActivityLog', ...(after ? { after } : {}) }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'timeline.list', this.raw.query({ type: 'timelineActivityLog', ...(after ? { after } : {}) }, pickTimeoutOptions(options)));
   }
 
   async actions(options: { timeoutMs?: number } = {}): Promise<TimelineAction[]> {
@@ -569,7 +595,7 @@ export class TimelineApi {
   }
 
   rawActions(options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('timeline.actions', this.raw.query({ type: 'timelineActionsV2' }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'timeline.actions', this.raw.query({ type: 'timelineActionsV2' }, pickTimeoutOptions(options)));
   }
 
   async detail(id: string, kind: TimelineDetailKind = 'timeline', options: { timeoutMs?: number } = {}): Promise<TimelineDetail> {
@@ -578,19 +604,22 @@ export class TimelineApi {
 
   rawDetail(id: string, kind: TimelineDetailKind = 'timeline', options: { timeoutMs?: number } = {}): Promise<unknown> {
     const key = kind === 'order' ? 'orderId' : kind === 'savingsPlan' ? 'savingsPlanId' : 'id';
-    return validated('timeline.detail', this.raw.query({ type: 'timelineDetailV2', [key]: id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'timeline.detail', this.raw.query({ type: 'timelineDetailV2', [key]: id }, pickTimeoutOptions(options)));
   }
 }
 
 export class PriceAlarmsApi {
-  constructor(private readonly raw: RawApi) {}
+  constructor(
+    private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async list(options: { timeoutMs?: number } = {}): Promise<PriceAlarm[]> {
     return arrayPayload(await this.rawList(options)).map(normalizePriceAlarm);
   }
 
   rawList(options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('priceAlarms.list', this.raw.query({ type: 'priceAlarms' }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'priceAlarms.list', this.raw.query({ type: 'priceAlarms' }, pickTimeoutOptions(options)));
   }
 
   async notifications(options: { timeoutMs?: number } = {}): Promise<PriceAlarm[]> {
@@ -598,7 +627,7 @@ export class PriceAlarmsApi {
   }
 
   rawNotifications(options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('priceAlarms.notifications', this.raw.query({ type: 'priceAlarmNotifications' }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'priceAlarms.notifications', this.raw.query({ type: 'priceAlarmNotifications' }, pickTimeoutOptions(options)));
   }
 
   create(options: { isin: string; price: number; currency?: string; crossing?: string; note?: string; timeoutMs?: number } & Record<string, unknown>): Promise<unknown> {
@@ -608,7 +637,7 @@ export class PriceAlarmsApi {
   }
 
   rawCreate(payload: Record<string, unknown>, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('priceAlarms.create', this.raw.query({ type: 'createPriceAlarm', ...payload }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'priceAlarms.create', this.raw.query({ type: 'createPriceAlarm', ...payload }, pickTimeoutOptions(options)));
   }
 
   cancel(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -616,19 +645,22 @@ export class PriceAlarmsApi {
   }
 
   rawCancel(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('priceAlarms.cancel', this.raw.query({ type: 'cancelPriceAlarm', id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'priceAlarms.cancel', this.raw.query({ type: 'cancelPriceAlarm', id }, pickTimeoutOptions(options)));
   }
 }
 
 export class InstrumentsApi {
-  constructor(private readonly raw: RawApi) {}
+  constructor(
+    private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async news(isin: string, options: { timeoutMs?: number } = {}): Promise<InstrumentNewsItem[]> {
     return arrayPayload(await this.rawNews(isin, options)).map(normalizeInstrumentNewsItem);
   }
 
   rawNews(isin: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.news', this.raw.query({ type: 'neonNews', isin }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.news', this.raw.query({ type: 'neonNews', isin }, pickTimeoutOptions(options)));
   }
 
   etfDetails(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -636,7 +668,7 @@ export class InstrumentsApi {
   }
 
   rawEtfDetails(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.etfDetails', this.raw.query({ type: 'etfDetails', id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.etfDetails', this.raw.query({ type: 'etfDetails', id }, pickTimeoutOptions(options)));
   }
 
   etfComposition(id: string, after?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -644,7 +676,7 @@ export class InstrumentsApi {
   }
 
   rawEtfComposition(id: string, after?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.etfComposition', this.raw.query({ type: 'etfComposition', id, ...(after ? { after } : {}) }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.etfComposition', this.raw.query({ type: 'etfComposition', id, ...(after ? { after } : {}) }, pickTimeoutOptions(options)));
   }
 
   fundDetails(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -652,7 +684,7 @@ export class InstrumentsApi {
   }
 
   rawFundDetails(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.fundDetails', this.raw.query({ type: 'mutualFundDetails', id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.fundDetails', this.raw.query({ type: 'mutualFundDetails', id }, pickTimeoutOptions(options)));
   }
 
   fundComposition(id: string, after?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -660,7 +692,7 @@ export class InstrumentsApi {
   }
 
   rawFundComposition(id: string, after?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.fundComposition', this.raw.query({ type: 'mutualFundComposition', id, ...(after ? { after } : {}) }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.fundComposition', this.raw.query({ type: 'mutualFundComposition', id, ...(after ? { after } : {}) }, pickTimeoutOptions(options)));
   }
 
   cryptoDetails(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -668,7 +700,7 @@ export class InstrumentsApi {
   }
 
   rawCryptoDetails(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.cryptoDetails', this.raw.query({ type: 'cryptoDetails', id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.cryptoDetails', this.raw.query({ type: 'cryptoDetails', id }, pickTimeoutOptions(options)));
   }
 
   yieldToMaturity(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -676,7 +708,7 @@ export class InstrumentsApi {
   }
 
   rawYieldToMaturity(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('instruments.yieldToMaturity', this.raw.query({ type: 'yieldToMaturity', id }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'instruments.yieldToMaturity', this.raw.query({ type: 'yieldToMaturity', id }, pickTimeoutOptions(options)));
   }
 }
 
@@ -684,17 +716,18 @@ export class TradingApi {
   constructor(
     private readonly http: HttpClient,
     private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
   ) {}
 
   priceForOrder(options: { isin: string; exchangeId: string; side: string; unit?: string }, queryOptions: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated('trading.priceForOrder', this.raw.query({ type: 'priceForOrderV2', unit: 'EUR', ...options }, pickTimeoutOptions(queryOptions)));
+    return validated(this.validateRaw, 'trading.priceForOrder', this.raw.query({ type: 'priceForOrderV2', unit: 'EUR', ...options }, pickTimeoutOptions(queryOptions)));
   }
 
   async availableSize(instrumentId: string, secAccNo?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
-    return validated('trading.availableSize', this.raw.query({ type: 'availableSize', parameters: { instrumentId }, secAccNo: accountNumber }, pickTimeoutOptions(options)));
+    return validated(this.validateRaw, 'trading.availableSize', this.raw.query({ type: 'availableSize', parameters: { instrumentId }, secAccNo: accountNumber }, pickTimeoutOptions(options)));
   }
 
   async orderDestinations(isin: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<OrderDestination[]> {
@@ -702,7 +735,7 @@ export class TradingApi {
   }
 
   rawOrderDestinations(isin: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
-    return validated('trading.orderDestinations', this.http.request('GET', `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, undefined, query));
+    return validated(this.validateRaw, 'trading.orderDestinations', this.http.request('GET', `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, undefined, query));
   }
 
   async trades(query: Record<string, string | number | boolean | undefined> = {}): Promise<Trade[]> {
@@ -710,7 +743,7 @@ export class TradingApi {
   }
 
   rawTrades(query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
-    return validated('trading.trades', this.http.request('GET', '/web-trading-gateway/api/customer/v1/trades', undefined, query));
+    return validated(this.validateRaw, 'trading.trades', this.http.request('GET', '/web-trading-gateway/api/customer/v1/trades', undefined, query));
   }
 
   dailyPnl(items: unknown[]): Promise<unknown> {
@@ -718,7 +751,7 @@ export class TradingApi {
   }
 
   rawDailyPnl(items: unknown[]): Promise<unknown> {
-    return validated('trading.dailyPnl', this.http.request('POST', '/web-trading-gateway/api/customer/v1/pnl/daily', { items }));
+    return validated(this.validateRaw, 'trading.dailyPnl', this.http.request('POST', '/web-trading-gateway/api/customer/v1/pnl/daily', { items }));
   }
 
   private resolveSecuritiesAccountNumber(): Promise<string> {
@@ -727,14 +760,17 @@ export class TradingApi {
 }
 
 export class DiscoveryApi {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   async exchangeDetails(): Promise<ExchangeDetails[]> {
     return arrayPayload(await this.rawExchangeDetails()).map(normalizeExchangeDetails);
   }
 
   rawExchangeDetails(): Promise<unknown> {
-    return validated('discovery.exchangeDetails', this.http.request('GET', '/api-gateway/instrument-universe/api/v1/exchanges-details', undefined, { includeMaintenanceWindow: false }));
+    return validated(this.validateRaw, 'discovery.exchangeDetails', this.http.request('GET', '/api-gateway/instrument-universe/api/v1/exchanges-details', undefined, { includeMaintenanceWindow: false }));
   }
 
   async exchangeSchedule(exchange: string): Promise<ExchangeSchedule> {
@@ -742,7 +778,7 @@ export class DiscoveryApi {
   }
 
   rawExchangeSchedule(exchange: string): Promise<unknown> {
-    return validated('discovery.exchangeSchedule', this.http.request('GET', `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`));
+    return validated(this.validateRaw, 'discovery.exchangeSchedule', this.http.request('GET', `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`));
   }
 
   async instrumentStatus(isin: string, exchange: string): Promise<InstrumentStatus> {
@@ -750,7 +786,7 @@ export class DiscoveryApi {
   }
 
   rawInstrumentStatus(isin: string, exchange: string): Promise<unknown> {
-    return validated('discovery.instrumentStatus', this.http.request('GET', `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`));
+    return validated(this.validateRaw, 'discovery.instrumentStatus', this.http.request('GET', `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`));
   }
 
   watchlists(): Promise<unknown> {
@@ -758,7 +794,7 @@ export class DiscoveryApi {
   }
 
   rawWatchlists(): Promise<unknown> {
-    return validated('discovery.watchlists', this.http.request('GET', '/api-gateway/watchlists/api/v2/watchlists'));
+    return validated(this.validateRaw, 'discovery.watchlists', this.http.request('GET', '/api-gateway/watchlists/api/v2/watchlists'));
   }
 
   createWatchlist(name: string): Promise<unknown> {
@@ -766,7 +802,7 @@ export class DiscoveryApi {
   }
 
   rawCreateWatchlist(name: string): Promise<unknown> {
-    return validated('discovery.watchlists.create', this.http.request('POST', '/api-gateway/watchlists/api/v2/watchlists', { name }));
+    return validated(this.validateRaw, 'discovery.watchlists.create', this.http.request('POST', '/api-gateway/watchlists/api/v2/watchlists', { name }));
   }
 
   renameWatchlist(watchlistId: string, name: string): Promise<unknown> {
@@ -774,7 +810,7 @@ export class DiscoveryApi {
   }
 
   rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown> {
-    return validated('discovery.watchlists.rename', this.http.request('PUT', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, { name }));
+    return validated(this.validateRaw, 'discovery.watchlists.rename', this.http.request('PUT', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, { name }));
   }
 
   deleteWatchlist(watchlistId: string): Promise<unknown> {
@@ -782,7 +818,7 @@ export class DiscoveryApi {
   }
 
   rawDeleteWatchlist(watchlistId: string): Promise<unknown> {
-    return validated('discovery.watchlists.delete', this.http.request('DELETE', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`));
+    return validated(this.validateRaw, 'discovery.watchlists.delete', this.http.request('DELETE', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`));
   }
 
   addWatchlistItem(watchlistId: string, instrumentId: string, options: Record<string, unknown> = {}): Promise<unknown> {
@@ -790,7 +826,7 @@ export class DiscoveryApi {
   }
 
   rawAddWatchlistItem(watchlistId: string, instrumentId: string, options: Record<string, unknown> = {}): Promise<unknown> {
-    return validated('discovery.watchlists.addItem', this.http.request('POST', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, { instrument_id: instrumentId, item_rank: -1, ...options }));
+    return validated(this.validateRaw, 'discovery.watchlists.addItem', this.http.request('POST', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, { instrument_id: instrumentId, item_rank: -1, ...options }));
   }
 
   removeWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown> {
@@ -798,7 +834,7 @@ export class DiscoveryApi {
   }
 
   rawRemoveWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown> {
-    return validated('discovery.watchlists.removeItem', this.http.request('DELETE', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`));
+    return validated(this.validateRaw, 'discovery.watchlists.removeItem', this.http.request('DELETE', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`));
   }
 
   screeners(): Promise<unknown> {
@@ -806,7 +842,7 @@ export class DiscoveryApi {
   }
 
   rawScreeners(): Promise<unknown> {
-    return validated('discovery.screeners', this.http.request('GET', '/api-gateway/screeners/api/v2/screeners'));
+    return validated(this.validateRaw, 'discovery.screeners', this.http.request('GET', '/api-gateway/screeners/api/v2/screeners'));
   }
 
   screenerOptions(): Promise<unknown> {
@@ -814,7 +850,7 @@ export class DiscoveryApi {
   }
 
   rawScreenerOptions(): Promise<unknown> {
-    return validated('discovery.screenerOptions', this.http.request('GET', '/api-gateway/screeners/api/v2/screeners/options'));
+    return validated(this.validateRaw, 'discovery.screenerOptions', this.http.request('GET', '/api-gateway/screeners/api/v2/screeners/options'));
   }
 
   userPreferences(): Promise<unknown> {
@@ -822,31 +858,37 @@ export class DiscoveryApi {
   }
 
   rawUserPreferences(): Promise<unknown> {
-    return validated('discovery.userPreferences', this.http.request('GET', '/api-gateway/pro-trading/api/v1/user-preferences'));
+    return validated(this.validateRaw, 'discovery.userPreferences', this.http.request('GET', '/api-gateway/pro-trading/api/v1/user-preferences'));
   }
 }
 
 export class DocumentsApi {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   documents(): Promise<unknown> {
     return this.rawDocuments();
   }
 
   rawDocuments(): Promise<unknown> {
-    return validated('documents.documents', this.http.request('GET', '/api/v1/documents/all'));
+    return validated(this.validateRaw, 'documents.documents', this.http.request('GET', '/api/v1/documents/all'));
   }
 }
 
 export class TaxApi {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   taxInformation(): Promise<unknown> {
     return this.rawTaxInformation();
   }
 
   rawTaxInformation(): Promise<unknown> {
-    return validated('tax.taxInformation', this.http.request('GET', '/api/v1/taxes/information'));
+    return validated(this.validateRaw, 'tax.taxInformation', this.http.request('GET', '/api/v1/taxes/information'));
   }
 
   exemptionOrder(): Promise<unknown> {
@@ -854,7 +896,7 @@ export class TaxApi {
   }
 
   rawExemptionOrder(): Promise<unknown> {
-    return validated('tax.exemptionOrder', this.http.request('GET', '/api/v1/taxes/exemptionorders'));
+    return validated(this.validateRaw, 'tax.exemptionOrder', this.http.request('GET', '/api/v1/taxes/exemptionorders'));
   }
 
   taxResidencies(): Promise<unknown> {
@@ -862,7 +904,7 @@ export class TaxApi {
   }
 
   rawTaxResidencies(): Promise<unknown> {
-    return validated('tax.taxResidencies', this.http.request('GET', '/api/v1/auth/account/change/taxresidencies'));
+    return validated(this.validateRaw, 'tax.taxResidencies', this.http.request('GET', '/api/v1/auth/account/change/taxresidencies'));
   }
 
   taxResidencyCountries(): Promise<unknown> {
@@ -870,19 +912,22 @@ export class TaxApi {
   }
 
   rawTaxResidencyCountries(): Promise<unknown> {
-    return validated('tax.taxResidencyCountries', this.http.request('GET', '/api/v1/country/taxresidency'));
+    return validated(this.validateRaw, 'tax.taxResidencyCountries', this.http.request('GET', '/api/v1/country/taxresidency'));
   }
 }
 
 export class PaymentsApi {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly validateRaw: RawSchemaValidator,
+  ) {}
 
   paymentMethods(): Promise<unknown> {
     return this.rawPaymentMethods();
   }
 
   rawPaymentMethods(): Promise<unknown> {
-    return validated('payments.paymentMethods', this.http.request('GET', '/api/v2/payment/methods'));
+    return validated(this.validateRaw, 'payments.paymentMethods', this.http.request('GET', '/api/v2/payment/methods'));
   }
 
   iban(): Promise<unknown> {
@@ -890,7 +935,7 @@ export class PaymentsApi {
   }
 
   rawIban(): Promise<unknown> {
-    return validated('payments.iban', this.http.request('GET', '/api/v1/auth/account/iban'));
+    return validated(this.validateRaw, 'payments.iban', this.http.request('GET', '/api/v1/auth/account/iban'));
   }
 
   interestDetails(): Promise<unknown> {
@@ -898,7 +943,7 @@ export class PaymentsApi {
   }
 
   rawInterestDetails(): Promise<unknown> {
-    return validated('payments.interestDetails', this.http.request('GET', '/api/v1/interest/details'));
+    return validated(this.validateRaw, 'payments.interestDetails', this.http.request('GET', '/api/v1/interest/details'));
   }
 }
 

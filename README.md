@@ -219,6 +219,20 @@ unknown field to a strict variant or changes a payload shape, the SDK throws
 summary. That makes API drift visible while debugging instead of silently
 normalizing the wrong shape.
 
+If Trade Republic changes a payload before this package is updated, you can
+temporarily disable this validation per client:
+
+```ts
+const tr = TradeRepublicClient.create({
+  rawSchemaValidation: false,
+});
+```
+
+With `rawSchemaValidation: false`, first-class SDK methods skip the Zod raw
+response check and continue with the raw payload they received. This is useful
+for local debugging during API drift, but it can also hide incompatible response
+changes and make normalized output less trustworthy.
+
 The schema registry lives in `src/schemas/registry.ts` and records transport,
 risk class, request metadata, request schema, response schema, known variants,
 and live-test metadata. Generate the public catalog with:

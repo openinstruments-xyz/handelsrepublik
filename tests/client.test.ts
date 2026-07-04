@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
 import { TradeRepublicClient } from '../src/index.js';
 import { FakeSocket } from './fake-socket.js';
@@ -144,6 +145,27 @@ describe('TradeRepublicClient', () => {
 
     expect(client.securitiesAccountNumber).toBe('0000000000');
     expect(client.getSession()).toMatchObject({ securitiesAccountNumber: '0000000000' });
+  });
+
+  it('rejects drifted raw payloads by default', async () => {
+    const client = TradeRepublicClient.create({
+      fetch: mockFetch([], { unexpected: true }),
+    });
+
+    await assert.rejects(
+      () => client.account.current(),
+      /Trade Republic schema validation failed for auth\.account/,
+    );
+  });
+
+  it('can disable raw schema validation for drifted payloads', async () => {
+    const payload = { unexpected: true };
+    const client = TradeRepublicClient.create({
+      rawSchemaValidation: false,
+      fetch: mockFetch([], payload),
+    });
+
+    await expect(client.account.current()).resolves.toEqual(payload);
   });
 
   it('normalizes portfolio and cash payloads', async () => {

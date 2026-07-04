@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
 import { TradeRepublicClient } from '../src/index.js';
 import type { WebSocketLike } from '../src/types.js';
@@ -33,6 +34,24 @@ describe('market abstractions', () => {
       '2026-07-02T00:00:00.000Z',
       '2026-07-02T02:00:00.000Z',
     ]);
+  });
+
+  it('can disable ResourceClient raw schema validation', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      rawSchemaValidation: false,
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          assert.equal(payload.type, 'accountPairs');
+          socket.emit('message', `${id} accountPairs ${JSON.stringify({ unexpected: true })}`);
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.market.subscriptions()).resolves.toEqual([]);
+    expect(sockets[0]?.sent[1]).toBe('sub 1 {"type":"accountPairs"}');
   });
 
   it('subscribes to typed l2 order book streams', async () => {

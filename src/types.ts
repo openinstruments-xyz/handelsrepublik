@@ -39,7 +39,10 @@ export interface TradeRepublicClientOptions {
   endpoints?: EndpointMap | undefined;
   fetch?: typeof fetch | undefined;
   websocketFactory?: WebSocketFactory | undefined;
+  rawSchemaValidation?: boolean | undefined;
 }
+
+export type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;
 
 export interface Account {
   raw: unknown;

@@ -14,7 +14,9 @@ interface TradeRepublicClientOptions {
     endpoints?: EndpointMap | undefined;
     fetch?: typeof fetch | undefined;
     websocketFactory?: WebSocketFactory | undefined;
+    rawSchemaValidation?: boolean | undefined;
 }
+type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;
 interface Board {
     id: string;
     name?: string | undefined;
@@ -403,7 +405,8 @@ declare class ResourceClient {
     private readonly http;
     private readonly endpoints;
     private readonly raw;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi);
+    private readonly validateRaw;
+    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw?: RawSchemaValidator);
     query<TParams, TResult>(spec: QuerySpec<TParams, TResult>, params: TParams): Promise<TResult>;
     stream<TParams, TResult>(spec: StreamSpec<TParams, TResult>, params: TParams): Subscription<TResult>;
 }
@@ -445,6 +448,7 @@ declare class TradeRepublicClient {
     private readonly http;
     private readonly endpoints;
     private readonly resources;
+    private readonly validateRaw;
     constructor(options?: TradeRepublicClientOptions);
     static create(options?: TradeRepublicClientOptions): TradeRepublicClient;
     getSession(): Session | undefined;
@@ -454,7 +458,8 @@ declare class TradeRepublicClient {
 }
 declare class AssetsApi {
     private readonly raw;
-    constructor(raw: RawApi);
+    private readonly validateRaw;
+    constructor(raw: RawApi, validateRaw: RawSchemaValidator);
     search(query: string, options?: {
         limit?: number;
         page?: number;
@@ -472,7 +477,8 @@ declare class AssetsApi {
 declare class AccountApi {
     private readonly http;
     private readonly endpoints;
-    constructor(http: HttpClient, endpoints: EndpointResolver);
+    private readonly validateRaw;
+    constructor(http: HttpClient, endpoints: EndpointResolver, validateRaw: RawSchemaValidator);
     current(): Promise<unknown>;
     session(): Promise<unknown>;
     accountSettings(): Promise<unknown>;
@@ -483,13 +489,15 @@ declare class AccountApi {
 declare class BoardsApi {
     private readonly http;
     private readonly endpoints;
-    constructor(http: HttpClient, endpoints: EndpointResolver);
+    private readonly validateRaw;
+    constructor(http: HttpClient, endpoints: EndpointResolver, validateRaw: RawSchemaValidator);
     list(): Promise<Board[]>;
     get(boardId: string): Promise<Board>;
 }
 declare class DerivativesApi {
     private readonly raw;
-    constructor(raw: RawApi);
+    private readonly validateRaw;
+    constructor(raw: RawApi, validateRaw: RawSchemaValidator);
     search(query: string, options?: {
         underlyingId?: string;
         direction?: 'long' | 'short';
@@ -506,9 +514,10 @@ declare class OrdersApi {
     private readonly http;
     private readonly endpoints;
     private readonly raw;
+    private readonly validateRaw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
     open(options?: OrdersListOptions): Promise<Order[]>;
     closed(options?: OrdersListOptions): Promise<Order[]>;
     all(options?: OrdersListOptions): Promise<Order[]>;
@@ -524,9 +533,10 @@ declare class PortfolioApi {
     private readonly http;
     private readonly endpoints;
     private readonly raw;
+    private readonly validateRaw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
     current(options?: {
         timeoutMs?: number;
     }): Promise<Portfolio>;
@@ -566,7 +576,8 @@ declare class MarketApi {
 }
 declare class TimelineApi {
     private readonly raw;
-    constructor(raw: RawApi);
+    private readonly validateRaw;
+    constructor(raw: RawApi, validateRaw: RawSchemaValidator);
     list(options?: {
         after?: string;
         timeoutMs?: number;
@@ -590,7 +601,8 @@ declare class TimelineApi {
 }
 declare class PriceAlarmsApi {
     private readonly raw;
-    constructor(raw: RawApi);
+    private readonly validateRaw;
+    constructor(raw: RawApi, validateRaw: RawSchemaValidator);
     list(options?: {
         timeoutMs?: number;
     }): Promise<PriceAlarm[]>;
@@ -623,7 +635,8 @@ declare class PriceAlarmsApi {
 }
 declare class InstrumentsApi {
     private readonly raw;
-    constructor(raw: RawApi);
+    private readonly validateRaw;
+    constructor(raw: RawApi, validateRaw: RawSchemaValidator);
     news(isin: string, options?: {
         timeoutMs?: number;
     }): Promise<InstrumentNewsItem[]>;
@@ -670,9 +683,10 @@ declare class InstrumentsApi {
 declare class TradingApi {
     private readonly http;
     private readonly raw;
+    private readonly validateRaw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, raw: RawApi, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    constructor(http: HttpClient, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
     priceForOrder(options: {
         isin: string;
         exchangeId: string;
@@ -694,7 +708,8 @@ declare class TradingApi {
 }
 declare class DiscoveryApi {
     private readonly http;
-    constructor(http: HttpClient);
+    private readonly validateRaw;
+    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
     exchangeDetails(): Promise<ExchangeDetails[]>;
     rawExchangeDetails(): Promise<unknown>;
     exchangeSchedule(exchange: string): Promise<ExchangeSchedule>;
@@ -722,13 +737,15 @@ declare class DiscoveryApi {
 }
 declare class DocumentsApi {
     private readonly http;
-    constructor(http: HttpClient);
+    private readonly validateRaw;
+    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
     documents(): Promise<unknown>;
     rawDocuments(): Promise<unknown>;
 }
 declare class TaxApi {
     private readonly http;
-    constructor(http: HttpClient);
+    private readonly validateRaw;
+    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
     taxInformation(): Promise<unknown>;
     rawTaxInformation(): Promise<unknown>;
     exemptionOrder(): Promise<unknown>;
@@ -740,7 +757,8 @@ declare class TaxApi {
 }
 declare class PaymentsApi {
     private readonly http;
-    constructor(http: HttpClient);
+    private readonly validateRaw;
+    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
     paymentMethods(): Promise<unknown>;
     rawPaymentMethods(): Promise<unknown>;
     iban(): Promise<unknown>;

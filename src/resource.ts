@@ -2,7 +2,7 @@ import type { EndpointResolver } from './endpoints.js';
 import type { HttpClient } from './http.js';
 import type { RawApi, RawSubscription } from './raw.js';
 import { validateRawResponse } from './schemas/registry.js';
-import type { EndpointKey, HttpMethod } from './types.js';
+import type { EndpointKey, HttpMethod, RawSchemaValidator } from './types.js';
 
 export interface QuerySpec<TParams, TResult> {
   endpoint?: EndpointKey;
@@ -32,6 +32,7 @@ export class ResourceClient {
     private readonly http: HttpClient,
     private readonly endpoints: EndpointResolver,
     private readonly raw: RawApi,
+    private readonly validateRaw: RawSchemaValidator = validateRawResponse,
   ) {}
 
   async query<TParams, TResult>(spec: QuerySpec<TParams, TResult>, params: TParams): Promise<TResult> {
@@ -43,13 +44,13 @@ export class ResourceClient {
         spec.body?.(params),
         spec.query?.(params),
       );
-    const validatedRaw = spec.schemaName ? validateRawResponse(spec.schemaName, raw) : raw;
+    const validatedRaw = spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw;
     return spec.normalize(validatedRaw, params);
   }
 
   stream<TParams, TResult>(spec: StreamSpec<TParams, TResult>, params: TParams): Subscription<TResult> {
     return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params)))
-      .map((raw) => spec.normalize(spec.schemaName ? validateRawResponse(spec.schemaName, raw) : raw, params));
+      .map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
   }
 }
 
