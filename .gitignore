@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# TypeScript incremental output
+*.tsbuildinfo
+
+# npm/local caches
+.npm-cache/
+.cache/
+
+# Demo REPL local state
+demo/.demo-session.json
+demo/.demo-config.json
+demo/*.log
+demo/*.pid
+
+# Legacy scratchpad local state
+scratchpad/.chrome-profile/
+scratchpad/.scratchpad-*.json
+scratchpad/*.log
+scratchpad/*.pid
+scratchpad/.scratchpad-debug-*/
+scratchpad/dev-*.log
+scratchpad/dev-*.err.log
+scratchpad/qr-login-scratchpad.*.log
+scratchpad/qr-login-scratchpad.pid
+
+# Local auth/debug helpers
+.challenge.js
+scratchpad-challenge.js
+.scratchpad-debug-*/
+
+# Local Trade Republic captures and downloaded web bundles
+trade republic flows
+*.har
+*.mitm
+*.pcap
+*.pcapng
+
+# Sensitive session/config material
+*.session.json
+*.session.json.tmp
+*.cookies
+*.cookie
+.env
+.env.*
+!.env.example

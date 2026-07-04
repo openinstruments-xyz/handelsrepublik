@@ -1,0 +1,16 @@
+{
+  "phoneNumber": "+491234567890",
+  "jurisdiction": "DE",
+  "name": {
+    "firstName": "Example",
+    "lastName": "User"
+  },
+  "email": {
+    "address": "example@example.invalid"
+  },
+  "cashAccount": {
+    "iban": "DE00000000000000000000"
+  },
+  "securitiesAccountNumber": "0000000001",
+  "personId": "person-1"
+}

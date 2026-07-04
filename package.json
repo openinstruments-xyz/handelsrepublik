@@ -1,0 +1,61 @@
+{
+  "name": "handelsrepublik",
+  "version": "0.1.0",
+  "description": "Unofficial TypeScript SDK for the Trade Republic web API.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "npm run build && node ./demo/repl.mjs",
+    "start": "npm run build && node ./demo/repl.mjs",
+    "build": "tsup src/index.ts --format esm --dts --sourcemap",
+    "demo:repl": "npm run build && node ./demo/repl.mjs",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --import tsx --test tests/integration/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "schemas:doc": "node --import tsx scripts/generate-schema-catalog.ts",
+    "reference:download": "node ../../references/traderepublic-web/download-bundles.mjs"
+  },
+  "keywords": [
+    "handelsrepublik",
+    "broker",
+    "api",
+    "sdk",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VIEWVIEWVIEW/handelsrepublik.git"
+  },
+  "bugs": {
+    "url": "https://github.com/VIEWVIEWVIEW/handelsrepublik/issues"
+  },
+  "homepage": "https://github.com/VIEWVIEWVIEW/handelsrepublik#readme",
+  "dependencies": {
+    "eventemitter3": "^5.0.1",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "acorn": "^8.17.0",
+    "playwright": "^1.61.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,358 @@
+import type { EndpointResolver } from './endpoints.js';
+import type { HttpClient } from './http.js';
+import { asRecord } from './normalizers.js';
+import type { InstantLoginChallenge, Session, SessionStore } from './types.js';
+
+export interface CreateInstantLoginOptions {
+  phoneNumber?: string;
+  deviceName?: string;
+  signal?: AbortSignal;
+}
+
+export interface PollInstantLoginOptions {
+  intervalMs?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  debug?: boolean;
+}
+
+interface LoginProgressState {
+  status: string | undefined;
+  processId: string | undefined;
+  session: Session | undefined;
+}
+
+type SessionReadyHandler = (session: Session) => Promise<Session | void> | Session | void;
+
+export class AuthApi {
+  constructor(
+    private readonly http: HttpClient,
+    private readonly endpoints: EndpointResolver,
+    private readonly getSession: () => Session | undefined,
+    private readonly setSession: (session: Session) => void,
+    private readonly sessionStore?: SessionStore,
+    private readonly onSessionReady?: SessionReadyHandler,
+  ) {}
+
+  async createInstantLogin(options: CreateInstantLoginOptions = {}): Promise<InstantLoginChallenge> {
+    const raw = await this.http.request<unknown>(
+      'POST',
+      this.endpoints.resolve('auth.qrChallenge'),
+      stripUndefined({
+        phoneNumber: options.phoneNumber,
+        deviceName: options.deviceName,
+      }),
+      undefined,
+      { signal: options.signal },
+    );
+    return normalizeChallenge(raw);
+  }
+
+  async pollInstantLogin(challenge: Pick<InstantLoginChallenge, 'id'>, options: PollInstantLoginOptions = {}): Promise<Session> {
+    const intervalMs = options.intervalMs ?? 1500;
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    const startedAt = Date.now();
+    let processId: string | undefined;
+    let accumulatedSession: Session | undefined = this.getSession();
+    debugLog(options.debug, 'poll:start', { challengeId: challenge.id, intervalMs, timeoutMs });
+    while (Date.now() - startedAt <= timeoutMs) {
+      if (options.signal?.aborted) throw options.signal.reason;
+      if (processId) {
+        const processResponse = await this.http.requestDetailed<unknown>(
+          'GET',
+          this.endpoints.resolve('auth.loginProcess', { processId }),
+          undefined,
+          undefined,
+          { signal: options.signal },
+        );
+        const processRaw = processResponse.body;
+        const processState = extractLoginProgressState(processRaw);
+        const processStatus = normalizeStatus(processState.status);
+        const processCookieSession = extractCookieSession(processResponse.headers);
+        accumulatedSession = rememberProgressSession(accumulatedSession, processCookieSession, this.setSession);
+        debugLog(options.debug, 'poll:process', {
+          processId,
+          status: processState.status ?? null,
+          responseKeys: objectKeys(processRaw),
+          responseBody: processRaw,
+          setCookieNames: Object.keys(processCookieSession?.cookies ?? {}),
+          hasSession: Boolean(processState.session),
+        });
+        const processSession = processState.session ?? (isAuthenticatedStatus(processStatus) ? accumulatedSession : undefined);
+        if (processSession) {
+          const completedSession = await this.completeWebSession(processSession, options);
+          const finalizedSession = await this.finalizeSession(completedSession);
+          debugLog(options.debug, 'poll:session', summarizeSession(finalizedSession));
+          return finalizedSession;
+        }
+        processId = processState.processId ?? processId;
+        if (isTerminalFailureStatus(processStatus)) {
+          throw new Error(`Trade Republic instant login failed during process step: ${processState.status ?? 'unknown'}.`);
+        }
+      } else {
+        const response = await this.http.requestDetailed<unknown>(
+          'GET',
+          this.endpoints.resolve('auth.qrStatus', { challengeId: challenge.id }),
+          undefined,
+          undefined,
+          { signal: options.signal },
+        );
+        const raw = response.body;
+        const challengeState = extractLoginProgressState(raw);
+        const challengeStatus = normalizeStatus(challengeState.status);
+        const cookieSession = extractCookieSession(response.headers);
+        accumulatedSession = rememberProgressSession(accumulatedSession, cookieSession, this.setSession);
+        debugLog(options.debug, 'poll:challenge', {
+          challengeId: challenge.id,
+          status: challengeState.status ?? null,
+          processId: challengeState.processId ?? null,
+          responseKeys: objectKeys(raw),
+          responseBody: raw,
+          setCookieNames: Object.keys(cookieSession?.cookies ?? {}),
+          hasSession: Boolean(challengeState.session),
+        });
+        const session = challengeState.session ?? (isAuthenticatedStatus(challengeStatus) ? accumulatedSession : undefined);
+        if (session) {
+          const completedSession = await this.completeWebSession(session, options);
+          const finalizedSession = await this.finalizeSession(completedSession);
+          debugLog(options.debug, 'poll:session', summarizeSession(finalizedSession));
+          return finalizedSession;
+        }
+        processId = challengeState.processId ?? processId;
+        if (isTerminalFailureStatus(challengeStatus) && !processId) {
+          throw new Error(`Trade Republic instant login failed while polling challenge: ${challengeState.status ?? 'unknown'}.`);
+        }
+      }
+      await delay(intervalMs);
+    }
+    throw new Error('Timed out while waiting for Trade Republic instant login approval.');
+  }
+
+  async restoreSession(): Promise<Session | undefined> {
+    const session = await this.sessionStore?.load();
+    if (session) this.setSession(session);
+    return session;
+  }
+
+  async saveSession(session = this.getSession()): Promise<void> {
+    if (!session) throw new Error('No Trade Republic session is available to save.');
+    await this.sessionStore?.save(session);
+  }
+
+  async refreshSession(options: { signal?: AbortSignal; debug?: boolean } = {}): Promise<Session> {
+    const session = this.getSession() ?? await this.sessionStore?.load();
+    if (!session) throw new Error('No Trade Republic session is available to refresh.');
+    const refreshedSession = await this.completeWebSession(session, options);
+    const finalizedSession = await this.finalizeSession(refreshedSession);
+    debugLog(options.debug, 'refresh:session', summarizeSession(finalizedSession));
+    return finalizedSession;
+  }
+
+  async clearSession(): Promise<void> {
+    this.setSession({});
+    await this.sessionStore?.clear();
+  }
+
+  private async completeWebSession(session: Session, options: PollInstantLoginOptions): Promise<Session> {
+    this.setSession(session);
+    const response = await this.http.requestDetailed<unknown>(
+      'GET',
+      this.endpoints.resolve('auth.session'),
+      undefined,
+      undefined,
+      { signal: options.signal },
+    );
+    const webSession = extractSession(response.body);
+    const cookieSession = extractCookieSession(response.headers);
+    const completedSession = mergeSessions(session, cookieSession, webSession, {
+      metadata: {
+        source: 'instant-login-web-session',
+        authSession: response.body,
+      },
+    });
+    debugLog(options.debug, 'poll:web-session', {
+      status: response.status,
+      responseKeys: objectKeys(response.body),
+      responseBody: response.body,
+      setCookieNames: Object.keys(cookieSession?.cookies ?? {}),
+      session: summarizeSession(completedSession),
+    });
+    return completedSession;
+  }
+
+  private async finalizeSession(session: Session): Promise<Session> {
+    this.setSession(session);
+    const updatedSession = await this.onSessionReady?.(session);
+    const finalizedSession = updatedSession ? mergeSessions(session, updatedSession) : session;
+    this.setSession(finalizedSession);
+    await this.sessionStore?.save(finalizedSession);
+    return finalizedSession;
+  }
+}
+
+function normalizeChallenge(raw: unknown): InstantLoginChallenge {
+  const record = asRecord(raw);
+  const id = stringValue(record.id, record.challengeId, record.processId);
+  return {
+    id,
+    qrCode: optionalString(record.qrCode, record.qrCodePayload, record.qr, record.code),
+    qrCodeDataUrl: optionalString(record.qrCodeDataUrl, record.qrDataUrl),
+    deepLink: optionalString(record.deepLink, record.loginUrl, record.url),
+    expiresAt: optionalString(record.expiresAt, record.challengeExpiresAt, record.qrCodeTokenExpiresAt, record.expiration),
+    raw,
+  };
+}
+
+function extractSession(raw: unknown): Session | undefined {
+  const record = asRecord(raw);
+  const sessionRecord = asRecord(record.session);
+  const accessToken = optionalString(record.accessToken, sessionRecord.accessToken, record.token);
+  const sessionToken = optionalString(
+    record.sessionToken,
+    sessionRecord.sessionToken,
+    record.connectionToken,
+    sessionRecord.connectionToken,
+    record.webSocketToken,
+    sessionRecord.webSocketToken,
+    record.websocketToken,
+    sessionRecord.websocketToken,
+    record.mapperToken,
+    sessionRecord.mapperToken,
+  );
+  const refreshToken = optionalString(record.refreshToken, sessionRecord.refreshToken);
+  if (!accessToken && !sessionToken && !refreshToken) return undefined;
+  return {
+    accessToken,
+    refreshToken,
+    sessionToken,
+    expiresAt: optionalString(record.expiresAt, sessionRecord.expiresAt),
+    accountId: optionalString(record.accountId, sessionRecord.accountId),
+    deviceId: optionalString(record.deviceId, sessionRecord.deviceId),
+    metadata: { source: 'instant-login' },
+  };
+}
+
+function mergeSessions(...sessions: Array<Session | undefined>): Session {
+  const result: Session = {};
+  for (const session of sessions) {
+    if (!session) continue;
+    result.accessToken = session.accessToken ?? result.accessToken;
+    result.refreshToken = session.refreshToken ?? result.refreshToken;
+    result.sessionToken = session.sessionToken ?? result.sessionToken;
+    result.expiresAt = session.expiresAt ?? result.expiresAt;
+    result.accountId = session.accountId ?? result.accountId;
+    result.deviceId = session.deviceId ?? result.deviceId;
+    result.securitiesAccountNumber = session.securitiesAccountNumber ?? result.securitiesAccountNumber;
+    result.cookies = { ...(result.cookies ?? {}), ...(session.cookies ?? {}) };
+    result.metadata = { ...(result.metadata ?? {}), ...(session.metadata ?? {}) };
+  }
+  return result;
+}
+
+function rememberProgressSession(
+  accumulatedSession: Session | undefined,
+  cookieSession: Session | undefined,
+  setSession: (session: Session) => void,
+): Session | undefined {
+  if (!cookieSession) return accumulatedSession;
+  const nextSession = mergeSessions(accumulatedSession, cookieSession);
+  setSession(nextSession);
+  return nextSession;
+}
+
+function extractCookieSession(headers: Headers): Session | undefined {
+  const cookies = setCookieHeaders(headers)
+    .map(parseSetCookie)
+    .filter((cookie): cookie is [string, string] => Boolean(cookie));
+  if (cookies.length === 0) return undefined;
+  return {
+    cookies: Object.fromEntries(cookies),
+    metadata: {
+      source: 'instant-login-set-cookie',
+      capturedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function extractLoginProgressState(raw: unknown): LoginProgressState {
+  const record = asRecord(raw);
+  return {
+    status: optionalString(record.status, record.state),
+    processId: optionalString(record.processId, record.id),
+    session: extractSession(raw),
+  };
+}
+
+function normalizeStatus(value: string | undefined): string | undefined {
+  return value?.trim().toUpperCase();
+}
+
+function isTerminalFailureStatus(status: string | undefined): boolean {
+  if (!status) return false;
+  return status === 'FAILED' || status === 'ERROR' || status === 'EXPIRED' || status === 'DECLINED' || status === 'CANCELLED';
+}
+
+function isAuthenticatedStatus(status: string | undefined): boolean {
+  if (!status) return false;
+  return status === 'PROCESSED' || status === 'COMPLETED' || status === 'SUCCESS' || status === 'AUTHENTICATED';
+}
+
+function stripUndefined(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function optionalString(...values: unknown[]): string | undefined {
+  for (const value of values) if (typeof value === 'string' && value.length) return value;
+  return undefined;
+}
+
+function stringValue(...values: unknown[]): string {
+  return optionalString(...values) ?? '';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function summarizeSession(session: Session): Record<string, unknown> {
+  return {
+    hasAccessToken: Boolean(session.accessToken),
+    hasRefreshToken: Boolean(session.refreshToken),
+    hasSessionToken: Boolean(session.sessionToken),
+    cookieNames: Object.keys(session.cookies ?? {}),
+    expiresAt: session.expiresAt ?? null,
+    accountId: session.accountId ?? null,
+    deviceId: session.deviceId ?? null,
+    hasSecuritiesAccountNumber: Boolean(session.securitiesAccountNumber),
+  };
+}
+
+function debugLog(enabled: boolean | undefined, event: string, payload: Record<string, unknown>): void {
+  if (!enabled) return;
+  console.log(`[handelsrepublik] ${event}`, payload);
+}
+
+function objectKeys(value: unknown): string[] {
+  return value && typeof value === 'object' ? Object.keys(value).sort() : [];
+}
+
+function setCookieHeaders(headers: Headers): string[] {
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof withGetSetCookie.getSetCookie === 'function') {
+    return withGetSetCookie.getSetCookie().flatMap(splitSetCookieHeader);
+  }
+  const combined = headers.get('set-cookie');
+  return combined ? splitSetCookieHeader(combined) : [];
+}
+
+function splitSetCookieHeader(value: string): string[] {
+  return value.split(/,(?=\s*[^;,=\s]+=[^;,]+)/).map((item) => item.trim()).filter(Boolean);
+}
+
+function parseSetCookie(value: string): [string, string] | undefined {
+  const firstPart = value.split(';', 1)[0]?.trim();
+  if (!firstPart) return undefined;
+  const separator = firstPart.indexOf('=');
+  if (separator <= 0) return undefined;
+  return [firstPart.slice(0, separator), firstPart.slice(separator + 1)];
+}

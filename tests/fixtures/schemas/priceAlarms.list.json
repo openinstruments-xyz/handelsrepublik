@@ -1,0 +1,14 @@
+{
+  "obj": {
+    "items": [
+      {
+        "alarmId": "alarm-1",
+        "isin": "US0378331005",
+        "price": {
+          "value": "123.45",
+          "currency": "EUR"
+        }
+      }
+    ]
+  }
+}
