@@ -35,59 +35,6 @@ npm install github:VIEWVIEWVIEW/handelsrepublik
 
 This package is ESM-only.
 
-## Local Development
-
-From this package directory:
-
-```bash
-npm install
-npm run typecheck
-npm run test
-npm run build
-```
-
-Unit tests use mocked HTTP and websocket transports. Read-only live integration
-tests are opt-in and reuse a real saved login session from the demo REPL:
-
-```bash
-npm run dev
-# log in once with loginQr(...)
-
-TR_INTEGRATION=1 npm run test:integration
-```
-
-By default the integration tests read `demo/.demo-session.json`. Override the
-session or market-data target when needed:
-
-```bash
-TR_INTEGRATION=1 \
-TR_SESSION_FILE=./demo/.demo-session.json \
-TR_INTEGRATION_ISIN=US0378331005 \
-TR_INTEGRATION_EXCHANGE=LSX \
-TR_INTEGRATION_QUERY=apple \
-TR_INTEGRATION_TYPE=stock \
-npm run test:integration
-```
-
-The integration suite calls read/query/subscription flows and low-risk
-developer-safe mutations only: session restore and refresh, account/portfolio
-reads, search, candles, current price lookup, documents/tax/payment discovery
-reads, read-only websocket payloads, and disposable low-risk price-alert and
-watchlist mutation probes with cleanup when the current API shape accepts them.
-Feature-gated or unavailable low-risk mutation shapes are reported as
-diagnostics; auth failures and schema failures still fail. The suite does not
-place/change/cancel orders, move money, accept documents, or mutate account
-identity, tax, PIN, login, or security settings. Those high-risk mutation paths
-stay mocked-only.
-
-Start the demo REPL:
-
-```bash
-npm run dev
-```
-
-`npm run dev` builds the SDK and starts the Node REPL demo.
-
 ## Authentication
 
 The SDK stores a `Session` object with any tokens and cookies returned by the web
@@ -624,3 +571,56 @@ npm run typecheck
 npm run test
 npm run build
 ```
+
+## Local Development
+
+From this package directory:
+
+```bash
+npm install
+npm run typecheck
+npm run test
+npm run build
+```
+
+Unit tests use mocked HTTP and websocket transports. Read-only live integration
+tests are opt-in and reuse a real saved login session from the demo REPL:
+
+```bash
+npm run dev
+# log in once with loginQr(...)
+
+TR_INTEGRATION=1 npm run test:integration
+```
+
+By default the integration tests read `demo/.demo-session.json`. Override the
+session or market-data target when needed:
+
+```bash
+TR_INTEGRATION=1 \
+TR_SESSION_FILE=./demo/.demo-session.json \
+TR_INTEGRATION_ISIN=US0378331005 \
+TR_INTEGRATION_EXCHANGE=LSX \
+TR_INTEGRATION_QUERY=apple \
+TR_INTEGRATION_TYPE=stock \
+npm run test:integration
+```
+
+The integration suite calls read/query/subscription flows and low-risk
+developer-safe mutations only: session restore and refresh, account/portfolio
+reads, search, candles, current price lookup, documents/tax/payment discovery
+reads, read-only websocket payloads, and disposable low-risk price-alert and
+watchlist mutation probes with cleanup when the current API shape accepts them.
+Feature-gated or unavailable low-risk mutation shapes are reported as
+diagnostics; auth failures and schema failures still fail. The suite does not
+place/change/cancel orders, move money, accept documents, or mutate account
+identity, tax, PIN, login, or security settings. Those high-risk mutation paths
+stay mocked-only.
+
+Start the demo REPL:
+
+```bash
+npm run dev
+```
+
+`npm run dev` builds the SDK and starts the Node REPL demo.
