@@ -35,10 +35,6 @@ npm install github:VIEWVIEWVIEW/handelsrepublik
 
 This package is ESM-only.
 
-```ts
-import { FileSessionStore, TradeRepublicClient } from 'handelsrepublik';
-```
-
 ## Local Development
 
 From this package directory:
