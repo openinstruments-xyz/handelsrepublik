@@ -53,13 +53,19 @@ import {
   TradeRepublicClient,
 } from 'handelsrepublik';
 
+// Trade Republic can require an AWS WAF browser challenge before QR login.
+// A real Playwright browser lets that challenge complete and gives the SDK the
+// matching WAF token, XSRF token, and cookies for later HTTP requests.
 const browser = await chromium.launch({ headless: false });
 const webContext = await collectTradeRepublicWebContext(browser);
 await browser.close();
 
 const tr = TradeRepublicClient.create({
+  // Reused automatically for QR login, refresh, and normal SDK calls.
   webContext,
+  // Contains cookies, WAF context, mapper tokens, and account metadata.
   sessionStore: new FileSessionStore('.tr-session.json'),
+  // Useful while Trade Republic's private response shapes are still changing.
   rawSchemaValidation: 'passthrough',
   onRawSchemaValidationFailure: ({ schemaName, error }) => {
     console.warn(`Trade Republic schema drift in ${schemaName}`, error);
@@ -72,6 +78,8 @@ const challenge = await tr.auth.createInstantLogin({
 
 console.log(challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode);
 
+// Approve the QR/deep link in the Trade Republic app, then polling completes
+// the web session and saves the refreshed cookies/tokens.
 const session = await tr.auth.pollInstantLogin(challenge);
 console.log(session.securitiesAccountNumber);
 ```
