@@ -22,7 +22,7 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 - REST and mapper-websocket transport behind one SDK client.
 - Typed convenience namespaces for portfolio, orders, market data, timeline,
   instruments, price alarms, discovery, account, documents, tax, and payments.
-- Strict Zod validation of covered raw Trade Republic responses before SDK
+- Configurable Zod validation of covered raw Trade Republic responses before SDK
   normalization.
 - Demo Node REPL for interactive local exploration.
 - Raw escape hatches for unmapped private API resources.
@@ -35,41 +35,38 @@ npm install github:VIEWVIEWVIEW/handelsrepublik
 
 This package is ESM-only.
 
-## Authentication
+Install Playwright too if you want the SDK to collect the browser/WAF context
+needed by Trade Republic's web login:
 
-The SDK stores a `Session` object with any tokens and cookies returned by the web
-login flow. Depending on the current Trade Republic web behavior, a session can
-contain:
+```bash
+npm install playwright
+npx playwright install chromium
+```
 
-- `cookies`: web cookies such as `tr_session`, `tr_claims`, and `XSRF-TOKEN`
-- `webContext`: WAF/browser headers and cookies collected from the web app
-- `sessionToken`: mapper/websocket connection token
-- `accessToken` or `refreshToken` when the backend returns them
-- `securitiesAccountNumber`, captured after login from `accountPairs`
-- optional metadata
-
-HTTP requests send saved cookies and relevant headers. Mapper websocket
-resources send `sessionToken` in the subscription payload when available.
-
-`mapper/websocket` is this SDK's shorthand for a transport pattern observed in
-the Trade Republic web app: instead of calling a normal URL endpoint, the app
-opens a websocket and sends JSON requests with a `type` value such as
-`availableCash` or `ticker`. Trade Republic error payloads label this backend
-routing layer as `MAPPER`, which is where the term comes from. See
-[What "Mapper" Means](#what-mapper-means) for the fuller distinction between
-REST endpoints, websocket resources, and mapper routing.
-
-### QR Login
+## Quick Start
 
 ```ts
-import { FileSessionStore, TradeRepublicClient } from 'handelsrepublik';
+import { chromium } from 'playwright';
+import {
+  collectTradeRepublicWebContext,
+  FileSessionStore,
+  TradeRepublicClient,
+} from 'handelsrepublik';
+
+const browser = await chromium.launch({ headless: false });
+const webContext = await collectTradeRepublicWebContext(browser);
+await browser.close();
 
 const tr = TradeRepublicClient.create({
+  webContext,
   sessionStore: new FileSessionStore('.tr-session.json'),
+  rawSchemaValidation: 'passthrough',
+  onRawSchemaValidationFailure: ({ schemaName, error }) => {
+    console.warn(`Trade Republic schema drift in ${schemaName}`, error);
+  },
 });
 
 const challenge = await tr.auth.createInstantLogin({
-  phoneNumber: '+491234567890',
   deviceName: 'local sdk',
 });
 
@@ -77,13 +74,19 @@ console.log(challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode);
 
 const session = await tr.auth.pollInstantLogin(challenge);
 console.log(session.securitiesAccountNumber);
-
 ```
 
-After login, the client keeps `client.securitiesAccountNumber` populated when it
-can resolve it.
+The client saves cookies, WAF context, mapper tokens, and the securities account
+number in the configured `SessionStore`. Treat that file as a secret.
 
-### Restore and Refresh
+`rawSchemaValidation` is configurable and you probably should choose a mode
+explicitly. The default is strict and throws on covered payload drift.
+`'passthrough'` still validates and reports drift, but lets methods return the
+original payload to the SDK so local tools keep working while the private API
+changes. Use `false` only when you want to skip raw response validation
+entirely.
+
+## Restore and Refresh
 
 ```ts
 await tr.auth.restoreSession();
@@ -97,121 +100,30 @@ and saves the updated session/cookies. Cookie expiry is not the same as full
 account-session expiry. For example, `tr_claims` can expire while `tr_session`
 still works.
 
-## How The API Works
+## Client Overview
 
-Trade Republic's web app does not use one single API style. The SDK wraps the
-two transport styles that show up in the web app.
+Most users should start with the typed namespaces and only use `raw` when a
+Trade Republic resource is not mapped yet.
 
-### REST HTTP Endpoints
+- `tr.auth`: login, restore, refresh, save, clear.
+- `tr.account`: account/session and account profile REST calls.
+- `tr.portfolio`: portfolio, cash, savings plans, portfolio chart.
+- `tr.orders`: web-trading order lists and order update stream.
+- `tr.assets`: search and instrument lookup.
+- `tr.derivatives`: derivative search and detail lookup.
+- `tr.market`: candles, live quotes, L2 order book, market subscriptions.
+- `tr.timeline`: timeline activity, actions, and detail.
+- `tr.priceAlarms`: price alarm reads and notifications.
+- `tr.instruments`: news, ETF/fund/crypto details, composition, yield.
+- `tr.trading`: price-for-order, available size, destinations, trades, daily PnL.
+- `tr.discovery`: exchanges, instrument status, watchlists, screeners, preferences.
+- `tr.documents`: document list.
+- `tr.tax`: tax information, exemption order, residencies.
+- `tr.payments`: payment methods, IBAN, interest details.
+- `tr.raw`: escape hatch for unmapped REST and mapper/websocket resources.
+- `tr.web`: debugging escape hatch for arbitrary REST/mapper calls.
 
-Some features are normal HTTP request/response calls with URL paths:
-
-```http
-GET /api/v2/auth/account
-GET /api/v1/documents/all
-GET /api-gateway/watchlists/api/v2/watchlists
-```
-
-In the SDK these are exposed as regular Promise-returning methods:
-
-```ts
-const account = await tr.account.current();
-const documents = await tr.documents.documents();
-const watchlists = await tr.discovery.watchlists();
-```
-
-For debugging, the same transport is available through `raw.request` or
-`web.request`:
-
-```ts
-const account = await tr.raw.request({
-  method: 'GET',
-  path: '/api/v2/auth/account',
-});
-```
-
-### Websocket Resources
-
-Many web-app features are not called by URL. Instead, the web app opens a
-websocket and sends a small JSON payload with a `type` field:
-
-```json
-{ "type": "availableCash" }
-{ "type": "ticker", "id": "US0378331005.LSX" }
-{ "type": "aggregateHistoryLightV2", "isin": "US0378331005", "exchangeId": "LSX", "range": "1d" }
-```
-
-The backend then routes that named resource internally and sends the result back
-on the websocket. For one-shot data the SDK subscribes, waits for the first
-payload, validates it, and closes the subscription. For live data it keeps the
-subscription open.
-
-In the SDK:
-
-```ts
-// One-shot websocket resource query.
-const cash = await tr.raw.query({ type: 'availableCash' });
-
-// Current-price snapshot. This is read-only.
-const ticker = await tr.raw.query({
-  type: 'ticker',
-  id: 'US0378331005.LSX',
-});
-
-// Historical chart data.
-const history = await tr.raw.query({
-  type: 'aggregateHistoryLightV2',
-  isin: 'US0378331005',
-  exchangeId: 'LSX',
-  unit: 'EUR',
-  range: '1d',
-});
-
-// Live websocket resource subscription.
-const stream = tr.raw.subscribe('ticker', {
-  id: 'US0378331005.LSX',
-});
-```
-
-Most users should prefer the typed SDK namespaces (`portfolio.cash()`,
-`market.candles()`, `orders.all()`, and so on). `raw.query` and `raw.subscribe`
-are mainly for debugging or mapping resources that are not first-class SDK
-methods yet.
-
-### What "Mapper" Means
-
-The word "mapper" is Trade Republic internal wording visible in websocket error
-payloads, for example:
-
-```json
-{
-  "errorCode": "JSON_PARSE_ERROR",
-  "meta": {
-    "source": "MAPPER"
-  }
-}
-```
-
-It is not a public API standard. In this package, "mapper resource" means a
-Trade Republic websocket resource identified by a `type` string, internally
-reported by Trade Republic as `MAPPER`. User-facing code should usually think in
-terms of "websocket resources":
-
-- `REST endpoint`: URL path plus HTTP method.
-- `websocket resource`: JSON payload with `type`, sent over the websocket.
-- `mapper`: Trade Republic's internal routing/validation layer for many of
-  those websocket resources.
-
-Some resources are snapshots even though they use websocket transport:
-`availableCash`, `portfolioStatus`, `aggregateHistoryLightV2`. Others are real
-streams: `ticker`, `tickerV2`, `tickerV3`, `L2`, `orderUpdates`.
-
-Mapper validation can be stricter than normal JSON APIs. A payload can have the
-right resource name but still fail if a field name, enum value, venue, or shape
-does not match what the web app currently sends. Keep `raw` payloads in logs
-while mapping new resources.
-
-## Strict Raw Schema Validation
+## Schema Validation
 
 Covered first-class SDK methods validate the raw Trade Republic payload with
 Zod before normalization. This is intentional: if Trade Republic adds an
@@ -244,10 +156,11 @@ const disabled = TradeRepublicClient.create({
 ```
 
 With `rawSchemaValidation: 'passthrough'`, first-class SDK methods still run
-Zod validation but return the raw payload on mismatch instead of throwing. With
-`rawSchemaValidation: false`, they skip the Zod raw response check entirely.
-Both modes are useful for local debugging during API drift, but they can also
-hide incompatible response changes and make normalized output less trustworthy.
+Zod validation but continue with the original payload on mismatch instead of
+throwing. With `rawSchemaValidation: false`, they skip the Zod raw response
+check entirely. Both modes are useful for local debugging during API drift, but
+they can also hide incompatible response changes and make normalized output less
+trustworthy.
 
 The schema registry lives in `src/schemas/registry.ts` and records transport,
 risk class, request metadata, request schema, response schema, known variants,
@@ -265,6 +178,31 @@ to `SCHEMAS.md`.
 See [SCHEMAS.md](./SCHEMAS.md) for the generated list. `blockedMutation`
 entries are deliberately documented so tests can assert that high-risk flows are
 not executed against a live account.
+
+## How The API Works
+
+Trade Republic's web app uses both normal REST endpoints and websocket-backed
+resources. The SDK hides that split behind typed methods where possible:
+
+```ts
+const account = await tr.account.current();
+const cash = await tr.portfolio.cash();
+const candles = await tr.market.candles({
+  assetId: 'US0378331005',
+  exchangeId: 'LSX',
+  timeframe: '1h',
+  from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+});
+```
+
+Trade Republic internally calls part of its websocket-backed routing layer
+`MAPPER`; that word shows up in some error payloads. In this README, a mapper
+resource means a websocket request identified by a `type` value such as
+`availableCash`, `ticker`, or `aggregateHistoryLightV2`.
+
+You usually do not need to care whether a high-level SDK method uses REST or
+mapper/websocket internally. Use `raw` only as an escape hatch while debugging
+or adding support for a resource that does not have a first-class method yet.
 
 ## Demo REPL
 
@@ -310,91 +248,9 @@ TR_CONFIG_FILE=...
 TR_PHONE_NUMBER=...
 ```
 
-### Playwright and WAF Context
-
-Trade Republic's web login can be protected by AWS WAF checks before the QR
-login endpoints accept requests. AWS WAF is browser-mediated: the reliable way
-to obtain the token and matching cookies is to load the real web app in a real
-browser context and let the challenge complete there.
-
-The SDK exposes `collectTradeRepublicWebContext(browser)` for this. It accepts a
-Playwright-compatible browser object, creates a fresh browser context, opens the
-Trade Republic web app, captures relevant WAF headers and cookies, and returns a
-`TradeRepublicWebContext`.
-
-```ts
-import { chromium } from 'playwright';
-import {
-  collectTradeRepublicWebContext,
-  FileSessionStore,
-  TradeRepublicClient,
-} from 'handelsrepublik';
-
-const browser = await chromium.launch({ headless: false });
-const webContext = await collectTradeRepublicWebContext(browser);
-await browser.close();
-
-const tr = TradeRepublicClient.create({
-  webContext,
-  sessionStore: new FileSessionStore('.tr-session.json'),
-});
-
-const challenge = await tr.auth.createInstantLogin();
-const session = await tr.auth.pollInstantLogin(challenge);
-await tr.auth.saveSession(session);
-```
-
-You can also attach a freshly collected context to an existing client:
-
-```ts
-tr.useWebContext(webContext);
-await tr.auth.saveSession();
-```
-
-`playwright` is intentionally optional for SDK consumers. Install it in apps
-that need WAF collection:
-
-```bash
-npm install playwright
-npx playwright install chromium
-```
-
 The demo tooling still accepts copied context through `demo/.demo-config.json`
 or the `TR_AWS_WAF_TOKEN`, `TR_XSRF_TOKEN`, and `TR_COOKIE` environment
 variables. Run `authContext()` inside the REPL to inspect loaded context.
-
-Treat session files as secrets. Once WAF context is saved, a session store can
-contain cookies, WAF tokens, XSRF tokens, mapper tokens, and account metadata.
-
-## Client Overview
-
-```ts
-const tr = TradeRepublicClient.create({
-  sessionStore: new FileSessionStore('.tr-session.json'),
-});
-
-await tr.auth.restoreSession();
-```
-
-Namespaces:
-
-- `tr.auth`: login, restore, refresh, save, clear.
-- `tr.account`: account/session and account profile REST calls.
-- `tr.portfolio`: portfolio, cash, savings plans, portfolio chart.
-- `tr.orders`: web-trading order lists and order update stream.
-- `tr.assets`: search and instrument lookup.
-- `tr.derivatives`: derivative search and detail lookup.
-- `tr.market`: candles, live quotes, L2 order book, market subscriptions.
-- `tr.timeline`: timeline activity, actions, and detail.
-- `tr.priceAlarms`: price alarm reads and notifications.
-- `tr.instruments`: news, ETF/fund/crypto details, composition, yield.
-- `tr.trading`: price-for-order, available size, destinations, trades, daily PnL.
-- `tr.discovery`: exchanges, instrument status, watchlists, screeners, preferences.
-- `tr.documents`: document list.
-- `tr.tax`: tax information, exemption order, residencies.
-- `tr.payments`: payment methods, IBAN, interest details.
-- `tr.raw`: raw REST and mapper websocket transport.
-- `tr.web`: debugging escape hatch for arbitrary REST/mapper calls.
 
 ## Portfolio and Account
 
@@ -553,16 +409,17 @@ const interest = await tr.payments.interestDetails();
 
 ## Raw Escape Hatches
 
-Use high-level namespaces first. For newly discovered endpoints, use `raw` or
-`web` while mapping the API.
+Use high-level namespaces first. The `raw` and `web` APIs are escape hatches for
+debugging, local inspection, and mapping newly discovered Trade Republic
+resources. They are not the recommended surface for normal application code.
 
-Mapper one-shot:
+Unmapped mapper one-shot:
 
 ```ts
 const availableCash = await tr.raw.query({ type: 'availableCash' });
 ```
 
-Mapper stream:
+Unmapped mapper stream:
 
 ```ts
 const ticker = tr.raw.subscribe('tickerV3', {
