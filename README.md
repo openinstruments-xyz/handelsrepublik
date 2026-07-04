@@ -275,6 +275,19 @@ TR_CONFIG_FILE=...
 TR_PHONE_NUMBER=...
 ```
 
+### Playwright and WAF Context
+
+Trade Republic's web login can be protected by AWS WAF checks before the QR
+login endpoints accept requests. The SDK HTTP client can send the required web
+headers and cookies, but it does not solve browser challenges by itself.
+
+The demo tooling keeps `playwright` as a development dependency so you can load
+the real web app in a browser context, pass the WAF challenge as a normal user,
+and copy the resulting WAF/header context into `demo/.demo-config.json` or the
+`TR_AWS_WAF_TOKEN`, `TR_XSRF_TOKEN`, and `TR_COOKIE` environment variables.
+After that, the REPL and SDK calls can reuse that context for QR login and
+session refresh work.
+
 Run `authContext()` inside the REPL to inspect loaded context.
 
 ## Client Overview
