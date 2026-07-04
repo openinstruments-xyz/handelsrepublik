@@ -27,6 +27,13 @@ export type EndpointKey =
   | 'market.l2OrderBook';
 
 export type EndpointMap = Partial<Record<EndpointKey, string>>;
+export type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
+
+export interface RawSchemaValidationFailure {
+  schemaName: string;
+  value: unknown;
+  error: unknown;
+}
 
 export interface TradeRepublicClientOptions {
   apiBaseUrl?: string | undefined;
@@ -39,7 +46,8 @@ export interface TradeRepublicClientOptions {
   endpoints?: EndpointMap | undefined;
   fetch?: typeof fetch | undefined;
   websocketFactory?: WebSocketFactory | undefined;
-  rawSchemaValidation?: boolean | undefined;
+  rawSchemaValidation?: RawSchemaValidationMode | undefined;
+  onRawSchemaValidationFailure?: ((failure: RawSchemaValidationFailure) => void) | undefined;
 }
 
 export type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;

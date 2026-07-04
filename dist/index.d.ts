@@ -3,6 +3,12 @@ import { ZodType } from 'zod';
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'boards.list' | 'boards.detail' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
 type EndpointMap = Partial<Record<EndpointKey, string>>;
+type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
+interface RawSchemaValidationFailure {
+    schemaName: string;
+    value: unknown;
+    error: unknown;
+}
 interface TradeRepublicClientOptions {
     apiBaseUrl?: string | undefined;
     websocketUrl?: string | undefined;
@@ -14,7 +20,8 @@ interface TradeRepublicClientOptions {
     endpoints?: EndpointMap | undefined;
     fetch?: typeof fetch | undefined;
     websocketFactory?: WebSocketFactory | undefined;
-    rawSchemaValidation?: boolean | undefined;
+    rawSchemaValidation?: RawSchemaValidationMode | undefined;
+    onRawSchemaValidationFailure?: ((failure: RawSchemaValidationFailure) => void) | undefined;
 }
 type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;
 interface Board {

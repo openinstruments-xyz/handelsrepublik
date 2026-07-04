@@ -1507,7 +1507,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   constructor(options = {}) {
     this.session = options.session;
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
-    this.validateRaw = options.rawSchemaValidation === false ? skipRawSchemaValidation : validateRawResponse;
+    this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
     this.endpoints = new EndpointResolver(options.endpoints);
     this.http = new HttpClient({
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
@@ -1893,6 +1893,20 @@ async function validated(validateRaw, schemaName, value) {
 }
 function skipRawSchemaValidation(_schemaName, value) {
   return value;
+}
+function createRawSchemaValidator(mode = true, onFailure) {
+  if (mode === false) return skipRawSchemaValidation;
+  if (mode === "passthrough") {
+    return (schemaName, value) => {
+      try {
+        return validateRawResponse(schemaName, value);
+      } catch (error) {
+        onFailure?.({ schemaName, value, error });
+        return value;
+      }
+    };
+  }
+  return validateRawResponse;
 }
 var MarketApi = class {
   constructor(resources) {

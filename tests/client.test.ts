@@ -168,6 +168,24 @@ describe('TradeRepublicClient', () => {
     await expect(client.account.current()).resolves.toEqual(payload);
   });
 
+  it('can validate drifted payloads without throwing', async () => {
+    const payload = { unexpected: true };
+    const failures: unknown[] = [];
+    const client = TradeRepublicClient.create({
+      rawSchemaValidation: 'passthrough',
+      onRawSchemaValidationFailure: (failure) => failures.push(failure),
+      fetch: mockFetch([], payload),
+    });
+
+    await expect(client.account.current()).resolves.toEqual(payload);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({
+      schemaName: 'auth.account',
+      value: payload,
+      error: expect.any(Error),
+    });
+  });
+
   it('normalizes portfolio and cash payloads', async () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({

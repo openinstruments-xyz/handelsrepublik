@@ -71,6 +71,8 @@ import type {
   Trade,
   TradeRepublicClientOptions,
   RawSchemaValidator,
+  RawSchemaValidationFailure,
+  RawSchemaValidationMode,
 } from './types.js';
 
 const DEFAULT_API_BASE_URL = 'https://api.traderepublic.com';
@@ -109,7 +111,7 @@ export class TradeRepublicClient {
   constructor(options: TradeRepublicClientOptions = {}) {
     this.session = options.session;
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
-    this.validateRaw = options.rawSchemaValidation === false ? skipRawSchemaValidation : validateRawResponse;
+    this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
     this.endpoints = new EndpointResolver(options.endpoints);
     this.http = new HttpClient({
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
@@ -533,6 +535,24 @@ async function validated<T>(validateRaw: RawSchemaValidator, schemaName: string,
 
 function skipRawSchemaValidation(_schemaName: string, value: unknown): unknown {
   return value;
+}
+
+function createRawSchemaValidator(
+  mode: RawSchemaValidationMode = true,
+  onFailure?: (failure: RawSchemaValidationFailure) => void,
+): RawSchemaValidator {
+  if (mode === false) return skipRawSchemaValidation;
+  if (mode === 'passthrough') {
+    return (schemaName, value) => {
+      try {
+        return validateRawResponse(schemaName, value);
+      } catch (error) {
+        onFailure?.({ schemaName, value, error });
+        return value;
+      }
+    };
+  }
+  return validateRawResponse;
 }
 
 export class MarketApi {
