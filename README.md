@@ -65,7 +65,10 @@ const tr = TradeRepublicClient.create({
   webContext,
   // Contains cookies, WAF context, mapper tokens, and account metadata.
   sessionStore: new FileSessionStore('.tr-session.json'),
-  // Useful while Trade Republic's private response shapes are still changing.
+  // rawSchemaValidation options:
+  // - true or 'throw': validate covered raw payloads and throw on drift.
+  // - 'passthrough': validate and report drift, but continue with the payload.
+  // - false: skip covered raw response validation entirely.
   rawSchemaValidation: 'passthrough',
   onRawSchemaValidationFailure: ({ schemaName, error }) => {
     console.warn(`Trade Republic schema drift in ${schemaName}`, error);
@@ -82,10 +85,52 @@ console.log(challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode);
 // the web session and saves the refreshed cookies/tokens.
 const session = await tr.auth.pollInstantLogin(challenge);
 console.log(session.securitiesAccountNumber);
+
+// Later, restore the saved session, refresh it, and save the updated cookies.
+await tr.auth.restoreSession();
+const refreshed = await tr.auth.refreshSession();
+// Persists the refreshed cookies/tokens back into the configured SessionStore.
+await tr.auth.saveSession(refreshed);
 ```
 
 The client saves cookies, WAF context, mapper tokens, and the securities account
 number in the configured `SessionStore`. Treat that file as a secret.
+
+```ts
+import { TradeRepublicClient, type Session, type SessionStore } from 'handelsrepublik';
+
+type RedisLike = {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<unknown>;
+  del(key: string): Promise<unknown>;
+};
+
+class RedisSessionStore implements SessionStore {
+  constructor(
+    private readonly redis: RedisLike,
+    private readonly key: string,
+  ) {}
+
+  async load(): Promise<Session | undefined> {
+    const value = await this.redis.get(this.key);
+    return value ? JSON.parse(value) as Session : undefined;
+  }
+
+  async save(session: Session): Promise<void> {
+    // Store this under a per-user key, for example:
+    // handelsrepublik:sessions:<user-id>
+    await this.redis.set(this.key, JSON.stringify(session));
+  }
+
+  async clear(): Promise<void> {
+    await this.redis.del(this.key);
+  }
+}
+
+const tr = TradeRepublicClient.create({
+  sessionStore: new RedisSessionStore(redis, 'handelsrepublik:sessions:alice'),
+});
+```
 
 `rawSchemaValidation` is configurable and you probably should choose a mode
 explicitly. The default is strict and throws on covered payload drift.
