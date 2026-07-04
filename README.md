@@ -30,7 +30,7 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 ## Install
 
 ```bash
-npm install handelsrepublik
+npm install github:VIEWVIEWVIEW/handelsrepublik
 ```
 
 This package is ESM-only.
