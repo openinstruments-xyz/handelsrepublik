@@ -251,15 +251,20 @@ hide incompatible response changes and make normalized output less trustworthy.
 
 The schema registry lives in `src/schemas/registry.ts` and records transport,
 risk class, request metadata, request schema, response schema, known variants,
-and live-test metadata. Generate the public catalog with:
+and live-test metadata. `SCHEMAS.md` is generated output, not the source of
+truth. Regenerate it with:
 
 ```bash
 npm run schemas:doc
 ```
 
-See [SCHEMAS.md](./SCHEMAS.md) for the generated list. `blockedMutation` entries
-are deliberately documented so tests can assert that high-risk flows are not
-executed against a live account.
+That command runs `scripts/generate-schema-catalog.ts`, which imports
+`schemaCatalogMarkdown()` from `src/schemas/registry.ts` and writes the result
+to `SCHEMAS.md`.
+
+See [SCHEMAS.md](./SCHEMAS.md) for the generated list. `blockedMutation`
+entries are deliberately documented so tests can assert that high-risk flows are
+not executed against a live account.
 
 ## Demo REPL
 
