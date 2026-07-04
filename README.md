@@ -96,6 +96,11 @@ await tr.auth.saveSession(refreshed);
 The client saves cookies, WAF context, mapper tokens, and the securities account
 number in the configured `SessionStore`. Treat that file as a secret.
 
+`FileSessionStore` is only the built-in local option. For a server process or a
+multi-user app, implement `SessionStore` yourself and persist the JSON session
+wherever you keep user state. A Redis-backed store only needs to load, save, and
+clear one session value under a per-user key:
+
 ```ts
 import { TradeRepublicClient, type Session, type SessionStore } from 'handelsrepublik';
 
