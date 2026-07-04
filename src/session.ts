@@ -2,7 +2,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Session, SessionStore } from './types.js';
 
-const SECRET_KEYS = new Set(['accessToken', 'refreshToken', 'sessionToken', 'cookies']);
+const SECRET_KEYS = new Set(['accessToken', 'refreshToken', 'sessionToken', 'webContext', 'cookies']);
 
 export function redactSession(session: Session): Record<string, unknown> {
   return Object.fromEntries(

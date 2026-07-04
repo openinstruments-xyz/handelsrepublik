@@ -42,6 +42,7 @@ login flow. Depending on the current Trade Republic web behavior, a session can
 contain:
 
 - `cookies`: web cookies such as `tr_session`, `tr_claims`, and `XSRF-TOKEN`
+- `webContext`: WAF/browser headers and cookies collected from the web app
 - `sessionToken`: mapper/websocket connection token
 - `accessToken` or `refreshToken` when the backend returns them
 - `securitiesAccountNumber`, captured after login from `accountPairs`
@@ -307,17 +308,58 @@ TR_PHONE_NUMBER=...
 ### Playwright and WAF Context
 
 Trade Republic's web login can be protected by AWS WAF checks before the QR
-login endpoints accept requests. The SDK HTTP client can send the required web
-headers and cookies, but it does not solve browser challenges by itself.
+login endpoints accept requests. AWS WAF is browser-mediated: the reliable way
+to obtain the token and matching cookies is to load the real web app in a real
+browser context and let the challenge complete there.
 
-The demo tooling keeps `playwright` as a development dependency so you can load
-the real web app in a browser context, pass the WAF challenge as a normal user,
-and copy the resulting WAF/header context into `demo/.demo-config.json` or the
-`TR_AWS_WAF_TOKEN`, `TR_XSRF_TOKEN`, and `TR_COOKIE` environment variables.
-After that, the REPL and SDK calls can reuse that context for QR login and
-session refresh work.
+The SDK exposes `collectTradeRepublicWebContext(browser)` for this. It accepts a
+Playwright-compatible browser object, creates a fresh browser context, opens the
+Trade Republic web app, captures relevant WAF headers and cookies, and returns a
+`TradeRepublicWebContext`.
 
-Run `authContext()` inside the REPL to inspect loaded context.
+```ts
+import { chromium } from 'playwright';
+import {
+  collectTradeRepublicWebContext,
+  FileSessionStore,
+  TradeRepublicClient,
+} from 'handelsrepublik';
+
+const browser = await chromium.launch({ headless: false });
+const webContext = await collectTradeRepublicWebContext(browser);
+await browser.close();
+
+const tr = TradeRepublicClient.create({
+  webContext,
+  sessionStore: new FileSessionStore('.tr-session.json'),
+});
+
+const challenge = await tr.auth.createInstantLogin();
+const session = await tr.auth.pollInstantLogin(challenge);
+await tr.auth.saveSession(session);
+```
+
+You can also attach a freshly collected context to an existing client:
+
+```ts
+tr.useWebContext(webContext);
+await tr.auth.saveSession();
+```
+
+`playwright` is intentionally optional for SDK consumers. Install it in apps
+that need WAF collection:
+
+```bash
+npm install playwright
+npx playwright install chromium
+```
+
+The demo tooling still accepts copied context through `demo/.demo-config.json`
+or the `TR_AWS_WAF_TOKEN`, `TR_XSRF_TOKEN`, and `TR_COOKIE` environment
+variables. Run `authContext()` inside the REPL to inspect loaded context.
+
+Treat session files as secrets. Once WAF context is saved, a session store can
+contain cookies, WAF tokens, XSRF tokens, mapper tokens, and account metadata.
 
 ## Client Overview
 
@@ -570,10 +612,43 @@ The Trade Republic web session can involve several independent values:
   whole session stops working.
 - `XSRF-TOKEN` is used for HTTP request protection.
 - `sessionToken` is used for mapper/websocket subscriptions.
+- `webContext` stores WAF/browser headers and cookies used by HTTP requests.
 
 Do not treat one cookie expiry as definitive proof that the full session is
 dead. The safest local pattern is to call `refreshSession()` periodically and
 fall back to a new QR login when the server rejects the session.
+
+### Multiple Users
+
+The SDK is single-user per `TradeRepublicClient`. To work with multiple
+accounts, create one client, one session store, and one WAF context per user.
+Do not share one client instance between users.
+
+```ts
+const users = [
+  {
+    id: 'alice',
+    client: TradeRepublicClient.create({
+      sessionStore: new FileSessionStore('.sessions/alice.json'),
+      webContext: aliceWebContext,
+    }),
+  },
+  {
+    id: 'bob',
+    client: TradeRepublicClient.create({
+      sessionStore: new FileSessionStore('.sessions/bob.json'),
+      webContext: bobWebContext,
+    }),
+  },
+];
+
+await Promise.allSettled(
+  users.map((user) => user.client.auth.refreshSession()),
+);
+```
+
+This keeps refresh and session persistence independent per user without adding a
+global queue, pool, or scheduler abstraction to the SDK.
 
 ## Endpoint Overrides
 

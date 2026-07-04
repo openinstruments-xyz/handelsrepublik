@@ -39,6 +39,39 @@ describe('HttpClient headers', () => {
     expect(headers['x-aws-waf-token']).toBe('waf-token');
   });
 
+  it('sends web context headers and cookies from the session', () => {
+    const session: Session = {
+      webContext: {
+        headers: {
+          'x-aws-waf-token': 'waf-token',
+          'x-tr-app-version': '1.2.3',
+        },
+        cookies: {
+          tr_session: 'web-session',
+          'XSRF-TOKEN': 'xsrf%3Dtoken',
+        },
+      },
+      cookies: {
+        tr_claims: 'claims',
+      },
+    };
+
+    const client = new HttpClient({
+      apiBaseUrl: 'https://api.traderepublic.com',
+      locale: 'en',
+      userAgent: 'test-agent',
+      fetch,
+      getSession: () => session,
+    });
+
+    const headers = client.headers();
+    expect(headers['x-aws-waf-token']).toBe('waf-token');
+    expect(headers['x-tr-app-version']).toBe('1.2.3');
+    expect(headers['x-xsrf-token']).toBe('xsrf=token');
+    expect(headers.cookie).toContain('tr_session=web-session');
+    expect(headers.cookie).toContain('tr_claims=claims');
+  });
+
   it('only sends content-type for JSON body requests by default', () => {
     const client = new HttpClient({
       apiBaseUrl: 'https://api.traderepublic.com',

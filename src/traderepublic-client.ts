@@ -34,6 +34,7 @@ import {
 import { defaultWebSocketFactory, RawApi } from './raw.js';
 import { ResourceClient, toSubscription, type Subscription } from './resource.js';
 import { validateRawResponse } from './schemas/registry.js';
+import { mergeTradeRepublicWebContexts, normalizeTradeRepublicWebContext } from './waf.js';
 import type {
   Asset,
   AssetDetail,
@@ -70,6 +71,7 @@ import type {
   TimelineItem,
   Trade,
   TradeRepublicClientOptions,
+  TradeRepublicWebContext,
   RawSchemaValidator,
   RawSchemaValidationFailure,
   RawSchemaValidationMode,
@@ -109,7 +111,7 @@ export class TradeRepublicClient {
   private readonly validateRaw: RawSchemaValidator;
 
   constructor(options: TradeRepublicClientOptions = {}) {
-    this.session = options.session;
+    this.session = withWebContext(options.session, options.webContext);
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
     this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
     this.endpoints = new EndpointResolver(options.endpoints);
@@ -163,9 +165,22 @@ export class TradeRepublicClient {
   }
 
   setSession(session: Session): void {
-    this.session = structuredClone(session);
+    const shouldPreserveWebContext = Object.keys(session).length > 0 && !session.webContext;
+    const nextSession = shouldPreserveWebContext && this.session?.webContext
+      ? { ...session, webContext: this.session.webContext }
+      : session;
+    this.session = structuredClone(nextSession);
     if (session.securitiesAccountNumber) this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
     else if (Object.keys(session).length === 0) this.securitiesAccountNumber = undefined;
+  }
+
+  useWebContext(webContext: TradeRepublicWebContext): Session {
+    const session = {
+      ...(this.session ?? {}),
+      webContext: mergeTradeRepublicWebContexts(this.session?.webContext, normalizeTradeRepublicWebContext(webContext)),
+    };
+    this.setSession(session);
+    return this.getSession() ?? session;
   }
 
   private setSecuritiesAccountNumber(value: string | undefined): void {
@@ -186,6 +201,14 @@ export class TradeRepublicClient {
       return session;
     }
   }
+}
+
+function withWebContext(session: Session | undefined, webContext: TradeRepublicWebContext | undefined): Session | undefined {
+  if (!webContext) return session ? structuredClone(session) : undefined;
+  return {
+    ...(session ? structuredClone(session) : {}),
+    webContext: mergeTradeRepublicWebContexts(session?.webContext, webContext),
+  };
 }
 
 export class AssetsApi {

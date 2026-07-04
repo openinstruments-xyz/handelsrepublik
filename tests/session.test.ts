@@ -8,12 +8,14 @@ describe('session stores', () => {
       refreshToken: 'refresh',
       sessionToken: 'session',
       accountId: 'account',
+      webContext: { awsWafToken: 'waf-token' },
       cookies: { tr_session: 'cookie' },
     })).toEqual({
       accessToken: '[redacted]',
       refreshToken: '[redacted]',
       sessionToken: '[redacted]',
       accountId: 'account',
+      webContext: '[redacted]',
       cookies: '[redacted]',
     });
   });

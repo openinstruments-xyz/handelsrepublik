@@ -69,7 +69,8 @@ export class HttpClient {
 
   headers(extra: Record<string, string> = {}, hasJsonBody = false): Record<string, string> {
     const session = this.options.getSession();
-    const xsrfToken = session?.cookies?.['XSRF-TOKEN'];
+    const webContext = session?.webContext;
+    const xsrfToken = session?.cookies?.['XSRF-TOKEN'] ?? webContext?.cookies?.['XSRF-TOKEN'] ?? webContext?.xsrfToken;
     const headers: Record<string, string> = {
       accept: 'application/json, text/plain, */*',
       'accept-language': this.options.locale,
@@ -77,13 +78,18 @@ export class HttpClient {
       referer: 'https://app.traderepublic.com/',
       'user-agent': this.options.userAgent,
       ...normalizeHeaderRecord(this.options.defaultHeaders),
+      ...normalizeHeaderRecord(webContext?.headers),
       ...extra,
     };
     if (hasJsonBody && !hasHeader(headers, 'content-type')) headers['content-type'] = 'application/json';
     if (session?.accessToken) headers.authorization = `Bearer ${session.accessToken}`;
     if (session?.sessionToken) headers['x-tr-session'] = session.sessionToken;
+    if (webContext?.awsWafToken && !hasHeader(headers, 'x-aws-waf-token')) headers['x-aws-waf-token'] = webContext.awsWafToken;
     if (xsrfToken && !hasHeader(headers, 'x-xsrf-token')) headers['x-xsrf-token'] = decodeCookieValue(xsrfToken);
-    const cookieHeader = mergeCookieHeaders(headers.cookie, session?.cookies);
+    const cookieHeader = mergeCookieHeaders(
+      [headers.cookie, webContext?.cookieHeader].filter((value): value is string => Boolean(value)).join('; '),
+      { ...(webContext?.cookies ?? {}), ...(session?.cookies ?? {}) },
+    );
     if (cookieHeader) {
       headers.cookie = cookieHeader;
     }

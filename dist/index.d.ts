@@ -15,6 +15,7 @@ interface TradeRepublicClientOptions {
     locale?: string | undefined;
     userAgent?: string | undefined;
     defaultHeaders?: Record<string, string> | undefined;
+    webContext?: TradeRepublicWebContext | undefined;
     session?: Session | undefined;
     sessionStore?: SessionStore | undefined;
     endpoints?: EndpointMap | undefined;
@@ -44,6 +45,7 @@ interface Session {
     accessToken?: string | undefined;
     refreshToken?: string | undefined;
     sessionToken?: string | undefined;
+    webContext?: TradeRepublicWebContext | undefined;
     cookies?: Record<string, string> | undefined;
     expiresAt?: string | undefined;
     accountId?: string | undefined;
@@ -55,6 +57,15 @@ interface SessionStore {
     load(): Promise<Session | undefined>;
     save(session: Session): Promise<void>;
     clear(): Promise<void>;
+}
+interface TradeRepublicWebContext {
+    headers?: Record<string, string> | undefined;
+    cookies?: Record<string, string> | undefined;
+    cookieHeader?: string | undefined;
+    awsWafToken?: string | undefined;
+    xsrfToken?: string | undefined;
+    capturedAt?: string | undefined;
+    metadata?: Record<string, unknown> | undefined;
 }
 interface InstantLoginChallenge {
     id: string;
@@ -460,6 +471,7 @@ declare class TradeRepublicClient {
     static create(options?: TradeRepublicClientOptions): TradeRepublicClient;
     getSession(): Session | undefined;
     setSession(session: Session): void;
+    useWebContext(webContext: TradeRepublicWebContext): Session;
     private setSecuritiesAccountNumber;
     private captureSecuritiesAccountNumber;
 }
@@ -877,6 +889,49 @@ declare class FileSessionStore implements SessionStore {
     clear(): Promise<void>;
 }
 
+interface TradeRepublicBrowserLike {
+    newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
+}
+type TradeRepublicBrowserContextOptions = Record<string, unknown>;
+interface CollectTradeRepublicWebContextOptions {
+    appUrl?: string | undefined;
+    apiUrl?: string | undefined;
+    contextOptions?: TradeRepublicBrowserContextOptions | undefined;
+    timeoutMs?: number | undefined;
+    settleMs?: number | undefined;
+    waitUntil?: string | undefined;
+}
+interface TradeRepublicBrowserContextLike {
+    newPage(): Promise<TradeRepublicPageLike>;
+    cookies(urls?: string | string[]): Promise<TradeRepublicCookieLike[]>;
+    close(): Promise<void> | void;
+    on?(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void;
+}
+interface TradeRepublicPageLike {
+    goto(url: string, options?: {
+        waitUntil?: string;
+        timeout?: number;
+    }): Promise<unknown>;
+    waitForLoadState?(state?: string, options?: {
+        timeout?: number;
+    }): Promise<unknown>;
+    waitForTimeout?(timeout: number): Promise<unknown>;
+    evaluate?<T>(fn: () => T): Promise<T>;
+    on?(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void;
+}
+interface TradeRepublicRequestLike {
+    url(): string;
+    headers(): Record<string, string>;
+}
+interface TradeRepublicCookieLike {
+    name: string;
+    value: string;
+    domain?: string | undefined;
+    path?: string | undefined;
+    expires?: number | undefined;
+}
+declare function collectTradeRepublicWebContext(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWebContextOptions): Promise<TradeRepublicWebContext>;
+
 type SchemaRisk = 'read' | 'lowRiskMutation' | 'blockedMutation';
 type SchemaTransport = 'rest' | 'websocket';
 interface TradeRepublicSchemaEntry {
@@ -897,4 +952,4 @@ declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicS
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutualFundOrdersOptions, type Order, type OrderDestination, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, TradeRepublicClient, type TradeRepublicClientOptions, TradeRepublicError, TradeRepublicHttpError, TradeRepublicProtocolError, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type Asset, type AssetDetail, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutualFundOrdersOptions, type Order, type OrderDestination, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

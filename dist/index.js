@@ -422,6 +422,194 @@ function normalizeDirection(...values) {
   return void 0;
 }
 
+// src/waf.ts
+var DEFAULT_APP_URL = "https://app.traderepublic.com/";
+var DEFAULT_API_URL = "https://api.traderepublic.com/";
+var DEFAULT_TIMEOUT_MS = 6e4;
+var DEFAULT_SETTLE_MS = 1e3;
+var RELEVANT_HEADER_NAMES = /* @__PURE__ */ new Set([
+  "accept-language",
+  "cookie",
+  "x-aws-waf-token",
+  "x-xsrf-token",
+  "x-tr-app-version",
+  "x-tr-device-info",
+  "x-tr-platform"
+]);
+async function collectTradeRepublicWebContext(browser, options = {}) {
+  const appUrl = options.appUrl ?? DEFAULT_APP_URL;
+  const apiUrl = options.apiUrl ?? DEFAULT_API_URL;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const settleMs = options.settleMs ?? DEFAULT_SETTLE_MS;
+  const waitUntil = options.waitUntil ?? "domcontentloaded";
+  const capturedHeaders = {};
+  const capturedCookies = {};
+  const startedAt = Date.now();
+  const context = await browser.newContext(options.contextOptions);
+  try {
+    context.on?.("request", (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
+    const page = await context.newPage();
+    page.on?.("request", (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
+    await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
+    await page.waitForLoadState?.("networkidle", { timeout: Math.min(timeoutMs, 1e4) }).catch(() => void 0);
+    if (settleMs > 0) await wait(page, settleMs);
+    let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
+    while (!hasUsefulContext(webContext) && Date.now() - startedAt < timeoutMs) {
+      await wait(page, 250);
+      webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
+    }
+    if (!hasUsefulContext(webContext)) {
+      throw new Error("Trade Republic WAF context was not available after loading the web app.");
+    }
+    return webContext;
+  } finally {
+    await context.close();
+  }
+}
+function normalizeTradeRepublicWebContext(context) {
+  const headers = normalizeHeaders(context.headers);
+  const cookieHeader = normalizeString(context.cookieHeader ?? headers.cookie);
+  const cookies = {
+    ...parseCookieHeader(cookieHeader),
+    ...normalizeRecord(context.cookies)
+  };
+  const xsrfToken = normalizeString(context.xsrfToken ?? headers["x-xsrf-token"] ?? cookies["XSRF-TOKEN"]);
+  const awsWafToken = normalizeString(context.awsWafToken ?? headers["x-aws-waf-token"]);
+  const result = {};
+  if (Object.keys(headers).length > 0) result.headers = headers;
+  if (Object.keys(cookies).length > 0) result.cookies = cookies;
+  const mergedCookieHeader = serializeCookies(cookies) || cookieHeader;
+  if (mergedCookieHeader) result.cookieHeader = mergedCookieHeader;
+  if (awsWafToken) result.awsWafToken = awsWafToken;
+  if (xsrfToken) result.xsrfToken = xsrfToken;
+  if (context.capturedAt) result.capturedAt = context.capturedAt;
+  if (context.metadata) result.metadata = structuredClone(context.metadata);
+  return result;
+}
+function mergeTradeRepublicWebContexts(current, next) {
+  if (!current && !next) return void 0;
+  const left = current ? normalizeTradeRepublicWebContext(current) : {};
+  const right = next ? normalizeTradeRepublicWebContext(next) : {};
+  return normalizeTradeRepublicWebContext({
+    headers: { ...left.headers ?? {}, ...right.headers ?? {} },
+    cookies: { ...left.cookies ?? {}, ...right.cookies ?? {} },
+    cookieHeader: [left.cookieHeader, right.cookieHeader].filter(Boolean).join("; "),
+    awsWafToken: right.awsWafToken ?? left.awsWafToken,
+    xsrfToken: right.xsrfToken ?? left.xsrfToken,
+    capturedAt: right.capturedAt ?? left.capturedAt,
+    metadata: { ...left.metadata ?? {}, ...right.metadata ?? {} }
+  });
+}
+function captureRequest(request, appUrl, apiUrl, headers, cookies) {
+  const url = request.url();
+  if (!isTradeRepublicUrl(url, appUrl, apiUrl)) return;
+  const requestHeaders = normalizeHeaders(request.headers());
+  for (const [name, value] of Object.entries(requestHeaders)) {
+    if (!RELEVANT_HEADER_NAMES.has(name) || !value) continue;
+    headers[name] = value;
+  }
+  Object.assign(cookies, parseCookieHeader(requestHeaders.cookie));
+}
+async function buildWebContext(context, appUrl, apiUrl, headers, requestCookies, page) {
+  const browserCookies = cookieArrayToRecord(await context.cookies([appUrl, apiUrl]));
+  const storageTokens = await readStorageTokens(page);
+  return normalizeTradeRepublicWebContext({
+    headers,
+    cookies: { ...requestCookies, ...browserCookies },
+    awsWafToken: headers["x-aws-waf-token"] ?? storageTokens.awsWafToken,
+    xsrfToken: headers["x-xsrf-token"] ?? browserCookies["XSRF-TOKEN"] ?? storageTokens.xsrfToken,
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    metadata: {
+      source: "playwright",
+      appUrl,
+      apiUrl
+    }
+  });
+}
+async function readStorageTokens(page) {
+  if (!page.evaluate) return {};
+  try {
+    const storage = await page.evaluate(() => {
+      const entries = {};
+      for (const area of [globalThis.localStorage, globalThis.sessionStorage]) {
+        for (let index = 0; index < area.length; index += 1) {
+          const key = area.key(index);
+          if (!key) continue;
+          const value = area.getItem(key);
+          if (value) entries[key] = value;
+        }
+      }
+      return entries;
+    });
+    const awsWafToken = firstStorageValue(storage, ["x-aws-waf-token", "awsWafToken", "aws-waf-token", "waf"]);
+    const xsrfToken = firstStorageValue(storage, ["x-xsrf-token", "xsrf"]);
+    return {
+      ...awsWafToken ? { awsWafToken } : {},
+      ...xsrfToken ? { xsrfToken } : {}
+    };
+  } catch {
+    return {};
+  }
+}
+function firstStorageValue(storage, needles) {
+  for (const [key, value] of Object.entries(storage)) {
+    const normalizedKey = key.toLowerCase();
+    if (needles.some((needle) => normalizedKey.includes(needle.toLowerCase())) && value.trim()) return value.trim();
+  }
+  return void 0;
+}
+function hasUsefulContext(context) {
+  return Boolean(
+    context.awsWafToken || context.headers?.["x-aws-waf-token"] || context.cookieHeader || Object.keys(context.cookies ?? {}).length > 0
+  );
+}
+function normalizeHeaders(headers) {
+  return Object.fromEntries(
+    Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), value.trim()]).filter(([key, value]) => key.length > 0 && value.length > 0)
+  );
+}
+function normalizeRecord(record) {
+  return Object.fromEntries(
+    Object.entries(record ?? {}).filter(([key, value]) => key.length > 0 && value.length > 0)
+  );
+}
+function normalizeString(value) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : void 0;
+}
+function cookieArrayToRecord(cookies) {
+  return Object.fromEntries(cookies.filter((cookie) => cookie.name && cookie.value).map((cookie) => [cookie.name, cookie.value]));
+}
+function parseCookieHeader(value) {
+  const cookies = {};
+  for (const part of (value ?? "").split(";")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    cookies[trimmed.slice(0, separator)] = trimmed.slice(separator + 1);
+  }
+  return cookies;
+}
+function serializeCookies(cookies) {
+  return Object.entries(cookies).map(([key, value]) => `${key}=${value}`).join("; ");
+}
+function isTradeRepublicUrl(value, appUrl, apiUrl) {
+  try {
+    const url = new URL(value);
+    return [new URL(appUrl), new URL(apiUrl)].some((base) => url.hostname === base.hostname || url.hostname.endsWith(`.${base.hostname}`));
+  } catch {
+    return false;
+  }
+}
+async function wait(page, timeout) {
+  if (page.waitForTimeout) {
+    await page.waitForTimeout(timeout);
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, timeout));
+}
+
 // src/auth.ts
 var AuthApi = class {
   constructor(http, endpoints, getSession, setSession, sessionStore, onSessionReady) {
@@ -633,6 +821,7 @@ function mergeSessions(...sessions) {
     result.accessToken = session.accessToken ?? result.accessToken;
     result.refreshToken = session.refreshToken ?? result.refreshToken;
     result.sessionToken = session.sessionToken ?? result.sessionToken;
+    result.webContext = mergeTradeRepublicWebContexts(result.webContext, session.webContext);
     result.expiresAt = session.expiresAt ?? result.expiresAt;
     result.accountId = session.accountId ?? result.accountId;
     result.deviceId = session.deviceId ?? result.deviceId;
@@ -696,6 +885,7 @@ function summarizeSession(session) {
     hasAccessToken: Boolean(session.accessToken),
     hasRefreshToken: Boolean(session.refreshToken),
     hasSessionToken: Boolean(session.sessionToken),
+    hasWebContext: Boolean(session.webContext),
     cookieNames: Object.keys(session.cookies ?? {}),
     expiresAt: session.expiresAt ?? null,
     accountId: session.accountId ?? null,
@@ -967,7 +1157,8 @@ var HttpClient = class {
   }
   headers(extra = {}, hasJsonBody = false) {
     const session = this.options.getSession();
-    const xsrfToken = session?.cookies?.["XSRF-TOKEN"];
+    const webContext = session?.webContext;
+    const xsrfToken = session?.cookies?.["XSRF-TOKEN"] ?? webContext?.cookies?.["XSRF-TOKEN"] ?? webContext?.xsrfToken;
     const headers = {
       accept: "application/json, text/plain, */*",
       "accept-language": this.options.locale,
@@ -975,13 +1166,18 @@ var HttpClient = class {
       referer: "https://app.traderepublic.com/",
       "user-agent": this.options.userAgent,
       ...normalizeHeaderRecord(this.options.defaultHeaders),
+      ...normalizeHeaderRecord(webContext?.headers),
       ...extra
     };
     if (hasJsonBody && !hasHeader(headers, "content-type")) headers["content-type"] = "application/json";
     if (session?.accessToken) headers.authorization = `Bearer ${session.accessToken}`;
     if (session?.sessionToken) headers["x-tr-session"] = session.sessionToken;
+    if (webContext?.awsWafToken && !hasHeader(headers, "x-aws-waf-token")) headers["x-aws-waf-token"] = webContext.awsWafToken;
     if (xsrfToken && !hasHeader(headers, "x-xsrf-token")) headers["x-xsrf-token"] = decodeCookieValue(xsrfToken);
-    const cookieHeader = mergeCookieHeaders(headers.cookie, session?.cookies);
+    const cookieHeader = mergeCookieHeaders(
+      [headers.cookie, webContext?.cookieHeader].filter((value) => Boolean(value)).join("; "),
+      { ...webContext?.cookies ?? {}, ...session?.cookies ?? {} }
+    );
     if (cookieHeader) {
       headers.cookie = cookieHeader;
     }
@@ -1505,7 +1701,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   resources;
   validateRaw;
   constructor(options = {}) {
-    this.session = options.session;
+    this.session = withWebContext(options.session, options.webContext);
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
     this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
     this.endpoints = new EndpointResolver(options.endpoints);
@@ -1555,9 +1751,19 @@ var TradeRepublicClient = class _TradeRepublicClient {
     });
   }
   setSession(session) {
-    this.session = structuredClone(session);
+    const shouldPreserveWebContext = Object.keys(session).length > 0 && !session.webContext;
+    const nextSession = shouldPreserveWebContext && this.session?.webContext ? { ...session, webContext: this.session.webContext } : session;
+    this.session = structuredClone(nextSession);
     if (session.securitiesAccountNumber) this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
     else if (Object.keys(session).length === 0) this.securitiesAccountNumber = void 0;
+  }
+  useWebContext(webContext) {
+    const session = {
+      ...this.session ?? {},
+      webContext: mergeTradeRepublicWebContexts(this.session?.webContext, normalizeTradeRepublicWebContext(webContext))
+    };
+    this.setSession(session);
+    return this.getSession() ?? session;
   }
   setSecuritiesAccountNumber(value) {
     if (!value) return;
@@ -1577,6 +1783,13 @@ var TradeRepublicClient = class _TradeRepublicClient {
     }
   }
 };
+function withWebContext(session, webContext) {
+  if (!webContext) return session ? structuredClone(session) : void 0;
+  return {
+    ...session ? structuredClone(session) : {},
+    webContext: mergeTradeRepublicWebContexts(session?.webContext, webContext)
+  };
+}
 var AssetsApi = class {
   constructor(raw, validateRaw) {
     this.raw = raw;
@@ -2414,7 +2627,7 @@ var WebApi = class {
 // src/session.ts
 import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname } from "path";
-var SECRET_KEYS = /* @__PURE__ */ new Set(["accessToken", "refreshToken", "sessionToken", "cookies"]);
+var SECRET_KEYS = /* @__PURE__ */ new Set(["accessToken", "refreshToken", "sessionToken", "webContext", "cookies"]);
 function redactSession(session) {
   return Object.fromEntries(
     Object.entries(session).map(([key, value]) => [key, SECRET_KEYS.has(key) ? "[redacted]" : value])
@@ -2464,6 +2677,7 @@ export {
   TradeRepublicHttpError,
   TradeRepublicProtocolError,
   TradeRepublicSchemaError,
+  collectTradeRepublicWebContext,
   redactSession,
   schemaCatalogMarkdown,
   schemaRegistry,

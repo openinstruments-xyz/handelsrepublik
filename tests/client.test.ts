@@ -147,6 +147,45 @@ describe('TradeRepublicClient', () => {
     expect(client.getSession()).toMatchObject({ securitiesAccountNumber: '0000000000' });
   });
 
+  it('attaches web context per client and preserves it when saving sessions', async () => {
+    const saved: unknown[] = [];
+    const first = TradeRepublicClient.create({
+      sessionStore: {
+        async load() {
+          return undefined;
+        },
+        async save(session) {
+          saved.push(session);
+        },
+        async clear() {},
+      },
+    });
+    const second = TradeRepublicClient.create();
+
+    first.useWebContext({
+      awsWafToken: 'waf-token',
+      cookies: {
+        tr_session: 'web-session',
+      },
+    });
+    await first.auth.saveSession();
+
+    expect(first.getSession()).toMatchObject({
+      webContext: {
+        awsWafToken: 'waf-token',
+        cookies: {
+          tr_session: 'web-session',
+        },
+      },
+    });
+    expect(second.getSession()).toBeUndefined();
+    expect(saved).toEqual([
+      expect.objectContaining({
+        webContext: expect.objectContaining({ awsWafToken: 'waf-token' }),
+      }),
+    ]);
+  });
+
   it('rejects drifted raw payloads by default', async () => {
     const client = TradeRepublicClient.create({
       fetch: mockFetch([], { unexpected: true }),

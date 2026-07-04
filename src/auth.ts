@@ -2,6 +2,7 @@ import type { EndpointResolver } from './endpoints.js';
 import type { HttpClient } from './http.js';
 import { asRecord } from './normalizers.js';
 import type { InstantLoginChallenge, Session, SessionStore } from './types.js';
+import { mergeTradeRepublicWebContexts } from './waf.js';
 
 export interface CreateInstantLoginOptions {
   phoneNumber?: string;
@@ -239,6 +240,7 @@ function mergeSessions(...sessions: Array<Session | undefined>): Session {
     result.accessToken = session.accessToken ?? result.accessToken;
     result.refreshToken = session.refreshToken ?? result.refreshToken;
     result.sessionToken = session.sessionToken ?? result.sessionToken;
+    result.webContext = mergeTradeRepublicWebContexts(result.webContext, session.webContext);
     result.expiresAt = session.expiresAt ?? result.expiresAt;
     result.accountId = session.accountId ?? result.accountId;
     result.deviceId = session.deviceId ?? result.deviceId;
@@ -319,6 +321,7 @@ function summarizeSession(session: Session): Record<string, unknown> {
     hasAccessToken: Boolean(session.accessToken),
     hasRefreshToken: Boolean(session.refreshToken),
     hasSessionToken: Boolean(session.sessionToken),
+    hasWebContext: Boolean(session.webContext),
     cookieNames: Object.keys(session.cookies ?? {}),
     expiresAt: session.expiresAt ?? null,
     accountId: session.accountId ?? null,

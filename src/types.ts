@@ -41,6 +41,7 @@ export interface TradeRepublicClientOptions {
   locale?: string | undefined;
   userAgent?: string | undefined;
   defaultHeaders?: Record<string, string> | undefined;
+  webContext?: TradeRepublicWebContext | undefined;
   session?: Session | undefined;
   sessionStore?: SessionStore | undefined;
   endpoints?: EndpointMap | undefined;
@@ -79,6 +80,7 @@ export interface Session {
   accessToken?: string | undefined;
   refreshToken?: string | undefined;
   sessionToken?: string | undefined;
+  webContext?: TradeRepublicWebContext | undefined;
   cookies?: Record<string, string> | undefined;
   expiresAt?: string | undefined;
   accountId?: string | undefined;
@@ -91,6 +93,16 @@ export interface SessionStore {
   load(): Promise<Session | undefined>;
   save(session: Session): Promise<void>;
   clear(): Promise<void>;
+}
+
+export interface TradeRepublicWebContext {
+  headers?: Record<string, string> | undefined;
+  cookies?: Record<string, string> | undefined;
+  cookieHeader?: string | undefined;
+  awsWafToken?: string | undefined;
+  xsrfToken?: string | undefined;
+  capturedAt?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 export interface InstantLoginChallenge {

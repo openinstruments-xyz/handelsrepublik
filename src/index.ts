@@ -2,8 +2,17 @@ export { TradeRepublicClient } from './traderepublic-client.js';
 export { TradeRepublicError, TradeRepublicHttpError, TradeRepublicProtocolError, TradeRepublicSchemaError } from './errors.js';
 export { MemorySessionStore, FileSessionStore, redactSession } from './session.js';
 export { CandleQuery } from './candles.js';
+export { collectTradeRepublicWebContext } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
 export type { SchemaRisk, SchemaTransport, TradeRepublicSchemaEntry } from './schemas/registry.js';
+export type {
+  CollectTradeRepublicWebContextOptions,
+  TradeRepublicBrowserContextLike,
+  TradeRepublicBrowserLike,
+  TradeRepublicCookieLike,
+  TradeRepublicPageLike,
+  TradeRepublicRequestLike,
+} from './waf.js';
 export type { QuerySpec, StreamSpec, Subscription } from './resource.js';
 export type {
   Asset,
@@ -46,4 +55,5 @@ export type {
   TimelineItem,
   Trade,
   TradeRepublicClientOptions,
+  TradeRepublicWebContext,
 } from './types.js';
