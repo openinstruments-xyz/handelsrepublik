@@ -50,6 +50,14 @@ contain:
 HTTP requests send saved cookies and relevant headers. Mapper websocket
 resources send `sessionToken` in the subscription payload when available.
 
+`mapper/websocket` is this SDK's shorthand for a transport pattern observed in
+the Trade Republic web app: instead of calling a normal URL endpoint, the app
+opens a websocket and sends JSON requests with a `type` value such as
+`availableCash` or `ticker`. Trade Republic error payloads label this backend
+routing layer as `MAPPER`, which is where the term comes from. See
+[What "Mapper" Means](#what-mapper-means) for the fuller distinction between
+REST endpoints, websocket resources, and mapper routing.
+
 ### QR Login
 
 ```ts
