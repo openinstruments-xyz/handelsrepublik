@@ -138,18 +138,20 @@ export class TradeRepublicClient {
     this.resources = new ResourceClient(this.http, this.endpoints, this.raw, this.validateRaw);
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
-    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
-    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    const getAccountNumber = () => this.securitiesAccountNumber ?? this.session?.securitiesAccountNumber;
+    const resolveAccountNumberFromRest = () => this.resolveSecuritiesAccountNumberFromRest();
+    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
+    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
     this.market = new MarketApi(this.resources);
     this.timeline = new TimelineApi(this.raw, this.validateRaw);
     this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
     this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
-    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
     this.discovery = new DiscoveryApi(this.http, this.validateRaw);
     this.documents = new DocumentsApi(this.http, this.validateRaw);
     this.tax = new TaxApi(this.http, this.validateRaw);
     this.payments = new PaymentsApi(this.http, this.validateRaw);
-    this.web = new WebApi(this.http, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.web = new WebApi(this.http, this.raw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
   }
 
   static create(options: TradeRepublicClientOptions = {}): TradeRepublicClient {
@@ -195,11 +197,18 @@ export class TradeRepublicClient {
       return session;
     }
     try {
-      const accountNumber = await resolveSecuritiesAccountNumber(this.raw, this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value), 5_000);
+      const accountNumber = await resolveSecuritiesAccountNumber(this.raw, this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value), 5_000, () => this.resolveSecuritiesAccountNumberFromRest());
       return { ...session, securitiesAccountNumber: accountNumber };
     } catch {
       return session;
     }
+  }
+
+  private async resolveSecuritiesAccountNumberFromRest(): Promise<string | undefined> {
+    const account = await this.account.current();
+    const accountNumber = firstStringByKey(account, 'securitiesAccountNumber');
+    if (accountNumber) this.setSecuritiesAccountNumber(accountNumber);
+    return accountNumber;
   }
 }
 
@@ -346,6 +355,7 @@ export class OrdersApi {
     private readonly validateRaw: RawSchemaValidator,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
+    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
   ) {}
 
   async open(options: OrdersListOptions = {}): Promise<Order[]> {
@@ -364,7 +374,7 @@ export class OrdersApi {
 
   async rawAll(options: OrdersListOptions = {}): Promise<unknown> {
     const { filters, secAccNo: providedSecAccNo, ...rest } = options;
-    const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
     return validated(this.validateRaw, 'orders.all', this.http.request<unknown>('GET', this.endpoints.resolve('orders.all'), undefined, {
       secAccNo,
       page: rest.page ?? numberString(rest.cursor) ?? 1,
@@ -417,7 +427,7 @@ export class OrdersApi {
   }
 
   async rawOrderUpdates(secAccNo?: string): Promise<unknown> {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
     return validated(this.validateRaw, 'orders.orderUpdates', this.raw.query({
       type: 'orderUpdates',
       selector: { case: 'bySecAccNo', value: { accountNumber } },
@@ -438,6 +448,7 @@ export class PortfolioApi {
     private readonly validateRaw: RawSchemaValidator,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
+    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
   ) {}
 
   async current(options: { timeoutMs?: number } = {}): Promise<Portfolio> {
@@ -491,7 +502,7 @@ export class PortfolioApi {
   }
 
   private async resolveSecuritiesAccountNumber(): Promise<string> {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
   }
 }
 
@@ -504,6 +515,7 @@ async function resolveSecuritiesAccountNumber(
   cached?: string,
   remember?: (value: string) => void,
   timeoutMs?: number,
+  fallback?: () => Promise<string | undefined>,
 ): Promise<string> {
   try {
     const accountPairs = await raw.query({ type: 'accountPairs' }, timeoutMs ? { timeoutMs } : undefined);
@@ -514,10 +526,20 @@ async function resolveSecuritiesAccountNumber(
     }
   } catch {
     if (cached) return cached;
-    throw new Error('Trade Republic securities account number was not available from accountPairs.');
+    const accountNumber = await fallback?.();
+    if (accountNumber) {
+      remember?.(accountNumber);
+      return accountNumber;
+    }
+    throw new Error('Trade Republic securities account number was not available from accountPairs or account profile.');
   }
   if (cached) return cached;
-  throw new Error('Trade Republic securities account number was not available from accountPairs.');
+  const accountNumber = await fallback?.();
+  if (accountNumber) {
+    remember?.(accountNumber);
+    return accountNumber;
+  }
+  throw new Error('Trade Republic securities account number was not available from accountPairs or account profile.');
 }
 
 function firstStringByKey(value: unknown, key: string): string | undefined {
@@ -762,6 +784,7 @@ export class TradingApi {
     private readonly validateRaw: RawSchemaValidator,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
+    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
   ) {}
 
   priceForOrder(options: { isin: string; exchangeId: string; side: string; unit?: string }, queryOptions: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -798,7 +821,7 @@ export class TradingApi {
   }
 
   private resolveSecuritiesAccountNumber(): Promise<string> {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
   }
 }
 
@@ -996,6 +1019,7 @@ export class WebApi {
     private readonly raw: RawApi,
     private readonly getSecuritiesAccountNumber?: () => string | undefined,
     private readonly setSecuritiesAccountNumber?: (value: string) => void,
+    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
   ) {}
 
   request<T = unknown>(
@@ -1198,7 +1222,7 @@ export class WebApi {
   }
 
   private async withSecAccNo(secAccNo: string | undefined, fn: (secAccNo: string) => Promise<unknown>): Promise<unknown> {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
     return fn(accountNumber);
   }
 }

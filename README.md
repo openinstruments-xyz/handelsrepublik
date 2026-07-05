@@ -27,6 +27,8 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 - Demo Node REPL for interactive local exploration.
 - Raw escape hatches for unmapped private API resources.
 
+- Placing orders was not tested
+
 ## Install
 
 ```bash
@@ -272,6 +274,8 @@ npm run dev
 
 The REPL builds the SDK, restores `demo/.demo-session.json` when present, prints
 `help()`, and exposes `client` plus convenience functions.
+
+For the widget-based TUI demo, run `npm run demo:tui`.
 
 Common commands:
 

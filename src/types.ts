@@ -3,6 +3,7 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type EndpointKey =
   | 'auth.qrChallenge'
   | 'auth.qrStatus'
+  | 'auth.login'
   | 'auth.loginProcess'
   | 'auth.account'
   | 'auth.session'

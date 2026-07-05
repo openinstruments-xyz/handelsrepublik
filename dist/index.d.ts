@@ -1,7 +1,7 @@
 import { ZodType } from 'zod';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'boards.list' | 'boards.detail' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
+type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'boards.list' | 'boards.detail' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
 type EndpointMap = Partial<Record<EndpointKey, string>>;
 type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
 interface RawSchemaValidationFailure {
@@ -349,11 +349,24 @@ interface CreateInstantLoginOptions {
     deviceName?: string;
     signal?: AbortSignal;
 }
+interface StartLoginWithPinOptions {
+    phoneNumber: string;
+    pin: string;
+    otpLess?: boolean | undefined;
+    signal?: AbortSignal;
+}
+interface LoginWithPinOptions extends StartLoginWithPinOptions, PollInstantLoginOptions {
+}
 interface PollInstantLoginOptions {
     intervalMs?: number;
     timeoutMs?: number;
     signal?: AbortSignal;
     debug?: boolean;
+}
+interface LoginProgressState {
+    status: string | undefined;
+    processId: string | undefined;
+    session: Session | undefined;
 }
 type SessionReadyHandler = (session: Session) => Promise<Session | void> | Session | void;
 declare class AuthApi {
@@ -365,7 +378,10 @@ declare class AuthApi {
     private readonly onSessionReady?;
     constructor(http: HttpClient, endpoints: EndpointResolver, getSession: () => Session | undefined, setSession: (session: Session) => void, sessionStore?: SessionStore | undefined, onSessionReady?: SessionReadyHandler | undefined);
     createInstantLogin(options?: CreateInstantLoginOptions): Promise<InstantLoginChallenge>;
+    startLoginWithPin(options: StartLoginWithPinOptions): Promise<LoginProgressState>;
+    loginWithPin(options: LoginWithPinOptions): Promise<Session>;
     pollInstantLogin(challenge: Pick<InstantLoginChallenge, 'id'>, options?: PollInstantLoginOptions): Promise<Session>;
+    pollLoginProcess(processId: string, options?: PollInstantLoginOptions): Promise<Session>;
     restoreSession(): Promise<Session | undefined>;
     saveSession(session?: Session | undefined): Promise<void>;
     refreshSession(options?: {
@@ -375,6 +391,7 @@ declare class AuthApi {
     clearSession(): Promise<void>;
     private completeWebSession;
     private finalizeSession;
+    private pollLoginProgress;
 }
 
 interface RawSubscription extends AsyncIterable<unknown> {
@@ -474,6 +491,7 @@ declare class TradeRepublicClient {
     useWebContext(webContext: TradeRepublicWebContext): Session;
     private setSecuritiesAccountNumber;
     private captureSecuritiesAccountNumber;
+    private resolveSecuritiesAccountNumberFromRest;
 }
 declare class AssetsApi {
     private readonly raw;
@@ -536,7 +554,8 @@ declare class OrdersApi {
     private readonly validateRaw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    private readonly resolveSecuritiesAccountNumberFallback?;
+    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
     open(options?: OrdersListOptions): Promise<Order[]>;
     closed(options?: OrdersListOptions): Promise<Order[]>;
     all(options?: OrdersListOptions): Promise<Order[]>;
@@ -555,7 +574,8 @@ declare class PortfolioApi {
     private readonly validateRaw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    private readonly resolveSecuritiesAccountNumberFallback?;
+    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
     current(options?: {
         timeoutMs?: number;
     }): Promise<Portfolio>;
@@ -705,7 +725,8 @@ declare class TradingApi {
     private readonly validateRaw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    private readonly resolveSecuritiesAccountNumberFallback?;
+    constructor(http: HttpClient, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
     priceForOrder(options: {
         isin: string;
         exchangeId: string;
@@ -790,7 +811,8 @@ declare class WebApi {
     private readonly raw;
     private readonly getSecuritiesAccountNumber?;
     private readonly setSecuritiesAccountNumber?;
-    constructor(http: HttpClient, raw: RawApi, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined);
+    private readonly resolveSecuritiesAccountNumberFallback?;
+    constructor(http: HttpClient, raw: RawApi, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
     request<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, options?: {
         body?: unknown;
         query?: Record<string, string | number | boolean | undefined>;

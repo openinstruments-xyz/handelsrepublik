@@ -77,16 +77,19 @@ export async function collectTradeRepublicWebContext(
     const page = await context.newPage();
     page.on?.('request', (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
     await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
-    await page.waitForLoadState?.('networkidle', { timeout: Math.min(timeoutMs, 10_000) }).catch(() => undefined);
-    if (settleMs > 0) await wait(page, settleMs);
-
     let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
-    while (!hasUsefulContext(webContext) && Date.now() - startedAt < timeoutMs) {
+    if (!hasLoginContext(webContext)) {
+      await page.waitForLoadState?.('networkidle', { timeout: Math.min(timeoutMs, 10_000) }).catch(() => undefined);
+      if (settleMs > 0) await wait(page, settleMs);
+      webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
+    }
+    while (!hasLoginContext(webContext) && Date.now() - startedAt < timeoutMs) {
       await wait(page, 250);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    if (!hasUsefulContext(webContext)) {
-      throw new Error('Trade Republic WAF context was not available after loading the web app.');
+    if (!hasLoginContext(webContext)) {
+      const missing = missingLoginContext(webContext);
+      throw new Error(formatLoginContextError(webContext, missing));
     }
     return webContext;
   } finally {
@@ -208,13 +211,56 @@ function firstStorageValue(storage: Record<string, string>, needles: string[]): 
   return undefined;
 }
 
-function hasUsefulContext(context: TradeRepublicWebContext): boolean {
-  return Boolean(
-    context.awsWafToken
-      || context.headers?.['x-aws-waf-token']
-      || context.cookieHeader
-      || Object.keys(context.cookies ?? {}).length > 0,
-  );
+function hasLoginContext(context: TradeRepublicWebContext): boolean {
+  return missingLoginContext(context).length === 0;
+}
+
+function missingLoginContext(context: TradeRepublicWebContext): string[] {
+  const headers = context.headers ?? {};
+  const missing = [];
+  if (!(context.awsWafToken || headers['x-aws-waf-token'])) missing.push('x-aws-waf-token');
+  if (!(context.cookieHeader || Object.keys(context.cookies ?? {}).length > 0)) missing.push('cookie');
+  if (!headers['x-tr-app-version']) missing.push('x-tr-app-version');
+  if (!headers['x-tr-platform']) missing.push('x-tr-platform');
+  if (!headers['x-tr-device-info']) missing.push('x-tr-device-info');
+  return missing;
+}
+
+function formatLoginContextError(context: TradeRepublicWebContext, missing: string[]): string {
+  const headers = context.headers ?? {};
+  const presentHeaders = [
+    'x-aws-waf-token',
+    'x-xsrf-token',
+    'x-tr-app-version',
+    'x-tr-platform',
+    'x-tr-device-info',
+    'accept-language',
+    'cookie',
+  ].filter((name) => Boolean(headers[name]));
+  const cookieNames = Object.keys(context.cookies ?? {}).sort();
+  const details = [
+    `Missing: ${missing.join(', ') || 'none'}`,
+    `Present headers: ${presentHeaders.join(', ') || 'none'}`,
+    `Header preview: ${formatHeaderPreview(headers)}`,
+    `Cookie names: ${cookieNames.join(', ') || 'none'}`,
+  ];
+  return `Trade Republic login context was incomplete after loading the web app. ${details.join(' | ')}`;
+}
+
+function formatHeaderPreview(headers: Record<string, string>): string {
+  const previewNames = ['x-tr-app-version', 'x-tr-platform', 'x-tr-device-info', 'x-aws-waf-token', 'x-xsrf-token'];
+  const preview = previewNames
+    .flatMap((name) => {
+      const value = headers[name];
+      return value ? [`${name}=${redactHeaderValue(value)}`] : [];
+    });
+  return preview.join(', ') || 'none';
+}
+
+function redactHeaderValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= 16) return trimmed;
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
 }
 
 function normalizeHeaders(headers: Record<string, string> | undefined): Record<string, string> {

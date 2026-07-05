@@ -24,6 +24,69 @@ describe('TradeRepublicClient', () => {
     expect(calls[0]?.init.body).toBe(JSON.stringify({ deviceName: 'sdk-test' }));
   });
 
+  it('logs in with phone and PIN through the v2 web login endpoint', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const saved: unknown[] = [];
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      sessionStore: {
+        async load() {
+          return undefined;
+        },
+        async save(session) {
+          saved.push(session);
+        },
+        async clear() {},
+      },
+      fetch: mockFetchSequence(calls, [
+        jsonResponse({
+          status: 'CONFIRMED',
+          processId: 'process-1',
+        }, 200, {
+          'set-cookie': 'JSESSIONID=start-session; Path=/; Secure; HttpOnly',
+        }),
+        jsonResponse({
+          status: 'COMPLETED',
+        }, 200, {
+          'set-cookie': 'JSESSIONID=complete-session; Path=/; Secure; HttpOnly',
+        }),
+        jsonResponse({
+          session: {
+            connectionToken: 'session-token',
+          },
+        }),
+      ]),
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'accountPairs') {
+            socket.emit('message', `${id} A ${JSON.stringify(accountPairsPayload())}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.auth.loginWithPin({
+      phoneNumber: '+491234567890',
+      pin: '1234',
+      intervalMs: 0,
+    })).resolves.toMatchObject({
+      sessionToken: 'session-token',
+      securitiesAccountNumber: '0000000001',
+      cookies: {
+        JSESSIONID: 'complete-session',
+      },
+    });
+
+    expect(calls[0]?.url).toBe('https://api.traderepublic.com/api/v2/auth/web/login');
+    expect(calls[0]?.init.method).toBe('POST');
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ phoneNumber: '+491234567890', pin: '1234' }));
+    expect(calls[1]?.url).toBe('https://api.traderepublic.com/api/v2/auth/web/login/processes/process-1');
+    expect(calls[2]?.url).toBe('https://api.traderepublic.com/api/v1/auth/web/session');
+    expect(saved).toEqual([expect.objectContaining({ securitiesAccountNumber: '0000000001' })]);
+  });
+
   it('carries QR login cookies across poll steps before completing the web session', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const saved: unknown[] = [];
@@ -291,6 +354,11 @@ describe('TradeRepublicClient', () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
+      session: {
+        cookies: {
+          tr_session: 'restored-session',
+        },
+      },
       fetch: mockFetchSequence(calls, [
         jsonResponse([{ id: 'o1', instrumentId: 'US1', side: 'BUY', submittedAt: '2026-07-03T10:00:00.000Z', trades: [] }]),
         jsonResponse([{ id: 'o2', instrumentId: 'US2', side: 'SELL', executedAt: '2026-07-03T11:00:00.000Z' }]),
@@ -332,6 +400,44 @@ describe('TradeRepublicClient', () => {
       instrumentId: 'US3',
     });
     expect(client.securitiesAccountNumber).toBe('0000000001');
+  });
+
+  it('falls back to the auth account profile when accountPairs has no securities account number', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      session: {
+        cookies: {
+          tr_session: 'restored-session',
+        },
+      },
+      fetch: mockFetchSequence(calls, [
+        jsonResponse(authAccountPayload()),
+        jsonResponse([{ id: 'o1', instrumentId: 'US1', side: 'BUY', submittedAt: '2026-07-03T10:00:00.000Z' }]),
+      ]),
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'accountPairs') {
+            socket.emit('message', `${id} A ${JSON.stringify({ accounts: [] })}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.orders.all()).resolves.toEqual([expect.objectContaining({ id: 'o1' })]);
+
+    expect(sockets[0]?.sent[1]).toBe('sub 1 {"type":"accountPairs"}');
+    expect(calls[0]?.url).toBe('https://api.traderepublic.com/api/v2/auth/account');
+    expectOrderCall(calls[1], {
+      secAccNo: '0000000001',
+      page: '1',
+      pageSize: '100',
+      sort: 'orderUpdatedAt,desc',
+    });
+    expect(client.securitiesAccountNumber).toBe('0000000001');
+    expect(client.getSession()).toMatchObject({ securitiesAccountNumber: '0000000001' });
   });
 
   it('queries assets through neonSearch and instrument resources', async () => {
@@ -810,6 +916,25 @@ function accountPairsPayload(): unknown {
         accountAccessType: 'OWNER',
       },
     ],
+  };
+}
+
+function authAccountPayload(): unknown {
+  return {
+    phoneNumber: '+491234567890',
+    jurisdiction: 'DE',
+    name: {
+      firstName: 'Example',
+      lastName: 'User',
+    },
+    email: {
+      address: 'example@example.invalid',
+    },
+    cashAccount: {
+      iban: 'DE00000000000000000000',
+    },
+    securitiesAccountNumber: '0000000001',
+    personId: 'person-1',
   };
 }
 

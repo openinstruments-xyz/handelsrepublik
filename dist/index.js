@@ -1,3 +1,41 @@
+// src/errors.ts
+var TradeRepublicError = class extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.cause = cause;
+    this.name = "TradeRepublicError";
+  }
+  cause;
+};
+var TradeRepublicHttpError = class extends TradeRepublicError {
+  constructor(message, status, responseBody) {
+    super(message);
+    this.status = status;
+    this.responseBody = responseBody;
+    this.name = "TradeRepublicHttpError";
+  }
+  status;
+  responseBody;
+};
+var TradeRepublicProtocolError = class extends TradeRepublicError {
+  constructor(message, cause) {
+    super(message, cause);
+    this.name = "TradeRepublicProtocolError";
+  }
+};
+var TradeRepublicSchemaError = class extends TradeRepublicError {
+  constructor(message, schemaName, issues, rawSummary, cause) {
+    super(message, cause);
+    this.schemaName = schemaName;
+    this.issues = issues;
+    this.rawSummary = rawSummary;
+    this.name = "TradeRepublicSchemaError";
+  }
+  schemaName;
+  issues;
+  rawSummary;
+};
+
 // src/normalizers.ts
 function arrayPayload(value) {
   if (Array.isArray(value)) return value;
@@ -451,15 +489,19 @@ async function collectTradeRepublicWebContext(browser, options = {}) {
     const page = await context.newPage();
     page.on?.("request", (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
     await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
-    await page.waitForLoadState?.("networkidle", { timeout: Math.min(timeoutMs, 1e4) }).catch(() => void 0);
-    if (settleMs > 0) await wait(page, settleMs);
     let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
-    while (!hasUsefulContext(webContext) && Date.now() - startedAt < timeoutMs) {
+    if (!hasLoginContext(webContext)) {
+      await page.waitForLoadState?.("networkidle", { timeout: Math.min(timeoutMs, 1e4) }).catch(() => void 0);
+      if (settleMs > 0) await wait(page, settleMs);
+      webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
+    }
+    while (!hasLoginContext(webContext) && Date.now() - startedAt < timeoutMs) {
       await wait(page, 250);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    if (!hasUsefulContext(webContext)) {
-      throw new Error("Trade Republic WAF context was not available after loading the web app.");
+    if (!hasLoginContext(webContext)) {
+      const missing = missingLoginContext(webContext);
+      throw new Error(formatLoginContextError(webContext, missing));
     }
     return webContext;
   } finally {
@@ -558,10 +600,51 @@ function firstStorageValue(storage, needles) {
   }
   return void 0;
 }
-function hasUsefulContext(context) {
-  return Boolean(
-    context.awsWafToken || context.headers?.["x-aws-waf-token"] || context.cookieHeader || Object.keys(context.cookies ?? {}).length > 0
-  );
+function hasLoginContext(context) {
+  return missingLoginContext(context).length === 0;
+}
+function missingLoginContext(context) {
+  const headers = context.headers ?? {};
+  const missing = [];
+  if (!(context.awsWafToken || headers["x-aws-waf-token"])) missing.push("x-aws-waf-token");
+  if (!(context.cookieHeader || Object.keys(context.cookies ?? {}).length > 0)) missing.push("cookie");
+  if (!headers["x-tr-app-version"]) missing.push("x-tr-app-version");
+  if (!headers["x-tr-platform"]) missing.push("x-tr-platform");
+  if (!headers["x-tr-device-info"]) missing.push("x-tr-device-info");
+  return missing;
+}
+function formatLoginContextError(context, missing) {
+  const headers = context.headers ?? {};
+  const presentHeaders = [
+    "x-aws-waf-token",
+    "x-xsrf-token",
+    "x-tr-app-version",
+    "x-tr-platform",
+    "x-tr-device-info",
+    "accept-language",
+    "cookie"
+  ].filter((name) => Boolean(headers[name]));
+  const cookieNames = Object.keys(context.cookies ?? {}).sort();
+  const details = [
+    `Missing: ${missing.join(", ") || "none"}`,
+    `Present headers: ${presentHeaders.join(", ") || "none"}`,
+    `Header preview: ${formatHeaderPreview(headers)}`,
+    `Cookie names: ${cookieNames.join(", ") || "none"}`
+  ];
+  return `Trade Republic login context was incomplete after loading the web app. ${details.join(" | ")}`;
+}
+function formatHeaderPreview(headers) {
+  const previewNames = ["x-tr-app-version", "x-tr-platform", "x-tr-device-info", "x-aws-waf-token", "x-xsrf-token"];
+  const preview = previewNames.flatMap((name) => {
+    const value = headers[name];
+    return value ? [`${name}=${redactHeaderValue(value)}`] : [];
+  });
+  return preview.join(", ") || "none";
+}
+function redactHeaderValue(value) {
+  const trimmed = value.trim();
+  if (trimmed.length <= 16) return trimmed;
+  return `${trimmed.slice(0, 8)}...${trimmed.slice(-4)}`;
 }
 function normalizeHeaders(headers) {
   return Object.fromEntries(
@@ -627,17 +710,53 @@ var AuthApi = class {
   sessionStore;
   onSessionReady;
   async createInstantLogin(options = {}) {
+    const basePayload = stripUndefined({
+      phoneNumber: options.phoneNumber,
+      deviceName: options.deviceName
+    });
+    let raw;
+    try {
+      raw = await this.http.request(
+        "POST",
+        this.endpoints.resolve("auth.qrChallenge"),
+        basePayload,
+        void 0,
+        { signal: options.signal }
+      );
+    } catch (error) {
+      if (!(error instanceof TradeRepublicHttpError) || options.phoneNumber !== void 0) throw error;
+      raw = await this.http.request(
+        "POST",
+        this.endpoints.resolve("auth.qrChallenge"),
+        {
+          ...basePayload,
+          phoneNumber: ""
+        },
+        void 0,
+        { signal: options.signal }
+      );
+    }
+    return normalizeChallenge(raw);
+  }
+  async startLoginWithPin(options) {
     const raw = await this.http.request(
       "POST",
-      this.endpoints.resolve("auth.qrChallenge"),
-      stripUndefined({
+      this.endpoints.resolve("auth.login"),
+      {
         phoneNumber: options.phoneNumber,
-        deviceName: options.deviceName
-      }),
+        pin: options.pin
+      },
       void 0,
-      { signal: options.signal }
+      {
+        signal: options.signal,
+        headers: options.otpLess ? { "X-TR-OTP-Less": "true" } : void 0
+      }
     );
-    return normalizeChallenge(raw);
+    return extractLoginProgressState(raw);
+  }
+  async loginWithPin(options) {
+    const progress = await this.startLoginWithPin(options);
+    return this.pollLoginProgress(progress, options);
   }
   async pollInstantLogin(challenge, options = {}) {
     const intervalMs = options.intervalMs ?? 1500;
@@ -718,6 +837,9 @@ var AuthApi = class {
     }
     throw new Error("Timed out while waiting for Trade Republic instant login approval.");
   }
+  async pollLoginProcess(processId, options = {}) {
+    return this.pollLoginProgress({ status: void 0, processId, session: void 0 }, options);
+  }
   async restoreSession() {
     const session = await this.sessionStore?.load();
     if (session) this.setSession(session);
@@ -772,6 +894,59 @@ var AuthApi = class {
     this.setSession(finalizedSession);
     await this.sessionStore?.save(finalizedSession);
     return finalizedSession;
+  }
+  async pollLoginProgress(progress, options) {
+    const intervalMs = options.intervalMs ?? 1500;
+    const timeoutMs = options.timeoutMs ?? 12e4;
+    const startedAt = Date.now();
+    let processId = progress.processId;
+    let accumulatedSession = mergeSessions(this.getSession(), progress.session);
+    if (accumulatedSession) this.setSession(accumulatedSession);
+    debugLog(options.debug, "poll:process:start", {
+      processId: processId ?? null,
+      status: progress.status ?? null,
+      hasSession: Boolean(progress.session)
+    });
+    while (Date.now() - startedAt <= timeoutMs) {
+      if (options.signal?.aborted) throw options.signal.reason;
+      const status = normalizeStatus(progress.status);
+      const processSession = progress.session ?? (isAuthenticatedStatus(status) ? accumulatedSession : void 0);
+      if (processSession) {
+        const completedSession = await this.completeWebSession(processSession, options);
+        const finalizedSession = await this.finalizeSession(completedSession);
+        debugLog(options.debug, "poll:session", summarizeSession(finalizedSession));
+        return finalizedSession;
+      }
+      processId = progress.processId ?? processId;
+      if (!processId) {
+        if (isTerminalFailureStatus(status)) throw new Error(`Trade Republic login failed: ${progress.status ?? "unknown"}.`);
+        throw new Error("Trade Republic login did not return a process id or session.");
+      }
+      if (isTerminalFailureStatus(status)) {
+        throw new Error(`Trade Republic login failed during process step: ${progress.status ?? "unknown"}.`);
+      }
+      await delay(intervalMs);
+      const response = await this.http.requestDetailed(
+        "GET",
+        this.endpoints.resolve("auth.loginProcess", { processId }),
+        void 0,
+        void 0,
+        { signal: options.signal }
+      );
+      const processRaw = response.body;
+      progress = extractLoginProgressState(processRaw);
+      const processCookieSession = extractCookieSession(response.headers);
+      accumulatedSession = rememberProgressSession(accumulatedSession, processCookieSession, this.setSession);
+      debugLog(options.debug, "poll:process", {
+        processId,
+        status: progress.status ?? null,
+        responseKeys: objectKeys(processRaw),
+        responseBody: processRaw,
+        setCookieNames: Object.keys(processCookieSession?.cookies ?? {}),
+        hasSession: Boolean(progress.session)
+      });
+    }
+    throw new Error("Timed out while waiting for Trade Republic login approval.");
   }
 };
 function normalizeChallenge(raw) {
@@ -1036,6 +1211,7 @@ function dedupeCandles(candles) {
 var DEFAULT_ENDPOINTS = {
   "auth.qrChallenge": "/api/v2/auth/web/login/qr-challenges",
   "auth.qrStatus": "/api/v2/auth/web/login/qr-challenges/{challengeId}",
+  "auth.login": "/api/v2/auth/web/login",
   "auth.loginProcess": "/api/v2/auth/web/login/processes/{processId}",
   "auth.account": "/api/v2/auth/account",
   "auth.session": "/api/v1/auth/web/session",
@@ -1071,44 +1247,6 @@ var EndpointResolver = class {
     }
     return path;
   }
-};
-
-// src/errors.ts
-var TradeRepublicError = class extends Error {
-  constructor(message, cause) {
-    super(message);
-    this.cause = cause;
-    this.name = "TradeRepublicError";
-  }
-  cause;
-};
-var TradeRepublicHttpError = class extends TradeRepublicError {
-  constructor(message, status, responseBody) {
-    super(message);
-    this.status = status;
-    this.responseBody = responseBody;
-    this.name = "TradeRepublicHttpError";
-  }
-  status;
-  responseBody;
-};
-var TradeRepublicProtocolError = class extends TradeRepublicError {
-  constructor(message, cause) {
-    super(message, cause);
-    this.name = "TradeRepublicProtocolError";
-  }
-};
-var TradeRepublicSchemaError = class extends TradeRepublicError {
-  constructor(message, schemaName, issues, rawSummary, cause) {
-    super(message, cause);
-    this.schemaName = schemaName;
-    this.issues = issues;
-    this.rawSummary = rawSummary;
-    this.name = "TradeRepublicSchemaError";
-  }
-  schemaName;
-  issues;
-  rawSummary;
 };
 
 // src/http.ts
@@ -1727,18 +1865,20 @@ var TradeRepublicClient = class _TradeRepublicClient {
     this.resources = new ResourceClient(this.http, this.endpoints, this.raw, this.validateRaw);
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
-    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
-    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    const getAccountNumber = () => this.securitiesAccountNumber ?? this.session?.securitiesAccountNumber;
+    const resolveAccountNumberFromRest = () => this.resolveSecuritiesAccountNumberFromRest();
+    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
+    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
     this.market = new MarketApi(this.resources);
     this.timeline = new TimelineApi(this.raw, this.validateRaw);
     this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
     this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
-    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
     this.discovery = new DiscoveryApi(this.http, this.validateRaw);
     this.documents = new DocumentsApi(this.http, this.validateRaw);
     this.tax = new TaxApi(this.http, this.validateRaw);
     this.payments = new PaymentsApi(this.http, this.validateRaw);
-    this.web = new WebApi(this.http, this.raw, () => this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value));
+    this.web = new WebApi(this.http, this.raw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
   }
   static create(options = {}) {
     return new _TradeRepublicClient(options);
@@ -1776,11 +1916,17 @@ var TradeRepublicClient = class _TradeRepublicClient {
       return session;
     }
     try {
-      const accountNumber = await resolveSecuritiesAccountNumber(this.raw, this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value), 5e3);
+      const accountNumber = await resolveSecuritiesAccountNumber(this.raw, this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value), 5e3, () => this.resolveSecuritiesAccountNumberFromRest());
       return { ...session, securitiesAccountNumber: accountNumber };
     } catch {
       return session;
     }
+  }
+  async resolveSecuritiesAccountNumberFromRest() {
+    const account = await this.account.current();
+    const accountNumber = firstStringByKey(account, "securitiesAccountNumber");
+    if (accountNumber) this.setSecuritiesAccountNumber(accountNumber);
+    return accountNumber;
   }
 };
 function withWebContext(session, webContext) {
@@ -1910,13 +2056,14 @@ var DerivativesApi = class {
   }
 };
 var OrdersApi = class {
-  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
     this.http = http;
     this.endpoints = endpoints;
     this.raw = raw;
     this.validateRaw = validateRaw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
+    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
   }
   http;
   endpoints;
@@ -1924,6 +2071,7 @@ var OrdersApi = class {
   validateRaw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
+  resolveSecuritiesAccountNumberFallback;
   async open(options = {}) {
     const orders = await this.all(options);
     return orders.filter(isOpenOrder);
@@ -1937,7 +2085,7 @@ var OrdersApi = class {
   }
   async rawAll(options = {}) {
     const { filters, secAccNo: providedSecAccNo, ...rest } = options;
-    const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
     return validated(this.validateRaw, "orders.all", this.http.request("GET", this.endpoints.resolve("orders.all"), void 0, {
       secAccNo,
       page: rest.page ?? numberString(rest.cursor) ?? 1,
@@ -1984,7 +2132,7 @@ var OrdersApi = class {
     })).map((raw) => this.validateRaw("orders.orderUpdates", raw));
   }
   async rawOrderUpdates(secAccNo) {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
     return validated(this.validateRaw, "orders.orderUpdates", this.raw.query({
       type: "orderUpdates",
       selector: { case: "bySecAccNo", value: { accountNumber } }
@@ -1996,13 +2144,14 @@ function isOpenOrder(order) {
   return status === "OPEN" || status === "OPENED" || status === "PARTIALLYFILLED" || status === "PARTIALLY_FILLED" || status === "RECEIVED";
 }
 var PortfolioApi = class {
-  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
     this.http = http;
     this.endpoints = endpoints;
     this.raw = raw;
     this.validateRaw = validateRaw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
+    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
   }
   http;
   endpoints;
@@ -2010,6 +2159,7 @@ var PortfolioApi = class {
   validateRaw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
+  resolveSecuritiesAccountNumberFallback;
   async current(options = {}) {
     const secAccNo = await this.resolveSecuritiesAccountNumber();
     const raw = await validated(this.validateRaw, "portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
@@ -2051,26 +2201,36 @@ var PortfolioApi = class {
     return normalizePortfolio(raw);
   }
   async resolveSecuritiesAccountNumber() {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
   }
 };
 function pickTimeoutOptions(options) {
   return options.timeoutMs ? { timeoutMs: options.timeoutMs } : void 0;
 }
-async function resolveSecuritiesAccountNumber(raw, cached, remember, timeoutMs) {
+async function resolveSecuritiesAccountNumber(raw, cached, remember, timeoutMs, fallback) {
   try {
     const accountPairs = await raw.query({ type: "accountPairs" }, timeoutMs ? { timeoutMs } : void 0);
-    const accountNumber = firstStringByKey(accountPairs, "securitiesAccountNumber");
-    if (accountNumber) {
-      remember?.(accountNumber);
-      return accountNumber;
+    const accountNumber2 = firstStringByKey(accountPairs, "securitiesAccountNumber");
+    if (accountNumber2) {
+      remember?.(accountNumber2);
+      return accountNumber2;
     }
   } catch {
     if (cached) return cached;
-    throw new Error("Trade Republic securities account number was not available from accountPairs.");
+    const accountNumber2 = await fallback?.();
+    if (accountNumber2) {
+      remember?.(accountNumber2);
+      return accountNumber2;
+    }
+    throw new Error("Trade Republic securities account number was not available from accountPairs or account profile.");
   }
   if (cached) return cached;
-  throw new Error("Trade Republic securities account number was not available from accountPairs.");
+  const accountNumber = await fallback?.();
+  if (accountNumber) {
+    remember?.(accountNumber);
+    return accountNumber;
+  }
+  throw new Error("Trade Republic securities account number was not available from accountPairs or account profile.");
 }
 function firstStringByKey(value, key) {
   if (Array.isArray(value)) {
@@ -2267,18 +2427,20 @@ var InstrumentsApi = class {
   }
 };
 var TradingApi = class {
-  constructor(http, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
     this.http = http;
     this.raw = raw;
     this.validateRaw = validateRaw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
+    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
   }
   http;
   raw;
   validateRaw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
+  resolveSecuritiesAccountNumberFallback;
   priceForOrder(options, queryOptions = {}) {
     return validated(this.validateRaw, "trading.priceForOrder", this.raw.query({ type: "priceForOrderV2", unit: "EUR", ...options }, pickTimeoutOptions(queryOptions)));
   }
@@ -2305,7 +2467,7 @@ var TradingApi = class {
     return validated(this.validateRaw, "trading.dailyPnl", this.http.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { items }));
   }
   resolveSecuritiesAccountNumber() {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
   }
 };
 var DiscoveryApi = class {
@@ -2461,16 +2623,18 @@ var PaymentsApi = class {
   }
 };
 var WebApi = class {
-  constructor(http, raw, getSecuritiesAccountNumber, setSecuritiesAccountNumber) {
+  constructor(http, raw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
     this.http = http;
     this.raw = raw;
     this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
     this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
+    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
   }
   http;
   raw;
   getSecuritiesAccountNumber;
   setSecuritiesAccountNumber;
+  resolveSecuritiesAccountNumberFallback;
   request(method, path, options = {}) {
     return this.http.request(method, path, options.body, options.query);
   }
@@ -2619,7 +2783,7 @@ var WebApi = class {
     return this.request("GET", "/api-gateway/screeners/api/v2/screeners/options");
   }
   async withSecAccNo(secAccNo, fn) {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber);
+    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
     return fn(accountNumber);
   }
 };

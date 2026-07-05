@@ -23,6 +23,8 @@ describe('collectTradeRepublicWebContext', () => {
       headers: {
         'x-aws-waf-token': 'waf-token',
         'x-tr-app-version': '1.2.3',
+        'x-tr-platform': 'web',
+        'x-tr-device-info': 'test-device',
       },
       cookies: {
         tr_session: 'session-cookie',
@@ -80,6 +82,8 @@ class FakePage implements TradeRepublicPageLike {
     const request = new FakeRequest('https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges', {
       'x-aws-waf-token': 'waf-token',
       'x-tr-app-version': '1.2.3',
+      'x-tr-platform': 'web',
+      'x-tr-device-info': 'test-device',
       cookie: 'tr_claims=claims-cookie',
     });
     this.emitContextRequest(request);

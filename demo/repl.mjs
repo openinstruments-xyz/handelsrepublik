@@ -5,8 +5,8 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
-import QRCode from 'qrcode';
-import { FileSessionStore, TradeRepublicClient } from '../dist/index.js';
+import qrcodeTerminal from 'qrcode-terminal';
+import { collectTradeRepublicWebContext, FileSessionStore, TradeRepublicClient } from '../dist/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sessionPath = process.env.TR_SESSION_FILE || join(here, '.demo-session.json');
@@ -14,7 +14,7 @@ const configPath = process.env.TR_CONFIG_FILE || join(here, '.demo-config.json')
 const legacyScratchpadConfigPath = join(here, '..', 'scratchpad', '.scratchpad-config.json');
 const sessionStoreConfig = createSessionStore();
 const sessionStore = sessionStoreConfig.store;
-const runtimeConfig = await loadRuntimeConfig();
+let runtimeConfig = await loadRuntimeConfig();
 const EXAMPLE_ASSET_ID = 'US0378331005';
 const EXAMPLE_QUERY = 'apple';
 const EXAMPLE_QUOTE_EXCHANGE_ID = 'LSX';
@@ -24,6 +24,7 @@ const client = TradeRepublicClient.create({
   sessionStore,
   defaultHeaders: defaultHeadersFromConfig(runtimeConfig),
 });
+useRuntimeWebContext(runtimeConfig);
 let sessionRefreshTimer = null;
 let sessionRefreshInFlight = false;
 let replInterface;
@@ -32,7 +33,7 @@ let replPrompt = 'traderepublic> ';
 let inputQueue = Promise.resolve();
 
 const helperSignatures = new Map([
-  ['loginQr', 'loginQr(phoneNumber?: string, options?: { deviceName?: string; intervalMs?: number; timeoutMs?: number; debug?: boolean })'],
+  ['loginQr', 'loginQr(phoneNumber?: string, pinOrOptions?: string | { pin?: string; deviceName?: string; intervalMs?: number; timeoutMs?: number; debug?: boolean })'],
   ['restore', 'restore()'],
   ['refresh', 'refresh()'],
   ['clear', 'clear()'],
@@ -142,18 +143,34 @@ function createSessionStore() {
   };
 }
 
-async function loginQr(phoneNumber, options = {}) {
+async function loginQr(phoneNumber, pinOrOptions = {}) {
+  const options = typeof pinOrOptions === 'string' ? { pin: pinOrOptions } : pinOrOptions;
   const resolvedPhoneNumber = phoneNumber ?? process.env.TR_PHONE_NUMBER;
-  if (!resolvedPhoneNumber) {
-    throw new Error('Missing phone number. Call loginQr("+491...") or set TR_PHONE_NUMBER.');
-  }
-  const missingContext = missingLoginContext(runtimeConfig);
-  if (missingContext.length > 0) {
-    throw new Error(`Missing Trade Republic web context: ${missingContext.join(', ')}. Set env vars or create ${configPath}. Run authContext() to inspect loaded context.`);
+  const resolvedPin = options.pin ?? process.env.TR_PIN;
+  await ensureLoginContext(options);
+
+  if (resolvedPin) {
+    if (!resolvedPhoneNumber) {
+      throw new Error('Missing phone number for PIN login. Call loginQr("+491...", "1234") or set TR_PHONE_NUMBER.');
+    }
+    const session = await client.auth.loginWithPin({
+      phoneNumber: resolvedPhoneNumber,
+      pin: resolvedPin,
+      otpLess: options.otpLess ?? false,
+      signal: options.signal,
+      intervalMs: options.intervalMs ?? 1500,
+      timeoutMs: options.timeoutMs ?? 10 * 60_000,
+      debug: options.debug ?? false,
+    });
+    const profile = await loginProfile();
+    scheduleSessionRefresh(session, {
+      messagePrefix: `Logged in successfully with security account number ${profile.securitiesAccountNumber ?? 'unknown'}, name: "${profile.name ?? 'unknown'}".`,
+    });
+    return session;
   }
 
   const challenge = await client.auth.createInstantLogin({
-    phoneNumber: resolvedPhoneNumber,
+    ...(resolvedPhoneNumber ? { phoneNumber: resolvedPhoneNumber } : {}),
     deviceName: options.deviceName ?? 'handelsrepublik demo repl',
   });
 
@@ -161,23 +178,21 @@ async function loginQr(phoneNumber, options = {}) {
   const displayedChallenge = {
     ...challenge,
     deepLink: challenge.deepLink ?? qrDetails.deepLink,
-    expiresAt: challenge.expiresAt ?? qrDetails.expiresAt,
+    expiresAt: qrDetails.expiresAt ?? challenge.expiresAt,
   };
 
   if (qrDetails.payload) {
-    console.log(await QRCode.toString(qrDetails.payload, { type: 'terminal', small: true }));
+    await writeConsoleLine(renderTerminalQr(qrDetails.payload));
   } else {
-    console.warn('QR payload was not returned by Trade Republic. Challenge details:', {
+    throw new Error(`Trade Republic did not return a QR payload for challenge ${challenge.id}.`);
+  }
+  if (options.debug) {
+    console.log({
       challengeId: challenge.id,
       expiresAt: displayedChallenge.expiresAt ?? null,
-      hasQrCodeDataUrl: Boolean(challenge.qrCodeDataUrl),
+      deepLink: displayedChallenge.deepLink ?? null,
     });
   }
-  console.log({
-    challengeId: challenge.id,
-    expiresAt: displayedChallenge.expiresAt ?? null,
-    deepLink: displayedChallenge.deepLink ?? null,
-  });
 
   const stopCountdown = startQrCountdown(displayedChallenge.expiresAt);
   try {
@@ -193,6 +208,44 @@ async function loginQr(phoneNumber, options = {}) {
     return session;
   } finally {
     stopCountdown();
+  }
+}
+
+async function ensureLoginContext(options = {}) {
+  runtimeConfig = currentRuntimeConfig();
+  const missingContext = missingLoginContext(runtimeConfig);
+  if (missingContext.length === 0) {
+    useRuntimeWebContext(runtimeConfig);
+    return;
+  }
+
+  const browser = await launchBrowserForLoginContext();
+  try {
+    console.log(`Collecting Trade Republic web context (${missingContext.join(', ')} missing)...`);
+    const webContext = await collectTradeRepublicWebContext(browser, {
+      timeoutMs: options.webContextTimeoutMs ?? options.contextTimeoutMs ?? 60_000,
+      settleMs: options.webContextSettleMs ?? 1_000,
+    });
+    client.useWebContext(webContext);
+    runtimeConfig = {
+      ...runtimeConfig,
+      ...runtimeConfigFromWebContext(webContext),
+    };
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}
+
+async function launchBrowserForLoginContext() {
+  const { chromium } = await import('playwright');
+  try {
+    return await chromium.launch({ headless: false, channel: 'chrome' });
+  } catch {
+    try {
+      return await chromium.launch({ headless: false });
+    } catch {
+      return await chromium.launch({ headless: true });
+    }
   }
 }
 
@@ -214,7 +267,7 @@ async function loginProfile() {
 async function resolveQrChallengeDetails(challenge) {
   const inlinePayload = challenge.qrCode ?? challenge.deepLink;
   const inlineExpiresAt = firstString(challenge.expiresAt);
-  if (inlinePayload || inlineExpiresAt) {
+  if (inlinePayload) {
     return {
       payload: inlinePayload,
       deepLink: challenge.deepLink,
@@ -230,7 +283,7 @@ async function resolveQrChallengeDetails(challenge) {
     return {
       payload: firstString(detail.qrCodePayload, detail.qrCode, detail.deepLink),
       deepLink: firstString(detail.deepLink, detail.qrCodePayload),
-      expiresAt: firstString(detail.expiresAt, detail.challengeExpiresAt, detail.qrCodeTokenExpiresAt, detail.expiration),
+      expiresAt: firstString(detail.qrCodeTokenExpiresAt, detail.expiresAt, detail.expiration, detail.challengeExpiresAt),
     };
   } catch (error) {
     printFullError(error);
@@ -268,6 +321,20 @@ function startQrCountdown(expiresAt) {
     readline.cursorTo(process.stdout, 0);
     process.stdout.write('\n');
   };
+}
+
+function renderTerminalQr(payload) {
+  let rendered = '';
+  qrcodeTerminal.generate(payload, { small: true }, (output) => {
+    rendered = output;
+  });
+  return rendered;
+}
+
+function writeConsoleLine(value) {
+  return new Promise((resolve) => {
+    process.stdout.write(`${value}\n`, resolve);
+  });
 }
 
 function formatCountdown(expiresAtMs) {
@@ -1118,17 +1185,19 @@ async function fixedSavingsValuation(instrumentId = EXAMPLE_ASSET_ID, accountNum
 }
 
 function authContext() {
+  const config = currentRuntimeConfig();
   return {
     configPath,
     legacyScratchpadConfigPath,
-    hasAwsWafToken: Boolean(runtimeConfig.awsWafToken),
-    hasCookie: Boolean(runtimeConfig.cookie),
-    hasXsrfToken: Boolean(runtimeConfig.xsrfToken),
-    hasTrAppVersion: Boolean(runtimeConfig.trAppVersion),
-    hasTrPlatform: Boolean(runtimeConfig.trPlatform),
-    hasTrDeviceInfo: Boolean(runtimeConfig.trDeviceInfo),
-    acceptLanguage: runtimeConfig.acceptLanguage || null,
-    missingForLogin: missingLoginContext(runtimeConfig),
+    hasAwsWafToken: Boolean(config.awsWafToken),
+    hasCookie: Boolean(config.cookie),
+    hasXsrfToken: Boolean(config.xsrfToken),
+    hasTrAppVersion: Boolean(config.trAppVersion),
+    hasTrPlatform: Boolean(config.trPlatform),
+    hasTrDeviceInfo: Boolean(config.trDeviceInfo),
+    hasSessionWebContext: Boolean(client.getSession()?.webContext),
+    acceptLanguage: config.acceptLanguage || null,
+    missingForLogin: missingLoginContext(config),
   };
 }
 
@@ -1167,6 +1236,81 @@ function defaultHeadersFromConfig(config) {
   if (config.trDeviceInfo) headers['x-tr-device-info'] = config.trDeviceInfo;
   if (config.acceptLanguage) headers['accept-language'] = config.acceptLanguage;
   return headers;
+}
+
+function useRuntimeWebContext(config) {
+  const webContext = webContextFromRuntimeConfig(config);
+  if (webContext) client.useWebContext(webContext);
+}
+
+function webContextFromRuntimeConfig(config) {
+  const headers = defaultHeadersFromConfig(config);
+  const cookies = parseCookieHeader(config.cookie);
+  const webContext = {};
+  if (Object.keys(headers).length > 0) webContext.headers = headers;
+  if (Object.keys(cookies).length > 0) webContext.cookies = cookies;
+  if (config.cookie) webContext.cookieHeader = config.cookie;
+  if (config.awsWafToken) webContext.awsWafToken = config.awsWafToken;
+  if (config.xsrfToken) webContext.xsrfToken = config.xsrfToken;
+  return Object.keys(webContext).length > 0 ? webContext : undefined;
+}
+
+function runtimeConfigFromWebContext(webContext) {
+  const headers = normalizeHeaderNames(webContext.headers);
+  const cookies = webContext.cookies ?? {};
+  return {
+    awsWafToken: cleanString(webContext.awsWafToken ?? headers['x-aws-waf-token']),
+    xsrfToken: cleanString(webContext.xsrfToken ?? headers['x-xsrf-token'] ?? cookies['XSRF-TOKEN']),
+    cookie: cleanString(webContext.cookieHeader ?? serializeCookieRecord(cookies)),
+    trAppVersion: cleanString(headers['x-tr-app-version']),
+    trPlatform: cleanString(headers['x-tr-platform']),
+    trDeviceInfo: cleanString(headers['x-tr-device-info']),
+    acceptLanguage: cleanString(headers['accept-language']),
+  };
+}
+
+function currentRuntimeConfig() {
+  return mergeRuntimeConfig(
+    runtimeConfig,
+    runtimeConfigFromWebContext(client.getSession()?.webContext ?? {}),
+  );
+}
+
+function mergeRuntimeConfig(...configs) {
+  const result = {};
+  for (const config of configs) {
+    for (const [key, value] of Object.entries(config ?? {})) {
+      if (cleanString(value)) result[key] = cleanString(value);
+    }
+  }
+  return result;
+}
+
+function normalizeHeaderNames(headers = {}) {
+  return Object.fromEntries(
+    Object.entries(headers)
+      .filter(([, value]) => typeof value === 'string' && value.length > 0)
+      .map(([key, value]) => [key.toLowerCase(), value]),
+  );
+}
+
+function parseCookieHeader(cookieHeader) {
+  const cookies = {};
+  for (const part of (cookieHeader ?? '').split(';')) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.indexOf('=');
+    if (separator <= 0) continue;
+    cookies[trimmed.slice(0, separator).trim()] = trimmed.slice(separator + 1).trim();
+  }
+  return cookies;
+}
+
+function serializeCookieRecord(cookies) {
+  return Object.entries(cookies ?? {})
+    .filter(([, value]) => typeof value === 'string' && value.length > 0)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('; ');
 }
 
 function missingLoginContext(config) {
@@ -1289,7 +1433,7 @@ function help() {
   return {
     client: 'TradeRepublicClient instance',
     tr: 'Alias for client',
-    loginQr: 'loginQr("+491...") or set TR_PHONE_NUMBER and run loginQr()',
+    loginQr: 'loginQr() shows a QR code; loginQr("+491...", "1234") logs in with phone + PIN',
     restore: 'restore()',
     refresh: 'refresh()',
     clear: 'await clear()',

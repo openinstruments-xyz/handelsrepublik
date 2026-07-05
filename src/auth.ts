@@ -1,4 +1,5 @@
 import type { EndpointResolver } from './endpoints.js';
+import { TradeRepublicHttpError } from './errors.js';
 import type { HttpClient } from './http.js';
 import { asRecord } from './normalizers.js';
 import type { InstantLoginChallenge, Session, SessionStore } from './types.js';
@@ -10,6 +11,15 @@ export interface CreateInstantLoginOptions {
   signal?: AbortSignal;
 }
 
+export interface StartLoginWithPinOptions {
+  phoneNumber: string;
+  pin: string;
+  otpLess?: boolean | undefined;
+  signal?: AbortSignal;
+}
+
+export interface LoginWithPinOptions extends StartLoginWithPinOptions, PollInstantLoginOptions {}
+
 export interface PollInstantLoginOptions {
   intervalMs?: number;
   timeoutMs?: number;
@@ -17,7 +27,7 @@ export interface PollInstantLoginOptions {
   debug?: boolean;
 }
 
-interface LoginProgressState {
+export interface LoginProgressState {
   status: string | undefined;
   processId: string | undefined;
   session: Session | undefined;
@@ -36,17 +46,55 @@ export class AuthApi {
   ) {}
 
   async createInstantLogin(options: CreateInstantLoginOptions = {}): Promise<InstantLoginChallenge> {
+    const basePayload = stripUndefined({
+      phoneNumber: options.phoneNumber,
+      deviceName: options.deviceName,
+    });
+    let raw: unknown;
+    try {
+      raw = await this.http.request<unknown>(
+        'POST',
+        this.endpoints.resolve('auth.qrChallenge'),
+        basePayload,
+        undefined,
+        { signal: options.signal },
+      );
+    } catch (error) {
+      if (!(error instanceof TradeRepublicHttpError) || options.phoneNumber !== undefined) throw error;
+      raw = await this.http.request<unknown>(
+        'POST',
+        this.endpoints.resolve('auth.qrChallenge'),
+        {
+          ...basePayload,
+          phoneNumber: '',
+        },
+        undefined,
+        { signal: options.signal },
+      );
+    }
+    return normalizeChallenge(raw);
+  }
+
+  async startLoginWithPin(options: StartLoginWithPinOptions): Promise<LoginProgressState> {
     const raw = await this.http.request<unknown>(
       'POST',
-      this.endpoints.resolve('auth.qrChallenge'),
-      stripUndefined({
+      this.endpoints.resolve('auth.login'),
+      {
         phoneNumber: options.phoneNumber,
-        deviceName: options.deviceName,
-      }),
+        pin: options.pin,
+      },
       undefined,
-      { signal: options.signal },
+      {
+        signal: options.signal,
+        headers: options.otpLess ? { 'X-TR-OTP-Less': 'true' } : undefined,
+      },
     );
-    return normalizeChallenge(raw);
+    return extractLoginProgressState(raw);
+  }
+
+  async loginWithPin(options: LoginWithPinOptions): Promise<Session> {
+    const progress = await this.startLoginWithPin(options);
+    return this.pollLoginProgress(progress, options);
   }
 
   async pollInstantLogin(challenge: Pick<InstantLoginChallenge, 'id'>, options: PollInstantLoginOptions = {}): Promise<Session> {
@@ -129,6 +177,10 @@ export class AuthApi {
     throw new Error('Timed out while waiting for Trade Republic instant login approval.');
   }
 
+  async pollLoginProcess(processId: string, options: PollInstantLoginOptions = {}): Promise<Session> {
+    return this.pollLoginProgress({ status: undefined, processId, session: undefined }, options);
+  }
+
   async restoreSession(): Promise<Session | undefined> {
     const session = await this.sessionStore?.load();
     if (session) this.setSession(session);
@@ -188,6 +240,60 @@ export class AuthApi {
     this.setSession(finalizedSession);
     await this.sessionStore?.save(finalizedSession);
     return finalizedSession;
+  }
+
+  private async pollLoginProgress(progress: LoginProgressState, options: PollInstantLoginOptions): Promise<Session> {
+    const intervalMs = options.intervalMs ?? 1500;
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    const startedAt = Date.now();
+    let processId = progress.processId;
+    let accumulatedSession: Session | undefined = mergeSessions(this.getSession(), progress.session);
+    if (accumulatedSession) this.setSession(accumulatedSession);
+    debugLog(options.debug, 'poll:process:start', {
+      processId: processId ?? null,
+      status: progress.status ?? null,
+      hasSession: Boolean(progress.session),
+    });
+    while (Date.now() - startedAt <= timeoutMs) {
+      if (options.signal?.aborted) throw options.signal.reason;
+      const status = normalizeStatus(progress.status);
+      const processSession = progress.session ?? (isAuthenticatedStatus(status) ? accumulatedSession : undefined);
+      if (processSession) {
+        const completedSession = await this.completeWebSession(processSession, options);
+        const finalizedSession = await this.finalizeSession(completedSession);
+        debugLog(options.debug, 'poll:session', summarizeSession(finalizedSession));
+        return finalizedSession;
+      }
+      processId = progress.processId ?? processId;
+      if (!processId) {
+        if (isTerminalFailureStatus(status)) throw new Error(`Trade Republic login failed: ${progress.status ?? 'unknown'}.`);
+        throw new Error('Trade Republic login did not return a process id or session.');
+      }
+      if (isTerminalFailureStatus(status)) {
+        throw new Error(`Trade Republic login failed during process step: ${progress.status ?? 'unknown'}.`);
+      }
+      await delay(intervalMs);
+      const response = await this.http.requestDetailed<unknown>(
+        'GET',
+        this.endpoints.resolve('auth.loginProcess', { processId }),
+        undefined,
+        undefined,
+        { signal: options.signal },
+      );
+      const processRaw = response.body;
+      progress = extractLoginProgressState(processRaw);
+      const processCookieSession = extractCookieSession(response.headers);
+      accumulatedSession = rememberProgressSession(accumulatedSession, processCookieSession, this.setSession);
+      debugLog(options.debug, 'poll:process', {
+        processId,
+        status: progress.status ?? null,
+        responseKeys: objectKeys(processRaw),
+        responseBody: processRaw,
+        setCookieNames: Object.keys(processCookieSession?.cookies ?? {}),
+        hasSession: Boolean(progress.session),
+      });
+    }
+    throw new Error('Timed out while waiting for Trade Republic login approval.');
   }
 }
 

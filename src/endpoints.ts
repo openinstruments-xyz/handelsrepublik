@@ -3,6 +3,7 @@ import type { EndpointKey, EndpointMap } from './types.js';
 export const DEFAULT_ENDPOINTS: Required<EndpointMap> = {
   'auth.qrChallenge': '/api/v2/auth/web/login/qr-challenges',
   'auth.qrStatus': '/api/v2/auth/web/login/qr-challenges/{challengeId}',
+  'auth.login': '/api/v2/auth/web/login',
   'auth.loginProcess': '/api/v2/auth/web/login/processes/{processId}',
   'auth.account': '/api/v2/auth/account',
   'auth.session': '/api/v1/auth/web/session',
