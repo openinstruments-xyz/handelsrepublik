@@ -6,8 +6,7 @@ This package is not affiliated with Trade Republic. It is based on observed web
 app traffic and can break when Trade Republic changes private endpoints,
 cookies, headers, mapper resource names, or response payloads.
 
-Use it for local automation, debugging, and research. Treat sessions, cookies,
-QR challenges, account payloads, documents, tax data, order data, and raw mapper
+Treat sessions, cookies, QR challenges, account payloads, documents, tax data, order data, and raw mapper
 responses as private secrets.
 
 Trade Republic market data may be subject to contractual restrictions. Check
@@ -35,9 +34,7 @@ npm install github:VIEWVIEWVIEW/handelsrepublik
 
 This package is ESM-only.
 
-Install Playwright too if you want the SDK to collect the browser/WAF context
-needed by Trade Republic's web login:
-
+To connect to TR you will need a WAF token. This project can capture the WAF token for you via Playwright. If you want to use that functionality, please install playwright like this:
 ```bash
 npm install playwright
 npx playwright install chromium
