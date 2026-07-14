@@ -1,0 +1,23 @@
+{
+  "destinations": [
+    {
+      "id": "LSX",
+      "name": "Lang & Schwarz Exchange",
+      "type": "EXCHANGE",
+      "orderModes": ["limit", "market", "stopMarket", "trailingStopMarket"],
+      "orderExpiries": ["gfd", "gtd"],
+      "listingId": "e7f9e2dc-0a04-423e-b76f-7bfe5a384c58",
+      "currencyId": "EUR",
+      "open": true,
+      "openTimeOffsetMillis": 27000000,
+      "closeTimeOffsetMillis": 82800000,
+      "timeZoneId": "Europe/Berlin",
+      "maintenanceWindow": null,
+      "ongoingOutage": false,
+      "priority": 10,
+      "tickSizes": null
+    }
+  ],
+  "preferredMarketDataProvider": "LSX",
+  "preferredOrderDestination": "LSX"
+}

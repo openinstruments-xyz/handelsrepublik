@@ -1770,6 +1770,14 @@ var normalizedArrayWrappers = z.union([
   z.strictObject({ accounts: z.array(jsonValue) }),
   z.strictObject({ obj: z.strictObject({ items: z.array(jsonValue) }) })
 ]);
+var orderDestinationsResponseSchema = z.union([
+  normalizedArrayWrappers,
+  z.strictObject({
+    destinations: z.array(jsonValue),
+    preferredMarketDataProvider: optionalNullableString,
+    preferredOrderDestination: optionalNullableString
+  })
+]);
 var accountSchema = z.object({
   account: jsonValue.optional(),
   phoneNumber: z.string().optional(),
@@ -1866,7 +1874,7 @@ var schemaRegistry = [
   entry("instruments.yieldToMaturity", "Yield to maturity", "websocket", "read", "yieldToMaturity", jsonValue),
   entry("trading.priceForOrder", "Price for order quote", "websocket", "read", "priceForOrderV2", jsonValue),
   entry("trading.availableSize", "Available size", "websocket", "read", "availableSize", jsonValue),
-  entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", normalizedArrayWrappers),
+  entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", orderDestinationsResponseSchema),
   entry("trading.trades", "Trades", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades", normalizedArrayWrappers),
   entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", jsonValue),
   entry("discovery.exchangeDetails", "Exchange details", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges-details", normalizedArrayWrappers),

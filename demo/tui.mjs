@@ -20,6 +20,13 @@ const minQrDisplayMs = 8_000;
 const nearExpiredQrRetryMs = 500;
 const l2ProbeTimeoutMs = 5_000;
 const searchDebounceMs = 300;
+const searchAssetClasses = [
+  { type: 'stock', label: 'Stocks' },
+  { type: 'crypto', label: 'Crypto' },
+  { type: 'etf', label: 'ETFs' },
+  { type: 'fund', label: 'Funds' },
+  { type: 'bond', label: 'Bonds' },
+];
 
 const screen = blessed.screen({
   smartCSR: true,
@@ -89,6 +96,7 @@ const state = {
   },
   search: {
     visible: false,
+    assetClassIndex: 0,
     query: '',
     results: [],
     selected: 0,
@@ -96,6 +104,8 @@ const state = {
     error: '',
     debounceTimer: undefined,
     requestGeneration: 0,
+    suppressNextSubmit: false,
+    focusResultsOnSubmit: false,
   },
   order: {
     visible: false,
@@ -176,7 +186,7 @@ const searchHeading = blessed.text({
   left: 2,
   right: 2,
   height: 1,
-  content: 'Type a query and press Enter, then select a result with Enter again.',
+  content: 'Tab / Shift-Tab moves focus. Use Left / Right on Asset class and Up / Down in Results.',
   style: {
     fg: 'white',
   },
@@ -190,7 +200,7 @@ const searchInput = blessed.textbox({
   height: 3,
   border: 'line',
   label: ' Query ',
-  inputOnFocus: true,
+  inputOnFocus: false,
   keys: true,
   mouse: true,
   vi: true,
@@ -200,9 +210,35 @@ const searchInput = blessed.textbox({
   },
 });
 
-const searchResults = blessed.list({
+const searchAssetTabs = blessed.listbar({
   parent: searchOverlay,
   top: 6,
+  left: 2,
+  right: 2,
+  height: 3,
+  border: 'line',
+  label: ' Asset class - Left / Right ',
+  keys: false,
+  mouse: true,
+  vi: true,
+  autoCommandKeys: false,
+  style: {
+    border: { fg: 'yellow' },
+    focus: { border: { fg: 'green' } },
+    selected: { bg: 'blue', fg: 'white', bold: true },
+    item: { fg: 'white' },
+    prefix: { fg: 'lightblack' },
+  },
+  commands: searchAssetClasses.map((assetClass, index) => ({
+    text: assetClass.label,
+    callback: () => selectSearchAssetClass(index),
+  })),
+});
+searchAssetTabs.enableKeys();
+
+const searchResults = blessed.list({
+  parent: searchOverlay,
+  top: 10,
   left: 2,
   right: 2,
   bottom: 1,
@@ -215,6 +251,7 @@ const searchResults = blessed.list({
   alwaysScroll: true,
   style: {
     border: { fg: 'yellow' },
+    focus: { border: { fg: 'green' } },
     selected: { bg: 'blue', fg: 'white' },
     item: { fg: 'white' },
   },
@@ -241,6 +278,58 @@ const orderPrompt = blessed.prompt({
 orderPrompt._.input.top = 14;
 orderPrompt._.okay.top = 16;
 orderPrompt._.cancel.top = 16;
+
+const orderChoice = blessed.box({
+  parent: screen,
+  top: 'center',
+  left: 'center',
+  width: '90%',
+  height: 24,
+  hidden: true,
+  border: 'line',
+  label: ' Order ',
+  tags: true,
+  keys: true,
+  vi: true,
+  style: {
+    border: { fg: 'yellow' },
+    fg: 'white',
+  },
+});
+
+const orderChoiceText = blessed.box({
+  parent: orderChoice,
+  top: 0,
+  left: 1,
+  right: 1,
+  height: 16,
+  tags: true,
+  wrap: true,
+  scrollable: true,
+  alwaysScroll: true,
+  content: '',
+});
+
+const orderChoiceList = blessed.list({
+  parent: orderChoice,
+  top: 16,
+  left: 1,
+  right: 1,
+  bottom: 0,
+  border: 'line',
+  label: ' Select with Enter ',
+  keys: true,
+  mouse: true,
+  vi: true,
+  scrollable: true,
+  alwaysScroll: true,
+  style: {
+    border: { fg: 'yellow' },
+    selected: { bg: 'blue', fg: 'white' },
+    item: { fg: 'white' },
+  },
+  items: [],
+});
 
 const orderMessage = blessed.message({
   parent: screen,
@@ -315,17 +404,30 @@ screen.key(['enter'], () => {
 });
 
 searchInput.on('submit', (value) => {
+  const suppress = state.search.suppressNextSubmit;
+  const focusResults = state.search.focusResultsOnSubmit;
+  state.search.suppressNextSubmit = false;
+  state.search.focusResultsOnSubmit = false;
+  if (suppress) return;
   const query = cleanString(value);
   if (!query) {
     resetSearchResults('Start typing to search.');
     render();
-    searchInput.focus();
+    if (focusResults) focusSearchInput();
     return;
   }
   clearTimeout(state.search.debounceTimer);
   state.search.debounceTimer = undefined;
   const generation = ++state.search.requestGeneration;
-  void runSearch(query, generation, { focusResults: true });
+  void runSearch(query, generation, { focusResults });
+});
+
+searchInput.on('cancel', () => {
+  closeSearch();
+});
+
+searchInput.on('focus', () => {
+  if (state.search.visible && !searchInput._reading) searchInput.readInput();
 });
 
 searchResults.on('select', async (_, index) => {
@@ -337,15 +439,52 @@ searchResults.on('select', async (_, index) => {
 
 searchResults.on('keypress', (ch, key) => {
   if (key.name === 'escape') closeSearch();
+  if (key.name === 'tab') cycleSearchFocus(searchResults, key.shift ? -1 : 1);
 });
 
-searchInput.on('keypress', (ch, key) => {
+searchAssetTabs.on('keypress', (ch, key) => {
   if (key.name === 'escape') {
     closeSearch();
     return;
   }
-  if (key.name === 'enter') return;
+  if (key.name === 'tab') {
+    cycleSearchFocus(searchAssetTabs, key.shift ? -1 : 1);
+    return;
+  }
+  if (key.name === 'left' || key.name === 'h') {
+    switchSearchAssetClass(-1);
+    return;
+  }
+  if (key.name === 'right' || key.name === 'l') {
+    switchSearchAssetClass(1);
+    return;
+  }
+  if (key.name === 'up') focusSearchInput();
+  if (key.name === 'down') searchResults.focus();
+});
+
+searchInput.on('keypress', (ch, key) => {
+  if ((key.ctrl && key.name === 'c') || key.full === 'C-c') {
+    void shutdown();
+    return;
+  }
+  if (key.name === 'enter') {
+    state.search.focusResultsOnSubmit = true;
+    return;
+  }
+  if (key.name === 'tab') {
+    const inputValue = searchInput.getValue();
+    suppressSearchSubmitForFocusChange();
+    cycleSearchFocus(searchInput, key.shift ? -1 : 1);
+    setImmediate(() => {
+      if (!state.search.visible) return;
+      searchInput.setValue(inputValue);
+      render();
+    });
+    return;
+  }
   if (key.name === 'down' && state.search.results.length) {
+    suppressSearchSubmitForFocusChange();
     searchResults.focus();
     return;
   }
@@ -382,14 +521,16 @@ function scheduleSearchFromInput() {
 
 async function runSearch(query, generation, options = {}) {
   if (!state.client || !state.search.visible || generation !== state.search.requestGeneration) return;
+  const assetClass = activeSearchAssetClass();
   state.search.query = query;
   state.search.loading = true;
   state.search.error = '';
-  searchResults.setItems(['Searching...']);
+  searchResults.setLabel(` ${assetClass.label} results `);
+  searchResults.setItems([`Searching ${assetClass.label.toLowerCase()}...`]);
   render();
 
   try {
-    const results = await state.client.assets.search(query, { limit: 12 });
+    const results = await state.client.assets.search(query, { limit: 12, type: assetClass.type });
     if (!state.search.visible || generation !== state.search.requestGeneration) return;
     state.search.results = results;
     state.search.selected = 0;
@@ -407,7 +548,7 @@ async function runSearch(query, generation, options = {}) {
       state.search.loading = false;
       render();
       if (options.focusResults && state.search.results.length) searchResults.focus();
-      else searchInput.focus();
+      else if (screen.focused === searchInput && !searchInput._reading) searchInput.readInput();
     }
   }
 }
@@ -418,7 +559,66 @@ function resetSearchResults(message) {
   state.search.selected = 0;
   state.search.loading = false;
   state.search.error = '';
+  searchResults.setLabel(` ${activeSearchAssetClass().label} results `);
   searchResults.setItems([message]);
+}
+
+function activeSearchAssetClass() {
+  return searchAssetClasses[state.search.assetClassIndex] ?? searchAssetClasses[0];
+}
+
+function suppressSearchSubmitForFocusChange() {
+  state.search.suppressNextSubmit = true;
+  setImmediate(() => {
+    state.search.suppressNextSubmit = false;
+  });
+}
+
+function cycleSearchFocus(current, offset) {
+  const widgets = [searchInput, searchAssetTabs, searchResults];
+  const currentIndex = Math.max(widgets.indexOf(current), 0);
+  const nextIndex = (currentIndex + offset + widgets.length) % widgets.length;
+  if (widgets[nextIndex] === searchInput) focusSearchInput();
+  else widgets[nextIndex].focus();
+  render();
+}
+
+function focusSearchInput() {
+  searchInput.focus();
+  if (!searchInput._reading) searchInput.readInput();
+}
+
+function switchSearchAssetClass(offset) {
+  const nextIndex = (state.search.assetClassIndex + offset + searchAssetClasses.length) % searchAssetClasses.length;
+  selectSearchAssetClass(nextIndex);
+}
+
+function selectSearchAssetClass(index) {
+  const nextIndex = Math.min(Math.max(Number(index) || 0, 0), searchAssetClasses.length - 1);
+  const changed = nextIndex !== state.search.assetClassIndex;
+  state.search.assetClassIndex = nextIndex;
+  searchAssetTabs.select(nextIndex);
+  if (!state.search.visible || !changed) {
+    render();
+    return;
+  }
+
+  clearTimeout(state.search.debounceTimer);
+  state.search.debounceTimer = undefined;
+  const query = cleanString(searchInput.getValue());
+  const generation = ++state.search.requestGeneration;
+  state.search.loading = false;
+  state.search.error = '';
+  state.search.results = [];
+  state.search.selected = 0;
+
+  if (!query) {
+    resetSearchResults('Start typing to search.');
+    render();
+    return;
+  }
+
+  void runSearch(query, generation);
 }
 
 loginBox.key(['escape'], () => {
@@ -1215,28 +1415,84 @@ async function openOrderFlow() {
   state.order.submitting = false;
   closeSearch();
   try {
-    const command = await promptOrder([
+    const side = await selectOrderOption('Order side', [
       `{bold}${escapeTags(instrument.name || instrument.assetId)}{/bold} (${escapeTags(instrument.assetId)})`,
       '',
-      'Enter one of:',
-      '  buy market <quantity>',
-      '  sell market <quantity>',
-      '  buy amount <EUR>',
-      '  sell amount <EUR>',
-      '  buy limit <quantity> <limit-price>',
-      '  sell stop <quantity> <stop-price>',
-      '',
+      'Choose whether you want to buy or sell.',
       'Escape cancels. Nothing is sent at this step.',
-    ].join('\n'));
-    if (!command || !state.order.visible) return;
-    const parsed = parseOrderCommand(command);
-    state.status = `Preparing ${parsed.side} order preview.`;
+    ].join('\n'), [
+      { label: 'Buy', value: 'buy' },
+      { label: 'Sell', value: 'sell' },
+    ]);
+    if (!side || !state.order.visible) return;
+
+    state.status = `Loading ${side} order destinations.`;
     render();
 
-    const destinations = await state.client.trading.orderDestinations(instrument.assetId);
-    const eligibleDestinations = destinations.filter((item) => destinationSupportsOrder(item, parsed.mode, parsed.side));
-    const destination = eligibleDestinations.find((item) => item.id === instrument.exchangeId) ?? eligibleDestinations[0];
-    if (!destination?.id) throw new Error('Trade Republic returned no valid order destination for this instrument. Nothing was sent.');
+    const destinations = (await state.client.trading.orderDestinations(instrument.assetId, { side: side.toUpperCase() }))
+      .filter((item) => Boolean(item?.id))
+      .sort((left, right) => destinationSortRank(left, instrument.exchangeId) - destinationSortRank(right, instrument.exchangeId));
+    if (destinations.length === 0) throw new Error('Trade Republic returned no order destinations for this instrument. Nothing was sent.');
+
+    const destination = destinations.length === 1
+      ? destinations[0]
+      : await selectOrderOption('Order destination', [
+        `{bold}${escapeTags(instrument.name || instrument.assetId)}{/bold} (${escapeTags(instrument.assetId)})`,
+        '',
+        'Choose the venue. A closed or unavailable venue may still be selected;',
+        'Trade Republic will return the authoritative result during submission.',
+      ].join('\n'), destinations.map((item) => ({
+        label: formatDestinationOption(item),
+        value: item,
+      })));
+    if (!destination?.id || !state.order.visible) return;
+
+    const modeOptions = [
+      { label: 'Market order', value: 'market' },
+      { label: 'Limit order', value: 'limit' },
+      { label: 'Stop market order', value: 'stopMarket' },
+    ].filter((option) => destinationSupportsOrderMode(destination, option.value));
+    if (modeOptions.length === 0) throw new Error(`${destination.name || destination.id} returned no supported order types. Nothing was sent.`);
+
+    const mode = await selectOrderOption('Order type', [
+      `{bold}${escapeTags(instrument.name || instrument.assetId)}{/bold}`,
+      `Side: ${side.toUpperCase()}   Destination: ${escapeTags(destination.name || destination.id)} (${escapeTags(destination.id)})`,
+      '',
+      'Choose the order type.',
+    ].join('\n'), modeOptions);
+    if (!mode || !state.order.visible) return;
+
+    const size = await promptOrderNumber('Quantity', [
+      `{bold}${escapeTags(instrument.name || instrument.assetId)}{/bold}`,
+      `Side: ${side.toUpperCase()}   Type: ${formatOrderMode(mode)}`,
+      `Destination: ${escapeTags(destination.name || destination.id)} (${escapeTags(destination.id)})`,
+      '',
+      'Enter only the quantity, for example: 1 or 0.5',
+      'Escape cancels. Nothing is sent at this step.',
+    ].join('\n'));
+    if (size === undefined || !state.order.visible) return;
+
+    let orderPrice;
+    if (mode === 'limit' || mode === 'stopMarket') {
+      orderPrice = await promptOrderNumber(mode === 'limit' ? 'Limit price' : 'Stop price', [
+        `{bold}${escapeTags(instrument.name || instrument.assetId)}{/bold}`,
+        `Side: ${side.toUpperCase()}   Quantity: ${formatNumber(size)}`,
+        '',
+        `Enter only the ${mode === 'limit' ? 'limit' : 'stop'} price.`,
+        'Escape cancels. Nothing is sent at this step.',
+      ].join('\n'));
+      if (orderPrice === undefined || !state.order.visible) return;
+    }
+
+    const parsed = {
+      side,
+      mode,
+      size,
+      ...(mode === 'limit' ? { limit: orderPrice } : {}),
+      ...(mode === 'stopMarket' ? { stop: orderPrice } : {}),
+    };
+    state.status = `Preparing ${side} order preview.`;
+    render();
 
     let lastClientPrice;
     let executablePrice;
@@ -1260,13 +1516,12 @@ async function openOrderFlow() {
     };
     const preview = await state.client.orders.preview(options);
     validateOrderAgainstDashboard(options);
-    const phrase = parsed.amount !== undefined
-      ? `${parsed.side.toUpperCase()} EUR ${formatConfirmationNumber(parsed.amount)} ${instrument.assetId}`
-      : `${parsed.side.toUpperCase()} ${formatConfirmationNumber(parsed.size)} ${instrument.assetId}`;
-    const confirmation = await promptOrder(formatOrderPreview(preview, instrument, destination, executablePrice, phrase));
-    if (!confirmation || !state.order.visible) return;
-    if (confirmation.trim() !== phrase) {
-      await showOrderMessage('{yellow-fg}Confirmation did not match. Nothing was sent.{/yellow-fg}');
+    const confirmed = await selectOrderOption('Confirm real order', formatOrderPreview(preview, instrument, destination, executablePrice), [
+      { label: 'Cancel - nothing will be sent', value: false },
+      { label: 'Submit real order', value: true },
+    ]);
+    if (!confirmed || !state.order.visible) {
+      state.status = 'Order canceled. Nothing was sent.';
       return;
     }
 
@@ -1289,43 +1544,19 @@ async function openOrderFlow() {
     state.status = result.status === 'succeeded' ? 'Order submitted.' : `Order submission ended with ${result.status}.`;
     await Promise.allSettled([refreshAccount(), refreshTrades()]);
   } catch (error) {
-    await showOrderMessage(`{red-fg}${escapeTags(formatError(error))}{/red-fg}\n\nNothing was automatically retried. Check Open Orders before trying again.`);
+    const recoveryMessage = state.order.submitting
+      ? 'Nothing was automatically retried. Check Open Orders before trying again.'
+      : 'Nothing was sent.';
+    await showOrderMessage(`{red-fg}${escapeTags(formatError(error))}{/red-fg}\n\n${recoveryMessage}`);
     state.status = 'Order flow stopped.';
   } finally {
     state.order.visible = false;
     state.order.submitting = false;
     orderPrompt.hide();
+    orderChoice.hide();
     orderMessage.hide();
     render();
   }
-}
-
-function parseOrderCommand(command) {
-  const parts = command.trim().split(/\s+/);
-  const side = parts[0]?.toLowerCase();
-  const modeInput = parts[1]?.toLowerCase();
-  if (side !== 'buy' && side !== 'sell') throw new Error('Order must start with buy or sell.');
-  if (modeInput === 'amount') {
-    if (parts.length !== 3) throw new Error('Amount syntax: buy amount <EUR>.');
-    const amount = Number(parts[2]);
-    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be greater than zero.');
-    return { side, mode: 'market', amount };
-  }
-  const mode = modeInput === 'stop' ? 'stopMarket' : modeInput;
-  if (mode !== 'market' && mode !== 'limit' && mode !== 'stopMarket') throw new Error('Order mode must be market, limit, or stop.');
-  const size = Number(parts[2]);
-  if (!Number.isFinite(size) || size <= 0) throw new Error('Quantity must be greater than zero.');
-  if (mode === 'market' && parts.length !== 3) throw new Error('Market syntax: buy market <quantity>.');
-  if (mode !== 'market' && parts.length !== 4) throw new Error('Limit/stop syntax includes exactly one price.');
-  const price = mode === 'market' ? undefined : Number(parts[3]);
-  if (mode !== 'market' && (!Number.isFinite(price) || price <= 0)) throw new Error('Order price must be greater than zero.');
-  return {
-    side,
-    mode,
-    size,
-    ...(mode === 'limit' ? { limit: price } : {}),
-    ...(mode === 'stopMarket' ? { stop: price } : {}),
-  };
 }
 
 function validateOrderAgainstDashboard(options) {
@@ -1342,7 +1573,7 @@ function validateOrderAgainstDashboard(options) {
   }
 }
 
-function formatOrderPreview(preview, instrument, destination, executablePrice, phrase) {
+function formatOrderPreview(preview, instrument, destination, executablePrice) {
   const parameters = preview.order.parameters;
   return [
     '{yellow-fg}{bold}FINAL ORDER PREVIEW - submitting can execute a real trade{/bold}{/yellow-fg}',
@@ -1358,13 +1589,14 @@ function formatOrderPreview(preview, instrument, destination, executablePrice, p
     `Fees: ${formatMoney(preview.totalFees, preview.currency)}`,
     `Estimated total/proceeds: ${formatMoney(preview.estimatedTotal, preview.currency)}`,
     '',
-    `Type exactly: {bold}${escapeTags(phrase)}{/bold}`,
-    'Anything else cancels. The preview expires when this dialog closes.',
+    'Select Submit real order to continue. Cancel is selected by default.',
+    'The preview expires when this dialog closes.',
   ].filter(Boolean).join('\n');
 }
 
-function promptOrder(message) {
+function promptOrder(message, label = 'Order') {
   return new Promise((resolve) => {
+    orderPrompt.setLabel(` ${label} `);
     orderPrompt.show();
     orderPrompt.setFront();
     orderPrompt.input(message, '', (error, value) => {
@@ -1372,6 +1604,47 @@ function promptOrder(message) {
       if (error || value == null) resolve(undefined);
       else resolve(String(value));
     });
+    screen.render();
+  });
+}
+
+async function promptOrderNumber(label, message) {
+  const value = await promptOrder(message, label);
+  if (value === undefined) return undefined;
+  const number = Number(value.trim().replace(',', '.'));
+  if (!Number.isFinite(number) || number <= 0) throw new Error(`${label} must be a number greater than zero. Nothing was sent.`);
+  return number;
+}
+
+function selectOrderOption(label, message, options, initialIndex = 0) {
+  return new Promise((resolve) => {
+    if (!Array.isArray(options) || options.length === 0) {
+      resolve(undefined);
+      return;
+    }
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      orderChoiceList.removeListener('select', onSelect);
+      orderChoiceList.unkey(['escape', 'q'], onCancel);
+      orderChoice.hide();
+      screen.rewindFocus();
+      resolve(value);
+    };
+    const onSelect = (_item, index) => finish(options[index]?.value);
+    const onCancel = () => finish(undefined);
+
+    orderChoice.setLabel(` ${label} `);
+    orderChoiceText.setContent(message);
+    orderChoiceText.setScrollPerc(0);
+    orderChoiceList.setItems(options.map((option) => option.label));
+    orderChoiceList.select(Math.min(Math.max(initialIndex, 0), options.length - 1));
+    orderChoiceList.once('select', onSelect);
+    orderChoiceList.key(['escape', 'q'], onCancel);
+    orderChoice.show();
+    orderChoice.setFront();
+    orderChoiceList.focus();
     screen.render();
   });
 }
@@ -1388,21 +1661,33 @@ function showOrderMessage(message) {
   });
 }
 
-function formatConfirmationNumber(value) {
-  return Number(value).toString();
+function destinationSortRank(destination, selectedExchangeId) {
+  if (destination.id === selectedExchangeId) return -1_000;
+  const priority = Number(destination?.raw?.priority);
+  return Number.isFinite(priority) ? priority : 1_000;
 }
 
-function destinationSupportsOrder(destination, mode, side) {
+function destinationSupportsOrderMode(destination, mode) {
   const modes = destination?.raw?.orderModes;
-  if (Array.isArray(modes) && !modes.includes(mode)) return false;
-  if (mode === 'market' && destination?.raw?.open === false) return false;
-  const maintenance = destination?.raw?.maintenanceWindow;
-  const now = Date.now();
-  if (maintenance && now >= Number(maintenance.validFrom) && now <= Number(maintenance.validUntil)) {
-    if (side === 'buy' && maintenance.buyAllowed === false) return false;
-    if (side === 'sell' && maintenance.sellAllowed === false) return false;
-  }
-  return Boolean(destination?.id);
+  return Boolean(destination?.id) && (!Array.isArray(modes) || modes.includes(mode));
+}
+
+function formatDestinationOption(destination) {
+  const raw = destination?.raw ?? {};
+  const status = raw.ongoingOutage === true
+    ? 'outage reported'
+    : raw.open === true
+      ? 'open'
+      : raw.open === false
+        ? 'currently reported closed'
+        : 'status unknown';
+  const currency = cleanString(raw.currencyId);
+  return `${destination.name || destination.id} (${destination.id}) - ${status}${currency ? ` - ${currency}` : ''}`;
+}
+
+function formatOrderMode(mode) {
+  if (mode === 'stopMarket') return 'Stop market';
+  return `${mode.slice(0, 1).toUpperCase()}${mode.slice(1)}`;
 }
 
 function openSearch() {
@@ -1416,17 +1701,22 @@ function openSearch() {
   searchOverlay.show();
   searchOverlay.setFront();
   searchInput.setValue('');
-  searchResults.setItems(['Start typing to search.']);
-  searchInput.focus();
+  searchAssetTabs.select(state.search.assetClassIndex);
+  resetSearchResults('Start typing to search.');
+  focusSearchInput();
   render();
 }
 
 function closeSearch() {
+  if (!state.search.visible) return;
   clearTimeout(state.search.debounceTimer);
   state.search.debounceTimer = undefined;
   state.search.requestGeneration += 1;
+  state.search.suppressNextSubmit = false;
+  state.search.focusResultsOnSubmit = false;
   state.search.visible = false;
   searchOverlay.hide();
+  screen.rewindFocus();
   render();
 }
 

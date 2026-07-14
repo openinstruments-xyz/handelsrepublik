@@ -1030,7 +1030,11 @@ describe('TradeRepublicClient', () => {
         jsonResponse({ screeners: [] }),
         jsonResponse({ options: [] }),
         jsonResponse({ theme: 'dark' }),
-        jsonResponse({ destinations: [{ exchangeId: 'LSX', name: 'Lang & Schwarz' }] }),
+        jsonResponse({
+          destinations: [{ exchangeId: 'LSX', name: 'Lang & Schwarz' }],
+          preferredMarketDataProvider: 'LSX',
+          preferredOrderDestination: 'LSX',
+        }),
         jsonResponse({ trades: [{ tradeId: 't1', isin: 'US1', amount: { value: '12', currency: 'EUR' } }] }),
         jsonResponse({ pnl: 1 }),
         jsonResponse({ account: true }),

@@ -17,6 +17,7 @@ describe('schema registry', () => {
       ['priceAlarms.list', 'priceAlarms.list.json'],
       ['discovery.watchlists', 'discovery.watchlists.json'],
       ['market.candles', 'market.candles.json'],
+      ['trading.orderDestinations', 'trading.orderDestinations.json'],
     ] as const) {
       assert.doesNotThrow(() => validateRawResponse(fixture[0], readFixture(fixture[1])), fixture[0]);
     }
