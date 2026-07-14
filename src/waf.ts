@@ -46,7 +46,8 @@ export interface TradeRepublicCookieLike {
 const DEFAULT_APP_URL = 'https://app.traderepublic.com/';
 const DEFAULT_API_URL = 'https://api.traderepublic.com/';
 const DEFAULT_TIMEOUT_MS = 60_000;
-const DEFAULT_SETTLE_MS = 1_000;
+const DEFAULT_SETTLE_MS = 0;
+const WAF_POLL_INTERVAL_MS = 50;
 
 const RELEVANT_HEADER_NAMES = new Set([
   'accept-language',
@@ -78,17 +79,16 @@ export async function collectTradeRepublicWebContext(
     page.on?.('request', (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
     await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
     let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
-    if (!hasLoginContext(webContext)) {
-      await page.waitForLoadState?.('networkidle', { timeout: Math.min(timeoutMs, 10_000) }).catch(() => undefined);
-      if (settleMs > 0) await wait(page, settleMs);
+    if (!hasWafContext(webContext) && settleMs > 0) {
+      await wait(page, settleMs);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    while (!hasLoginContext(webContext) && Date.now() - startedAt < timeoutMs) {
-      await wait(page, 250);
+    while (!hasWafContext(webContext) && Date.now() - startedAt < timeoutMs) {
+      await wait(page, WAF_POLL_INTERVAL_MS);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    if (!hasLoginContext(webContext)) {
-      const missing = missingLoginContext(webContext);
+    if (!hasWafContext(webContext)) {
+      const missing = missingWafContext(webContext);
       throw new Error(formatLoginContextError(webContext, missing));
     }
     return webContext;
@@ -166,7 +166,7 @@ async function buildWebContext(
   return normalizeTradeRepublicWebContext({
     headers,
     cookies: { ...requestCookies, ...browserCookies },
-    awsWafToken: headers['x-aws-waf-token'] ?? storageTokens.awsWafToken,
+    awsWafToken: headers['x-aws-waf-token'] ?? browserCookies['aws-waf-token'] ?? storageTokens.awsWafToken,
     xsrfToken: headers['x-xsrf-token'] ?? browserCookies['XSRF-TOKEN'] ?? storageTokens.xsrfToken,
     capturedAt: new Date().toISOString(),
     metadata: {
@@ -192,7 +192,12 @@ async function readStorageTokens(page: TradeRepublicPageLike): Promise<{ awsWafT
       }
       return entries;
     });
-    const awsWafToken = firstStorageValue(storage, ['x-aws-waf-token', 'awsWafToken', 'aws-waf-token', 'waf']);
+    const awsWafToken = decodeStorageToken(firstStorageValue(storage, [
+      'awswaf_session_storage',
+      'x-aws-waf-token',
+      'awsWafToken',
+      'aws-waf-token',
+    ]));
     const xsrfToken = firstStorageValue(storage, ['x-xsrf-token', 'xsrf']);
     return {
       ...(awsWafToken ? { awsWafToken } : {}),
@@ -204,25 +209,44 @@ async function readStorageTokens(page: TradeRepublicPageLike): Promise<{ awsWafT
 }
 
 function firstStorageValue(storage: Record<string, string>, needles: string[]): string | undefined {
-  for (const [key, value] of Object.entries(storage)) {
-    const normalizedKey = key.toLowerCase();
-    if (needles.some((needle) => normalizedKey.includes(needle.toLowerCase())) && value.trim()) return value.trim();
+  const entries = Object.entries(storage);
+  for (const needle of needles) {
+    const normalizedNeedle = needle.toLowerCase();
+    const exact = entries.find(([key, value]) => key.toLowerCase() === normalizedNeedle && value.trim());
+    if (exact) return exact[1].trim();
+  }
+  for (const needle of needles) {
+    const normalizedNeedle = needle.toLowerCase();
+    const partial = entries.find(([key, value]) => key.toLowerCase().includes(normalizedNeedle) && value.trim());
+    if (partial) return partial[1].trim();
   }
   return undefined;
 }
 
-function hasLoginContext(context: TradeRepublicWebContext): boolean {
-  return missingLoginContext(context).length === 0;
+function decodeStorageToken(value: string | undefined): string | undefined {
+  let current = value?.trim();
+  if (!current) return undefined;
+  for (let depth = 0; depth < 2; depth += 1) {
+    try {
+      const parsed = JSON.parse(current) as unknown;
+      if (typeof parsed !== 'string' || !parsed.trim()) break;
+      current = parsed.trim();
+    } catch {
+      break;
+    }
+  }
+  return current;
 }
 
-function missingLoginContext(context: TradeRepublicWebContext): string[] {
+function hasWafContext(context: TradeRepublicWebContext): boolean {
+  return missingWafContext(context).length === 0;
+}
+
+function missingWafContext(context: TradeRepublicWebContext): string[] {
   const headers = context.headers ?? {};
   const missing = [];
   if (!(context.awsWafToken || headers['x-aws-waf-token'])) missing.push('x-aws-waf-token');
   if (!(context.cookieHeader || Object.keys(context.cookies ?? {}).length > 0)) missing.push('cookie');
-  if (!headers['x-tr-app-version']) missing.push('x-tr-app-version');
-  if (!headers['x-tr-platform']) missing.push('x-tr-platform');
-  if (!headers['x-tr-device-info']) missing.push('x-tr-device-info');
   return missing;
 }
 

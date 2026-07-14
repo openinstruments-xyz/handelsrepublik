@@ -25,8 +25,7 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
   normalization.
 - Demo Node REPL for interactive local exploration.
 - Raw escape hatches for unmapped private API resources.
-
-- Placing orders was not tested
+- Fee previews plus explicitly invoked brokerage order submission and cancellation.
 
 ## Install
 
@@ -36,7 +35,7 @@ npm install github:VIEWVIEWVIEW/handelsrepublik
 
 This package is ESM-only.
 
-To connect to TR you will need a WAF token. This project can capture the WAF token for you via Playwright. If you want to use that functionality, please install playwright like this:
+To connect to TR you will need a WAF token. This project can capture the WAF token for you via Playwright. Unless you provide that functionality yourself, please install playwright like this:
 ```bash
 npm install playwright
 npx playwright install chromium
@@ -133,6 +132,21 @@ class RedisSessionStore implements SessionStore {
 
 const tr = TradeRepublicClient.create({
   sessionStore: new RedisSessionStore(redis, 'handelsrepublik:sessions:alice'),
+});
+```
+
+The SDK sends the currently observed Trade Republic web headers
+`x-tr-app-version`, `x-tr-platform`, and `x-tr-device-info` by default. You can
+override any of them when Trade Republic changes the web client or when you
+need a custom device profile:
+
+```ts
+const tr = TradeRepublicClient.create({
+  defaultHeaders: {
+    'x-tr-app-version': '15.101.0',
+    'x-tr-platform': 'web-pro',
+    'x-tr-device-info': 'your-base64-device-info',
+  },
 });
 ```
 
@@ -266,7 +280,8 @@ or adding support for a resource that does not have a first-class method yet.
 Start:
 
 ```bash
-npm run dev
+npm i
+npm run demo:tui
 ```
 
 The REPL builds the SDK, restores `demo/.demo-session.json` when present, prints
@@ -277,7 +292,7 @@ For the widget-based TUI demo, run `npm run demo:tui`.
 Common commands:
 
 ```js
-await loginQr("+491234567890")
+await loginQr()
 session()
 await refresh()
 await cash()
@@ -304,7 +319,6 @@ TR_DEVICE_INFO=...
 TR_ACCEPT_LANGUAGE=...
 TR_SESSION_FILE=...
 TR_CONFIG_FILE=...
-TR_PHONE_NUMBER=...
 ```
 
 The demo tooling still accepts copied context through `demo/.demo-config.json`
@@ -339,20 +353,47 @@ const mutualFunds = await tr.orders.mutualFunds();
 const privateMarkets = await tr.orders.privateMarkets();
 
 const destinations = await tr.trading.orderDestinations('US0378331005', {
+  jurisdiction: 'DE',
   side: 'BUY',
 });
 
-const quote = await tr.trading.priceForOrder({
-  isin: 'US0378331005',
-  exchangeId: 'LSX',
-  side: 'BUY',
-  unit: 'EUR',
-});
+const quote = await tr.market.quote('US0378331005', 'LSX');
 
 const available = await tr.trading.availableSize('US0378331005');
 const trades = await tr.trading.trades({ page: 1 });
 const pnl = await tr.trading.dailyPnl([{ instrumentId: 'US0378331005' }]);
 ```
+
+Order submission is a high-risk operation. Always obtain a fresh price and fee
+preview, show the exact order to the user, and require a separate confirmation
+before calling `submit()`:
+
+```ts
+const preview = await tr.orders.preview({
+  instrumentId: 'US0378331005',
+  exchangeId: destinations[0]!.id,
+  side: 'buy',
+  mode: 'market',
+  amount: 25,
+  lastClientPrice: 202.15,
+});
+
+console.log(preview.totalFees, preview.estimatedTotal, preview.order);
+
+// This sends a real order. Do not call it as part of an unattended test.
+const submitted = await tr.orders.submit(preview.order);
+console.log(submitted.status, submitted.orderId);
+
+// Cancellation is also a live mutation.
+await tr.orders.cancel(submitted.orderId!);
+```
+
+Use `size` instead of `amount` for an asset-quantity order. Limit orders require
+`mode: 'limit'` and `limit`; stop-market orders require `mode: 'stopMarket'` and
+`stop`. Amount orders derive and round the asset size to the selected venue's
+step size; pass `sizeStep` only when the instrument response does not expose
+enough metadata for automatic detection. `submit()` follows the mapper stream through `received`, `waiting`, and
+`confirmationNeeded` until Trade Republic returns `succeeded` or `failed`.
 
 Order updates are a stream:
 

@@ -19,6 +19,9 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `orders.mutualFunds` | `read` | `rest` | `GET /api-gateway/mutual-funds/api/v1/orders` |  |
 | `orders.privateMarkets` | `read` | `rest` | `GET /api/v1/private-markets/orders/all` |  |
 | `orders.orderUpdates` | `read` | `websocket` | `orderUpdates` |  |
+| `orders.fees` | `read` | `websocket` | `orderFeesV2` |  |
+| `orders.submit` | `highRiskMutation` | `websocket` | `simpleCreateOrder` |  |
+| `orders.cancel` | `highRiskMutation` | `websocket` | `cancelOrder` |  |
 | `portfolio.current` | `read` | `websocket` | `compactPortfolioByTypeV2` |  |
 | `portfolio.cash` | `read` | `websocket` | `availableCash` |  |
 | `portfolio.markToMarketValue` | `read` | `websocket` | `portfolioStatus` |  |
@@ -27,6 +30,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `portfolio.portfolioChart` | `read` | `rest` | `GET /api-gateway/portfolio-chart/v2/chart` |  |
 | `market.subscriptions` | `read` | `websocket` | `accountPairs` |  |
 | `market.candles` | `read` | `websocket` | `aggregateHistoryLightV2` | stock, crypto |
+| `market.quote` | `read` | `websocket` | `ticker` | stock, crypto |
 | `market.liveFeed` | `read` | `websocket` | `tickerV3` | stock, crypto |
 | `market.availableL2Books` | `read` | `websocket` | `instrument` |  |
 | `market.l2OrderBook` | `read` | `websocket` | `L2` |  |
@@ -46,13 +50,14 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `instruments.yieldToMaturity` | `read` | `websocket` | `yieldToMaturity` |  |
 | `trading.priceForOrder` | `read` | `websocket` | `priceForOrderV2` |  |
 | `trading.availableSize` | `read` | `websocket` | `availableSize` |  |
-| `trading.orderDestinations` | `read` | `rest` | `GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations` |  |
+| `trading.orderDestinations` | `read` | `rest` | `GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE` |  |
 | `trading.trades` | `read` | `rest` | `GET /web-trading-gateway/api/customer/v1/trades` |  |
 | `trading.dailyPnl` | `read` | `rest` | `POST /web-trading-gateway/api/customer/v1/pnl/daily` |  |
 | `discovery.exchangeDetails` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/exchanges-details` |  |
 | `discovery.exchangeSchedule` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule` |  |
 | `discovery.instrumentStatus` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}` |  |
 | `discovery.watchlists` | `read` | `rest` | `GET /api-gateway/watchlists/api/v2/watchlists` |  |
+| `discovery.watchlists.items` | `read` | `rest` | `GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items` |  |
 | `discovery.watchlists.create` | `lowRiskMutation` | `rest` | `POST /api-gateway/watchlists/api/v2/watchlists` |  |
 | `discovery.watchlists.rename` | `lowRiskMutation` | `rest` | `PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}` |  |
 | `discovery.watchlists.delete` | `lowRiskMutation` | `rest` | `DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}` |  |
@@ -69,9 +74,9 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `payments.paymentMethods` | `read` | `rest` | `GET /api/v2/payment/methods` |  |
 | `payments.iban` | `read` | `rest` | `GET /api/v1/auth/account/iban` |  |
 | `payments.interestDetails` | `read` | `rest` | `GET /api/v1/interest/details` |  |
-| `blocked.orderMutations` | `blockedMutation` | `websocket` | `simpleCreateOrder\|confirmOrder\|cancelOrder\|changeOrder` |  |
+| `blocked.orderMutations` | `blockedMutation` | `websocket` | `confirmOrder\|changeOrder` |  |
 | `blocked.bankTransfers` | `blockedMutation` | `rest` | `POST /api/v1/payout and payment authorization paths` |  |
 | `blocked.documentAcceptance` | `blockedMutation` | `rest` | `api/v1/documents/group/accept and terms accept paths` |  |
 | `blocked.accountSecurity` | `blockedMutation` | `rest` | `change account/tax/security paths` |  |
 
-`blockedMutation` entries are documented so integration tests can assert they are not executed live.
+`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.

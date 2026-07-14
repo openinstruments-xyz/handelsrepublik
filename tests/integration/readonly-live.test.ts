@@ -120,6 +120,8 @@ describe('TradeRepublicClient readonly live integration', { skip: enabled ? fals
 
   it('keeps high-risk mutations out of live integration execution', () => {
     const blocked = schemaRegistry.filter((entry) => entry.risk === 'blockedMutation').map((entry) => entry.name);
+    const highRisk = schemaRegistry.filter((entry) => entry.risk === 'highRiskMutation').map((entry) => entry.name);
+    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.submit']);
     assert.deepEqual(blocked.sort(), [
       'blocked.accountSecurity',
       'blocked.bankTransfers',

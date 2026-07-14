@@ -1,7 +1,7 @@
 import { z, type ZodType } from 'zod';
 import { TradeRepublicSchemaError } from '../errors.js';
 
-export type SchemaRisk = 'read' | 'lowRiskMutation' | 'blockedMutation';
+export type SchemaRisk = 'read' | 'lowRiskMutation' | 'highRiskMutation' | 'blockedMutation';
 export type SchemaTransport = 'rest' | 'websocket';
 
 export interface TradeRepublicSchemaEntry {
@@ -146,6 +146,9 @@ export const schemaRegistry = [
   entry('orders.mutualFunds', 'Mutual fund orders', 'rest', 'read', 'GET /api-gateway/mutual-funds/api/v1/orders', normalizedArrayWrappers),
   entry('orders.privateMarkets', 'Private market orders', 'rest', 'read', 'GET /api/v1/private-markets/orders/all', normalizedArrayWrappers),
   entry('orders.orderUpdates', 'Order update stream', 'websocket', 'read', 'orderUpdates', jsonValue, { live: { sample: 'stream' } }),
+  entry('orders.fees', 'Order fee preview', 'websocket', 'read', 'orderFeesV2', jsonValue),
+  entry('orders.submit', 'Submit brokerage order', 'websocket', 'highRiskMutation', 'simpleCreateOrder', jsonValue),
+  entry('orders.cancel', 'Cancel brokerage order', 'websocket', 'highRiskMutation', 'cancelOrder', jsonValue),
   entry('portfolio.current', 'Portfolio positions', 'websocket', 'read', 'compactPortfolioByTypeV2', z.union([jsonRecord, normalizedArrayWrappers])),
   entry('portfolio.cash', 'Available cash', 'websocket', 'read', 'availableCash', z.array(availableCashItemSchema)),
   entry('portfolio.markToMarketValue', 'Portfolio status', 'websocket', 'read', 'portfolioStatus', jsonValue),
@@ -154,6 +157,7 @@ export const schemaRegistry = [
   entry('portfolio.portfolioChart', 'Portfolio chart', 'rest', 'read', 'GET /api-gateway/portfolio-chart/v2/chart', jsonValue),
   entry('market.subscriptions', 'Market subscriptions', 'websocket', 'read', 'accountPairs', z.union([z.array(accountPairSchema), normalizedArrayWrappers])),
   entry('market.candles', 'Price history candles', 'websocket', 'read', 'aggregateHistoryLightV2', jsonValue, { variants: ['stock', 'crypto'] }),
+  entry('market.quote', 'Market quote', 'websocket', 'read', 'ticker', jsonValue, { variants: ['stock', 'crypto'] }),
   entry('market.liveFeed', 'Live quote feed', 'websocket', 'read', 'tickerV3', jsonValue, { variants: ['stock', 'crypto'], live: { sample: 'stream' } }),
   entry('market.availableL2Books', 'Available L2 books', 'websocket', 'read', 'instrument', jsonValue),
   entry('market.l2OrderBook', 'L2 order book stream', 'websocket', 'read', 'L2', jsonValue, { live: { sample: 'stream' } }),
@@ -173,13 +177,14 @@ export const schemaRegistry = [
   entry('instruments.yieldToMaturity', 'Yield to maturity', 'websocket', 'read', 'yieldToMaturity', jsonValue),
   entry('trading.priceForOrder', 'Price for order quote', 'websocket', 'read', 'priceForOrderV2', jsonValue),
   entry('trading.availableSize', 'Available size', 'websocket', 'read', 'availableSize', jsonValue),
-  entry('trading.orderDestinations', 'Order destinations', 'rest', 'read', 'GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations', normalizedArrayWrappers),
+  entry('trading.orderDestinations', 'Order destinations', 'rest', 'read', 'GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE', normalizedArrayWrappers),
   entry('trading.trades', 'Trades', 'rest', 'read', 'GET /web-trading-gateway/api/customer/v1/trades', normalizedArrayWrappers),
   entry('trading.dailyPnl', 'Daily PnL', 'rest', 'read', 'POST /web-trading-gateway/api/customer/v1/pnl/daily', jsonValue),
   entry('discovery.exchangeDetails', 'Exchange details', 'rest', 'read', 'GET /api-gateway/instrument-universe/api/v1/exchanges-details', normalizedArrayWrappers),
   entry('discovery.exchangeSchedule', 'Exchange schedule', 'rest', 'read', 'GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule', jsonRecord),
   entry('discovery.instrumentStatus', 'Instrument status', 'rest', 'read', 'GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}', jsonRecord),
   entry('discovery.watchlists', 'Watchlists', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists', jsonValue),
+  entry('discovery.watchlists.items', 'Watchlist items', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', jsonValue),
   entry('discovery.watchlists.create', 'Create watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.delete', 'Delete watchlist', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
@@ -196,7 +201,7 @@ export const schemaRegistry = [
   entry('payments.paymentMethods', 'Payment methods', 'rest', 'read', 'GET /api/v2/payment/methods', jsonValue),
   entry('payments.iban', 'IBAN', 'rest', 'read', 'GET /api/v1/auth/account/iban', z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
   entry('payments.interestDetails', 'Interest details', 'rest', 'read', 'GET /api/v1/interest/details', z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
-  entry('blocked.orderMutations', 'Order placement/change/cancel/confirm', 'websocket', 'blockedMutation', 'simpleCreateOrder|confirmOrder|cancelOrder|changeOrder', jsonValue),
+  entry('blocked.orderMutations', 'Unsupported legacy order change/confirm resources', 'websocket', 'blockedMutation', 'confirmOrder|changeOrder', jsonValue),
   entry('blocked.bankTransfers', 'Payouts and bank transfers', 'rest', 'blockedMutation', 'POST /api/v1/payout and payment authorization paths', jsonValue),
   entry('blocked.documentAcceptance', 'Document acceptance', 'rest', 'blockedMutation', 'api/v1/documents/group/accept and terms accept paths', jsonValue),
   entry('blocked.accountSecurity', 'Account identity, tax, PIN, login security mutations', 'rest', 'blockedMutation', 'change account/tax/security paths', jsonValue),
@@ -233,7 +238,7 @@ export function schemaCatalogMarkdown(): string {
     lines.push(`| \`${entry.name}\` | \`${entry.risk}\` | \`${entry.transport}\` | \`${entry.request.replaceAll('|', '\\|')}\` | ${entry.variants?.join(', ') ?? ''} |`);
   }
   lines.push('');
-  lines.push('`blockedMutation` entries are documented so integration tests can assert they are not executed live.');
+  lines.push('`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.');
   return `${lines.join('\n')}\n`;
 }
 

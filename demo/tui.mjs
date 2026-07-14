@@ -15,9 +15,11 @@ const deviceName = cleanString(process.env.TR_DEVICE_NAME) || 'handelsrepublik t
 const loginPhoneNumber = cleanString(process.env.TR_PHONE_NUMBER);
 const loginPin = cleanString(process.env.TR_PIN);
 const wafLoadingFrames = ['Collecting WAF.', 'Collecting WAF..', 'Collecting WAF...'];
-const qrRefreshSkewMs = 2_000;
-const minQrDisplayMs = 4_000;
+const qrRefreshSkewMs = 8_000;
+const minQrDisplayMs = 8_000;
 const nearExpiredQrRetryMs = 500;
+const l2ProbeTimeoutMs = 5_000;
+const searchDebounceMs = 300;
 
 const screen = blessed.screen({
   smartCSR: true,
@@ -39,6 +41,8 @@ const state = {
   browser: undefined,
   webContext: undefined,
   session: undefined,
+  reloginInFlight: false,
+  sessionRecoveryInFlight: false,
   login: {
     challenge: undefined,
     qrText: '',
@@ -56,8 +60,10 @@ const state = {
   dashboard: {
     instrumentQuery: defaultInstrumentQuery,
     instrument: undefined,
-    watchlists: [],
-    watchlistIndex: 0,
+    watchlist: undefined,
+    watchlistItemIndex: 0,
+    selectionGeneration: 0,
+    assetNames: new Map(),
     account: undefined,
     cash: undefined,
     portfolio: undefined,
@@ -66,6 +72,10 @@ const state = {
     orderBook: undefined,
     venueId: undefined,
     venueName: undefined,
+    bookUnavailable: false,
+    accountProfileError: '',
+    cashError: '',
+    portfolioError: '',
     loading: {
       account: false,
       watchlists: false,
@@ -84,6 +94,12 @@ const state = {
     selected: 0,
     loading: false,
     error: '',
+    debounceTimer: undefined,
+    requestGeneration: 0,
+  },
+  order: {
+    visible: false,
+    submitting: false,
   },
 };
 
@@ -205,6 +221,45 @@ const searchResults = blessed.list({
   items: [],
 });
 
+const orderPrompt = blessed.prompt({
+  parent: screen,
+  top: 'center',
+  left: 'center',
+  width: '90%',
+  height: 20,
+  hidden: true,
+  border: 'line',
+  label: ' Order ',
+  tags: true,
+  keys: true,
+  vi: true,
+  style: {
+    border: { fg: 'yellow' },
+    fg: 'white',
+  },
+});
+orderPrompt._.input.top = 14;
+orderPrompt._.okay.top = 16;
+orderPrompt._.cancel.top = 16;
+
+const orderMessage = blessed.message({
+  parent: screen,
+  top: 'center',
+  left: 'center',
+  width: '85%',
+  height: 12,
+  hidden: true,
+  border: 'line',
+  label: ' Order result ',
+  tags: true,
+  keys: true,
+  vi: true,
+  style: {
+    border: { fg: 'cyan' },
+    fg: 'white',
+  },
+});
+
 screen.append(statusBox);
 screen.append(loginBox);
 screen.append(searchOverlay);
@@ -221,78 +276,63 @@ screen.key(['C-c'], () => {
 });
 
 screen.key(['escape'], () => {
+  if (state.order.visible) return;
   if (state.search.visible) closeSearch();
 });
 
 screen.key(['q'], () => {
+  if (state.order.visible) return;
   if (state.search.visible) closeSearch();
 });
 
 screen.key(['/', 's'], () => {
-  if (state.phase !== 'dashboard') return;
+  if (state.phase !== 'dashboard' || state.order.visible) return;
   openSearch();
 });
 
+screen.key(['o'], () => {
+  if (state.phase === 'dashboard' && !state.search.visible && !state.order.visible) void openOrderFlow();
+});
+
 screen.key(['r'], () => {
-  if (state.phase === 'dashboard') void refreshDashboard(true);
+  if (state.phase === 'dashboard' && !state.order.visible) void refreshDashboard(true);
 });
 
 screen.key(['l'], () => {
-  if (state.phase === 'dashboard') void relogin();
+  if (state.phase === 'dashboard' && !state.order.visible) void relogin();
 });
 
-screen.key(['['], () => {
-  if (state.phase === 'dashboard') cycleWatchlist(-1);
+screen.key(['up', 'k'], () => {
+  if (state.phase === 'dashboard' && !state.search.visible && !state.order.visible) void moveWatchlistSelection(-1);
 });
 
-screen.key([']'], () => {
-  if (state.phase === 'dashboard') cycleWatchlist(1);
+screen.key(['down', 'j'], () => {
+  if (state.phase === 'dashboard' && !state.search.visible && !state.order.visible) void moveWatchlistSelection(1);
 });
 
 screen.key(['enter'], () => {
   if (state.phase === 'login' && !state.search.visible) void startLogin('manual');
 });
 
-searchInput.on('submit', async (value) => {
+searchInput.on('submit', (value) => {
   const query = cleanString(value);
-  state.search.query = query;
   if (!query) {
-    state.search.error = 'Search query is empty.';
+    resetSearchResults('Start typing to search.');
     render();
     searchInput.focus();
     return;
   }
-
-  state.search.loading = true;
-  state.search.error = '';
-  state.search.results = [];
-  searchResults.setItems(['Searching...']);
-  render();
-
-  try {
-    const results = await state.client.assets.search(query, { limit: 12 });
-    state.search.results = results;
-    state.search.selected = 0;
-    searchResults.setItems(results.length > 0
-      ? results.map((item, index) => formatSearchResult(item, index))
-      : ['No results.']);
-    if (results.length > 0) searchResults.select(0);
-  } catch (error) {
-    state.search.error = formatError(error);
-    state.search.results = [];
-    searchResults.setItems([`Search failed: ${state.search.error}`]);
-  } finally {
-    state.search.loading = false;
-    render();
-    searchResults.focus();
-  }
+  clearTimeout(state.search.debounceTimer);
+  state.search.debounceTimer = undefined;
+  const generation = ++state.search.requestGeneration;
+  void runSearch(query, generation, { focusResults: true });
 });
 
 searchResults.on('select', async (_, index) => {
   const result = state.search.results[index];
   if (!result) return;
   closeSearch();
-  await setInstrument(result, { query: state.search.query || result.name || result.id });
+  await selectInstrument(result, { query: state.search.query || result.name || result.id });
 });
 
 searchResults.on('keypress', (ch, key) => {
@@ -300,8 +340,86 @@ searchResults.on('keypress', (ch, key) => {
 });
 
 searchInput.on('keypress', (ch, key) => {
-  if (key.name === 'escape') closeSearch();
+  if (key.name === 'escape') {
+    closeSearch();
+    return;
+  }
+  if (key.name === 'enter') return;
+  if (key.name === 'down' && state.search.results.length) {
+    searchResults.focus();
+    return;
+  }
+  setImmediate(scheduleSearchFromInput);
 });
+
+function scheduleSearchFromInput() {
+  if (!state.search.visible) return;
+  clearTimeout(state.search.debounceTimer);
+  state.search.debounceTimer = undefined;
+  const query = cleanString(searchInput.getValue());
+  if (query === state.search.query) return;
+  state.search.query = query;
+  const generation = ++state.search.requestGeneration;
+
+  if (!query) {
+    resetSearchResults('Start typing to search.');
+    render();
+    return;
+  }
+
+  state.search.loading = false;
+  state.search.error = '';
+  state.search.results = [];
+  state.search.selected = 0;
+  searchResults.setItems(['Waiting for input...']);
+  render();
+  state.search.debounceTimer = setTimeout(() => {
+    state.search.debounceTimer = undefined;
+    void runSearch(query, generation);
+  }, searchDebounceMs);
+  state.search.debounceTimer.unref?.();
+}
+
+async function runSearch(query, generation, options = {}) {
+  if (!state.client || !state.search.visible || generation !== state.search.requestGeneration) return;
+  state.search.query = query;
+  state.search.loading = true;
+  state.search.error = '';
+  searchResults.setItems(['Searching...']);
+  render();
+
+  try {
+    const results = await state.client.assets.search(query, { limit: 12 });
+    if (!state.search.visible || generation !== state.search.requestGeneration) return;
+    state.search.results = results;
+    state.search.selected = 0;
+    searchResults.setItems(results.length > 0
+      ? results.map((item, index) => formatSearchResult(item, index))
+      : ['No results.']);
+    if (results.length > 0) searchResults.select(0);
+  } catch (error) {
+    if (!state.search.visible || generation !== state.search.requestGeneration) return;
+    state.search.error = formatError(error);
+    state.search.results = [];
+    searchResults.setItems([`Search failed: ${state.search.error}`]);
+  } finally {
+    if (state.search.visible && generation === state.search.requestGeneration) {
+      state.search.loading = false;
+      render();
+      if (options.focusResults && state.search.results.length) searchResults.focus();
+      else searchInput.focus();
+    }
+  }
+}
+
+function resetSearchResults(message) {
+  state.search.query = '';
+  state.search.results = [];
+  state.search.selected = 0;
+  state.search.loading = false;
+  state.search.error = '';
+  searchResults.setItems([message]);
+}
 
 loginBox.key(['escape'], () => {
   if (state.phase === 'login') void startLogin('manual');
@@ -340,24 +458,9 @@ async function boot() {
   try {
     layout();
     render();
-    state.browser = await launchBrowser();
-    const stopWafLoading = startWafLoading();
-    try {
-      state.webContext = await collectTradeRepublicWebContext(state.browser, {
-        timeoutMs: 20_000,
-        settleMs: 0,
-      });
-    } finally {
-      stopWafLoading();
-    }
-    await state.browser.close().catch(() => undefined);
-    state.browser = undefined;
-
     state.client = TradeRepublicClient.create({
-      webContext: state.webContext,
       sessionStore,
     });
-
     await state.client.auth.restoreSession();
     const restored = state.client.getSession();
     if (hasUsableSession(restored)) {
@@ -372,6 +475,20 @@ async function boot() {
         return;
       }
     }
+
+    state.browser = await launchBrowser();
+    const stopWafLoading = startWafLoading();
+    try {
+      state.webContext = await collectTradeRepublicWebContext(state.browser, {
+        timeoutMs: 20_000,
+        settleMs: 0,
+      });
+      state.client.useWebContext(state.webContext);
+    } finally {
+      stopWafLoading();
+    }
+    await state.browser.close().catch(() => undefined);
+    state.browser = undefined;
 
     state.status = hasPinLoginConfig()
       ? 'WAF token is ready. Starting phone and PIN login.'
@@ -449,9 +566,23 @@ async function discardSavedSession() {
 
 async function handleUnauthorized(error) {
   if (!isUnauthorizedError(error) || state.phase !== 'dashboard') return false;
-  state.status = 'Session expired. Starting login.';
-  state.login.error = `Session expired. Please log in again. ${formatError(error)}`;
-  await relogin();
+  if (state.sessionRecoveryInFlight || state.reloginInFlight) return true;
+  state.sessionRecoveryInFlight = true;
+  try {
+    state.status = 'Refreshing the Trade Republic session.';
+    render();
+    const refreshed = await state.client.auth.refreshSession();
+    state.session = refreshed;
+    state.status = 'Session refreshed.';
+    render();
+    return true;
+  } catch (refreshError) {
+    state.status = 'Session expired. Starting login.';
+    state.login.error = `Session refresh failed: ${formatError(refreshError)} (original: ${formatError(error)})`;
+    await relogin();
+  } finally {
+    state.sessionRecoveryInFlight = false;
+  }
   return true;
 }
 
@@ -523,7 +654,8 @@ async function requestFreshQr(reason) {
     }
 
     const nextExpiresAt = details.expiresAt || challenge.expiresAt;
-    const expiresAtMs = parseDateMs(nextExpiresAt);
+    const serverTime = details.serverTime ?? challenge.serverTime;
+    const expiresAtMs = calibratedExpiryMs(nextExpiresAt, serverTime);
     if (expiresAtMs && expiresAtMs - Date.now() <= minQrDisplayMs) {
       state.status = 'QR payload was already near expiry. Requesting a fresh QR.';
       render();
@@ -651,9 +783,10 @@ async function refreshDashboard(force = false) {
   await Promise.allSettled([
     refreshAccount(),
     refreshWatchlists(),
-    refreshInstrument(force),
     refreshTrades(),
   ]);
+  if (!state.dashboard.instrument) await refreshInstrument();
+  else if (force) await Promise.allSettled([refreshQuote(), refreshDom()]);
   render();
 }
 
@@ -661,18 +794,16 @@ async function refreshAccount() {
   if (!state.client || state.phase !== 'dashboard') return;
   state.dashboard.loading.account = true;
   try {
-    const [account, cash, portfolio] = await Promise.all([
+    const results = await Promise.allSettled([
       state.client.account.current(),
       state.client.portfolio.cash(),
       state.client.portfolio.current({ timeoutMs: 20_000 }),
     ]);
-    state.dashboard.account = account;
-    state.dashboard.cash = cash;
-    state.dashboard.portfolio = portfolio;
-    state.dashboard.accountError = '';
-  } catch (error) {
-    if (await handleUnauthorized(error)) return;
-    state.dashboard.accountError = formatError(error);
+    const unauthorized = results.find((result) => result.status === 'rejected' && isUnauthorizedError(result.reason));
+    if (unauthorized && await handleUnauthorized(unauthorized.reason)) return;
+    applySettledDashboardResult(results[0], 'account', 'accountProfileError');
+    applySettledDashboardResult(results[1], 'cash', 'cashError');
+    applySettledDashboardResult(results[2], 'portfolio', 'portfolioError');
   } finally {
     state.dashboard.loading.account = false;
   }
@@ -682,24 +813,76 @@ async function refreshWatchlists() {
   if (!state.client || state.phase !== 'dashboard') return;
   state.dashboard.loading.watchlists = true;
   try {
-    const payload = await state.client.discovery.watchlists();
-    state.dashboard.watchlists = normalizeWatchlists(payload);
-    state.dashboard.watchlistIndex = clamp(state.dashboard.watchlistIndex, 0, Math.max(0, state.dashboard.watchlists.length - 1));
+    const previousItem = state.dashboard.watchlist?.items?.[state.dashboard.watchlistItemIndex];
+    const loadedWatchlist = await state.client.discovery.cloudWatchlist({ pageSize: 200 });
+    const watchlist = await hydrateWatchlistInstrumentNames(loadedWatchlist);
+    state.dashboard.watchlist = watchlist;
+    const items = watchlist?.items || [];
+    const previousId = previousItem?.isin || previousItem?.id;
+    const previousIndex = previousId ? items.findIndex((item) => (item.isin || item.id) === previousId) : -1;
+    state.dashboard.watchlistItemIndex = previousIndex >= 0
+      ? previousIndex
+      : clamp(state.dashboard.watchlistItemIndex, 0, Math.max(0, items.length - 1));
     state.dashboard.watchlistsError = '';
+    if (!state.dashboard.instrument && items.length) {
+      await selectInstrument(items[state.dashboard.watchlistItemIndex], { query: items[state.dashboard.watchlistItemIndex]?.name });
+    }
   } catch (error) {
     if (await handleUnauthorized(error)) return;
     state.dashboard.watchlistsError = formatError(error);
-    state.dashboard.watchlists = [];
   } finally {
     state.dashboard.loading.watchlists = false;
   }
 }
 
-async function refreshInstrument(force = false) {
+async function hydrateWatchlistInstrumentNames(watchlist) {
+  if (!watchlist || !Array.isArray(watchlist.items) || !state.client) return watchlist;
+  const items = [...watchlist.items];
+  const unresolvedIndexes = items
+    .map((item, index) => hasUsefulInstrumentName(item) ? -1 : index)
+    .filter((index) => index >= 0);
+
+  for (let offset = 0; offset < unresolvedIndexes.length; offset += 6) {
+    const indexes = unresolvedIndexes.slice(offset, offset + 6);
+    const results = await Promise.allSettled(indexes.map((index) => {
+      const item = items[index];
+      return state.client.assets.get(item.isin || item.id);
+    }));
+    results.forEach((result, resultIndex) => {
+      if (result.status !== 'fulfilled') return;
+      const index = indexes[resultIndex];
+      const item = items[index];
+      const detail = result.value;
+      const name = firstString(detail.name, detail.shortName);
+      if (!name) return;
+      items[index] = {
+        ...item,
+        name,
+        exchangeIds: [...new Set([
+          ...firstStringArray(item.exchangeIds),
+          ...firstStringArray(detail.exchangeIds),
+        ])],
+      };
+    });
+  }
+
+  return { ...watchlist, items };
+}
+
+function hasUsefulInstrumentName(item) {
+  const name = cleanString(item?.name);
+  if (!name) return false;
+  const identifiers = [item?.isin, item?.instrumentId, item?.id]
+    .map(cleanString)
+    .filter(Boolean);
+  return !identifiers.some((identifier) => identifier.toLowerCase() === name.toLowerCase());
+}
+
+async function refreshInstrument() {
   if (!state.client || state.phase !== 'dashboard') return;
   state.dashboard.loading.instrument = true;
   try {
-    if (force || !state.dashboard.instrument) {
+    if (!state.dashboard.instrument) {
       const resolved = await resolveInstrument(state.client, state.dashboard.instrumentQuery);
       state.dashboard.instrument = resolved;
       state.dashboard.instrumentError = '';
@@ -719,33 +902,30 @@ async function refreshQuote() {
   const instrument = state.dashboard.instrument;
   if (!instrument?.assetId || !instrument?.exchangeId) return;
   state.dashboard.loading.quote = true;
+  const generation = state.dashboard.selectionGeneration;
   try {
-    const quote = await state.client.raw.query({
-      type: 'ticker',
-      id: `${instrument.assetId}.${instrument.exchangeId}`,
-    }, { timeoutMs: 15_000 });
+    const quote = await state.client.market.quote(instrument.assetId, instrument.exchangeId);
+    if (generation !== state.dashboard.selectionGeneration) return;
     state.dashboard.quote = quote;
     state.dashboard.quoteError = '';
   } catch (error) {
+    if (generation !== state.dashboard.selectionGeneration) return;
     if (await handleUnauthorized(error)) return;
     state.dashboard.quoteError = formatError(error);
   } finally {
-    state.dashboard.loading.quote = false;
+    if (generation === state.dashboard.selectionGeneration) state.dashboard.loading.quote = false;
   }
 }
 
 async function refreshTrades() {
   if (!state.client || state.phase !== 'dashboard') return;
-  const instrument = state.dashboard.instrument;
-  if (!instrument?.assetId) return;
   state.dashboard.loading.trades = true;
   try {
-    const trades = await state.client.trading.trades({
-      instrumentId: instrument.assetId,
+    const trades = await state.client.orders.executed({
       page: 1,
-      pageSize: 8,
+      pageSize: 25,
     });
-    state.dashboard.trades = trades;
+    state.dashboard.trades = await Promise.all(trades.slice(0, 8).map(enrichExecutionName));
     state.dashboard.tradesError = '';
   } catch (error) {
     if (await handleUnauthorized(error)) return;
@@ -761,40 +941,104 @@ async function refreshDom() {
   const instrument = state.dashboard.instrument;
   if (!instrument?.assetId) return;
 
+  const generation = state.dashboard.selectionGeneration;
+  state.dashboard.domSubscription?.close?.();
+  state.dashboard.domSubscription = undefined;
+  state.dashboard.orderBook = undefined;
+  state.dashboard.bookUnavailable = false;
   state.dashboard.loading.book = true;
   try {
     const venues = await state.client.market.availableL2Books(instrument.assetId);
-    const selectedVenue = pickVenue(venues, instrument.exchangeId);
-    state.dashboard.venueId = selectedVenue?.exchangeId;
-    state.dashboard.venueName = selectedVenue?.name || selectedVenue?.exchangeId;
-    if (!state.dashboard.venueId) {
-      state.dashboard.orderBook = undefined;
-      state.dashboard.bookError = '';
-      return;
+    const candidates = mergeVenueCandidates(instrument, venues);
+    for (const venue of candidates) {
+      if (generation !== state.dashboard.selectionGeneration) return;
+      const connected = await probeOrderBookVenue(instrument.assetId, venue, generation);
+      if (connected) {
+        state.dashboard.bookError = '';
+        return;
+      }
     }
-
-    state.dashboard.domSubscription?.close?.();
-    state.dashboard.domSubscription = state.client.market.subscribeL2OrderBook({
-      assetId: instrument.assetId,
-      exchangeId: state.dashboard.venueId,
-      depth: 5,
-    });
-
-    void consumeOrderBookStream(state.dashboard.domSubscription);
-    state.dashboard.bookError = '';
+    if (generation !== state.dashboard.selectionGeneration) return;
+    state.dashboard.venueId = undefined;
+    state.dashboard.venueName = undefined;
+    state.dashboard.bookUnavailable = true;
+    state.dashboard.bookError = candidates.length
+      ? `No L2 data from ${candidates.map((venue) => venue.exchangeId).join(', ')}.`
+      : 'No exchange candidates are available for this asset.';
   } catch (error) {
+    if (generation !== state.dashboard.selectionGeneration) return;
     if (await handleUnauthorized(error)) return;
     state.dashboard.bookError = formatError(error);
     state.dashboard.orderBook = undefined;
   } finally {
-    state.dashboard.loading.book = false;
+    if (generation === state.dashboard.selectionGeneration) state.dashboard.loading.book = false;
   }
 }
 
-async function consumeOrderBookStream(subscription) {
+async function probeOrderBookVenue(assetId, venue, generation) {
+  const subscription = state.client.market.subscribeL2OrderBook({
+    assetId,
+    exchangeId: venue.exchangeId,
+    depth: 5,
+  });
+  const iterator = subscription[Symbol.asyncIterator]();
+  const deadline = Date.now() + l2ProbeTimeoutMs;
   try {
-    for await (const book of subscription) {
-      if (state.phase !== 'dashboard') break;
+    while (Date.now() < deadline && generation === state.dashboard.selectionGeneration) {
+      const result = await nextWithTimeout(iterator, deadline - Date.now());
+      if (!result || result.done) break;
+      if (!hasOrderBookLevels(result.value)) continue;
+      state.dashboard.domSubscription = subscription;
+      state.dashboard.orderBook = result.value;
+      state.dashboard.venueId = venue.exchangeId;
+      state.dashboard.venueName = venue.name || venue.exchangeId;
+      state.dashboard.bookUnavailable = false;
+      void consumeOrderBookStream(subscription, iterator, generation);
+      return true;
+    }
+  } catch (error) {
+    if (isUnauthorizedError(error)) throw error;
+  }
+  subscription.close?.();
+  return false;
+}
+
+function nextWithTimeout(iterator, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), Math.max(1, timeoutMs));
+    timer.unref?.();
+    iterator.next().then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function hasOrderBookLevels(book) {
+  return Boolean(book && ((Array.isArray(book.bids) && book.bids.length) || (Array.isArray(book.asks) && book.asks.length)));
+}
+
+function mergeVenueCandidates(instrument, venues) {
+  const candidates = [
+    instrument.exchangeId ? { exchangeId: instrument.exchangeId } : undefined,
+    ...firstStringArray(instrument.exchangeIds).map((exchangeId) => ({ exchangeId })),
+    ...(Array.isArray(venues) ? venues : []),
+  ].filter(Boolean);
+  return candidates.filter((venue, index) => venue.exchangeId && candidates.findIndex((candidate) => candidate.exchangeId === venue.exchangeId) === index);
+}
+
+async function consumeOrderBookStream(subscription, iterator, generation) {
+  try {
+    while (state.phase === 'dashboard' && generation === state.dashboard.selectionGeneration) {
+      const result = await iterator.next();
+      if (result.done) break;
+      const book = result.value;
       state.dashboard.orderBook = book;
       render();
     }
@@ -807,25 +1051,70 @@ async function consumeOrderBookStream(subscription) {
   }
 }
 
-async function setInstrument(asset, options = {}) {
+function applySettledDashboardResult(result, valueKey, errorKey) {
+  if (result.status === 'fulfilled') {
+    state.dashboard[valueKey] = result.value;
+    state.dashboard[errorKey] = '';
+  } else {
+    state.dashboard[errorKey] = formatError(result.reason);
+  }
+}
+
+async function enrichExecutionName(order) {
+  if (order.name) return { ...order, displayName: order.name };
+  const assetId = order.isin || order.instrumentId;
+  if (!assetId) return order;
+  const cached = state.dashboard.assetNames.get(assetId);
+  if (cached) return { ...order, displayName: cached };
+  try {
+    const asset = await state.client.assets.get(assetId);
+    const name = asset.name || assetId;
+    state.dashboard.assetNames.set(assetId, name);
+    return { ...order, displayName: name };
+  } catch {
+    return { ...order, displayName: assetId };
+  }
+}
+
+async function moveWatchlistSelection(direction) {
+  const items = state.dashboard.watchlist?.items || [];
+  if (!items.length) return;
+  state.dashboard.watchlistItemIndex = (state.dashboard.watchlistItemIndex + direction + items.length) % items.length;
+  const item = items[state.dashboard.watchlistItemIndex];
+  render();
+  await selectInstrument(item, { query: item.name || item.isin || item.id });
+}
+
+async function selectInstrument(asset, options = {}) {
   if (!state.client) return;
+  const generation = ++state.dashboard.selectionGeneration;
+  state.dashboard.domSubscription?.close?.();
+  state.dashboard.domSubscription = undefined;
+  state.dashboard.quote = undefined;
+  state.dashboard.orderBook = undefined;
+  state.dashboard.bookUnavailable = false;
   state.dashboard.instrumentQuery = cleanString(options.query) || asset.name || asset.id;
+  const exchangeIds = firstStringArray(asset.exchangeIds);
   state.dashboard.instrument = {
     assetId: asset.isin || asset.id,
     isin: asset.isin || asset.id,
     name: asset.name || asset.id,
-    exchangeId: firstString(asset.exchangeIds) || 'LSX',
+    exchangeId: exchangeIds[0] || 'LSX',
+    exchangeIds,
   };
   state.status = `Loading ${state.dashboard.instrument.name || state.dashboard.instrument.assetId}.`;
   render();
 
   try {
     const detailed = await state.client.assets.get(state.dashboard.instrument.assetId);
+    if (generation !== state.dashboard.selectionGeneration) return;
+    const detailedExchangeIds = firstStringArray(detailed.exchangeIds);
     state.dashboard.instrument = {
       assetId: detailed.isin || detailed.id,
       isin: detailed.isin || detailed.id,
       name: detailed.name || detailed.id,
-      exchangeId: firstString(detailed.exchangeIds) || state.dashboard.instrument.exchangeId || 'LSX',
+      exchangeId: detailedExchangeIds[0] || state.dashboard.instrument.exchangeId || 'LSX',
+      exchangeIds: [...new Set([...detailedExchangeIds, ...exchangeIds])],
     };
   } catch {
     // Keep the search result fallback when instrument detail lookup is not available.
@@ -833,7 +1122,6 @@ async function setInstrument(asset, options = {}) {
 
   await Promise.allSettled([
     refreshQuote(),
-    refreshTrades(),
     refreshDom(),
   ]);
   render();
@@ -844,10 +1132,10 @@ function startDashboardLoops() {
   state.dashboard.timers = [
     setInterval(() => {
       if (state.phase === 'dashboard') void refreshAccount();
-    }, 20_000),
+    }, 60_000),
     setInterval(() => {
       if (state.phase === 'dashboard') void refreshWatchlists();
-    }, 30_000),
+    }, 60_000),
     setInterval(() => {
       if (state.phase === 'dashboard') void refreshQuote();
     }, 5_000),
@@ -867,6 +1155,9 @@ function stopDashboardLoops() {
 
 async function relogin() {
   if (!state.client) return;
+  if (state.reloginInFlight) return;
+  state.reloginInFlight = true;
+  try {
   stopDashboardLoops();
   await discardSavedSession();
   clearTimeout(state.login.expiryTimer);
@@ -884,14 +1175,19 @@ async function relogin() {
   state.dashboard.account = undefined;
   state.dashboard.cash = undefined;
   state.dashboard.portfolio = undefined;
-  state.dashboard.watchlists = [];
-  state.dashboard.watchlistIndex = 0;
+  state.dashboard.watchlist = undefined;
+  state.dashboard.watchlistItemIndex = 0;
+  state.dashboard.selectionGeneration += 1;
+  state.dashboard.assetNames.clear();
   state.dashboard.quote = undefined;
   state.dashboard.orderBook = undefined;
   state.dashboard.trades = [];
   state.dashboard.venueId = undefined;
   state.dashboard.venueName = undefined;
-  state.dashboard.accountError = '';
+  state.dashboard.bookUnavailable = false;
+  state.dashboard.accountProfileError = '';
+  state.dashboard.cashError = '';
+  state.dashboard.portfolioError = '';
   state.dashboard.watchlistsError = '';
   state.dashboard.instrumentError = '';
   state.dashboard.quoteError = '';
@@ -907,6 +1203,206 @@ async function relogin() {
   showLogin();
   render();
   await startLogin('manual');
+  } finally {
+    state.reloginInFlight = false;
+  }
+}
+
+async function openOrderFlow() {
+  const instrument = state.dashboard.instrument;
+  if (!state.client || !instrument?.assetId) return;
+  state.order.visible = true;
+  state.order.submitting = false;
+  closeSearch();
+  try {
+    const command = await promptOrder([
+      `{bold}${escapeTags(instrument.name || instrument.assetId)}{/bold} (${escapeTags(instrument.assetId)})`,
+      '',
+      'Enter one of:',
+      '  buy market <quantity>',
+      '  sell market <quantity>',
+      '  buy amount <EUR>',
+      '  sell amount <EUR>',
+      '  buy limit <quantity> <limit-price>',
+      '  sell stop <quantity> <stop-price>',
+      '',
+      'Escape cancels. Nothing is sent at this step.',
+    ].join('\n'));
+    if (!command || !state.order.visible) return;
+    const parsed = parseOrderCommand(command);
+    state.status = `Preparing ${parsed.side} order preview.`;
+    render();
+
+    const destinations = await state.client.trading.orderDestinations(instrument.assetId);
+    const eligibleDestinations = destinations.filter((item) => destinationSupportsOrder(item, parsed.mode, parsed.side));
+    const destination = eligibleDestinations.find((item) => item.id === instrument.exchangeId) ?? eligibleDestinations[0];
+    if (!destination?.id) throw new Error('Trade Republic returned no valid order destination for this instrument. Nothing was sent.');
+
+    let lastClientPrice;
+    let executablePrice;
+    if (parsed.mode === 'market') {
+      const quote = await state.client.market.quote(instrument.assetId, destination.id);
+      executablePrice = parsed.side === 'buy' ? quote.ask ?? quote.last : quote.bid ?? quote.last;
+      if (executablePrice === undefined) throw new Error('No current executable price is available. Nothing was sent.');
+      lastClientPrice = executablePrice;
+    }
+
+    const options = {
+      instrumentId: instrument.assetId,
+      exchangeId: destination.id,
+      side: parsed.side,
+      mode: parsed.mode,
+      ...(parsed.size !== undefined ? { size: parsed.size } : {}),
+      ...(parsed.amount !== undefined ? { amount: parsed.amount } : {}),
+      ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
+      ...(parsed.stop !== undefined ? { stop: parsed.stop } : {}),
+      ...(lastClientPrice !== undefined ? { lastClientPrice } : {}),
+    };
+    const preview = await state.client.orders.preview(options);
+    validateOrderAgainstDashboard(options);
+    const phrase = parsed.amount !== undefined
+      ? `${parsed.side.toUpperCase()} EUR ${formatConfirmationNumber(parsed.amount)} ${instrument.assetId}`
+      : `${parsed.side.toUpperCase()} ${formatConfirmationNumber(parsed.size)} ${instrument.assetId}`;
+    const confirmation = await promptOrder(formatOrderPreview(preview, instrument, destination, executablePrice, phrase));
+    if (!confirmation || !state.order.visible) return;
+    if (confirmation.trim() !== phrase) {
+      await showOrderMessage('{yellow-fg}Confirmation did not match. Nothing was sent.{/yellow-fg}');
+      return;
+    }
+
+    state.order.submitting = true;
+    state.status = `Submitting ${parsed.side} order. Do not retry while this is pending.`;
+    render();
+    const result = await state.client.orders.submit(preview.order);
+    const resultLines = [
+      result.status === 'succeeded'
+        ? '{green-fg}{bold}Order submitted successfully.{/bold}{/green-fg}'
+        : '{red-fg}{bold}Trade Republic did not accept the order.{/bold}{/red-fg}',
+      '',
+      `Status: ${escapeTags(result.status)}`,
+      `Order ID: ${escapeTags(result.orderId || 'not returned')}`,
+      result.error ? `Error: ${escapeTags(formatValue(result.error))}` : '',
+      '',
+      'Press any key to return to the dashboard.',
+    ].filter(Boolean);
+    await showOrderMessage(resultLines.join('\n'));
+    state.status = result.status === 'succeeded' ? 'Order submitted.' : `Order submission ended with ${result.status}.`;
+    await Promise.allSettled([refreshAccount(), refreshTrades()]);
+  } catch (error) {
+    await showOrderMessage(`{red-fg}${escapeTags(formatError(error))}{/red-fg}\n\nNothing was automatically retried. Check Open Orders before trying again.`);
+    state.status = 'Order flow stopped.';
+  } finally {
+    state.order.visible = false;
+    state.order.submitting = false;
+    orderPrompt.hide();
+    orderMessage.hide();
+    render();
+  }
+}
+
+function parseOrderCommand(command) {
+  const parts = command.trim().split(/\s+/);
+  const side = parts[0]?.toLowerCase();
+  const modeInput = parts[1]?.toLowerCase();
+  if (side !== 'buy' && side !== 'sell') throw new Error('Order must start with buy or sell.');
+  if (modeInput === 'amount') {
+    if (parts.length !== 3) throw new Error('Amount syntax: buy amount <EUR>.');
+    const amount = Number(parts[2]);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be greater than zero.');
+    return { side, mode: 'market', amount };
+  }
+  const mode = modeInput === 'stop' ? 'stopMarket' : modeInput;
+  if (mode !== 'market' && mode !== 'limit' && mode !== 'stopMarket') throw new Error('Order mode must be market, limit, or stop.');
+  const size = Number(parts[2]);
+  if (!Number.isFinite(size) || size <= 0) throw new Error('Quantity must be greater than zero.');
+  if (mode === 'market' && parts.length !== 3) throw new Error('Market syntax: buy market <quantity>.');
+  if (mode !== 'market' && parts.length !== 4) throw new Error('Limit/stop syntax includes exactly one price.');
+  const price = mode === 'market' ? undefined : Number(parts[3]);
+  if (mode !== 'market' && (!Number.isFinite(price) || price <= 0)) throw new Error('Order price must be greater than zero.');
+  return {
+    side,
+    mode,
+    size,
+    ...(mode === 'limit' ? { limit: price } : {}),
+    ...(mode === 'stopMarket' ? { stop: price } : {}),
+  };
+}
+
+function validateOrderAgainstDashboard(options) {
+  if (options.side === 'sell') {
+    if (!state.dashboard.portfolio || state.dashboard.portfolioError) {
+      throw new Error('Portfolio holdings are unavailable, so the TUI will not submit a sell order.');
+    }
+    const position = state.dashboard.portfolio.positions?.find((item) => (item.isin || item.id) === options.instrumentId);
+    const available = Number(position?.quantity ?? 0);
+    const requestedSize = options.size ?? (Number(options.amount) / Number(options.lastClientPrice));
+    if (!Number.isFinite(available) || !Number.isFinite(requestedSize) || available < requestedSize) {
+      throw new Error(`Estimated sell quantity ${formatNumber(requestedSize)} exceeds the loaded position ${formatNumber(available)}.`);
+    }
+  }
+}
+
+function formatOrderPreview(preview, instrument, destination, executablePrice, phrase) {
+  const parameters = preview.order.parameters;
+  return [
+    '{yellow-fg}{bold}FINAL ORDER PREVIEW - submitting can execute a real trade{/bold}{/yellow-fg}',
+    '',
+    `Asset: ${escapeTags(instrument.name || instrument.assetId)} (${escapeTags(instrument.assetId)})`,
+    `Side: ${String(parameters.type).toUpperCase()}   Mode: ${parameters.mode}`,
+    parameters.amount ? `Amount: ${formatMoney(parameters.amount, preview.currency)} (estimated ${formatNumber(Number(parameters.amount) / Number(preview.order.lastClientPrice))} assets)` : `Quantity: ${formatNumber(parameters.size)}`,
+    `Destination: ${escapeTags(destination.name || destination.id)} (${escapeTags(destination.id)})`,
+    parameters.limit ? `Limit: ${formatMoney(parameters.limit, preview.currency)}` : '',
+    parameters.stop ? `Stop: ${formatMoney(parameters.stop, preview.currency)}` : '',
+    executablePrice ? `Current executable price: ${formatMoney(executablePrice, preview.currency)}` : '',
+    `Estimated gross: ${formatMoney(preview.estimatedGross, preview.currency)}`,
+    `Fees: ${formatMoney(preview.totalFees, preview.currency)}`,
+    `Estimated total/proceeds: ${formatMoney(preview.estimatedTotal, preview.currency)}`,
+    '',
+    `Type exactly: {bold}${escapeTags(phrase)}{/bold}`,
+    'Anything else cancels. The preview expires when this dialog closes.',
+  ].filter(Boolean).join('\n');
+}
+
+function promptOrder(message) {
+  return new Promise((resolve) => {
+    orderPrompt.show();
+    orderPrompt.setFront();
+    orderPrompt.input(message, '', (error, value) => {
+      orderPrompt.hide();
+      if (error || value == null) resolve(undefined);
+      else resolve(String(value));
+    });
+    screen.render();
+  });
+}
+
+function showOrderMessage(message) {
+  return new Promise((resolve) => {
+    orderMessage.show();
+    orderMessage.setFront();
+    orderMessage.display(message, 0, () => {
+      orderMessage.hide();
+      resolve();
+    });
+    screen.render();
+  });
+}
+
+function formatConfirmationNumber(value) {
+  return Number(value).toString();
+}
+
+function destinationSupportsOrder(destination, mode, side) {
+  const modes = destination?.raw?.orderModes;
+  if (Array.isArray(modes) && !modes.includes(mode)) return false;
+  if (mode === 'market' && destination?.raw?.open === false) return false;
+  const maintenance = destination?.raw?.maintenanceWindow;
+  const now = Date.now();
+  if (maintenance && now >= Number(maintenance.validFrom) && now <= Number(maintenance.validUntil)) {
+    if (side === 'buy' && maintenance.buyAllowed === false) return false;
+    if (side === 'sell' && maintenance.sellAllowed === false) return false;
+  }
+  return Boolean(destination?.id);
 }
 
 function openSearch() {
@@ -920,12 +1416,15 @@ function openSearch() {
   searchOverlay.show();
   searchOverlay.setFront();
   searchInput.setValue('');
-  searchResults.setItems(['Type a query and press Enter.']);
+  searchResults.setItems(['Start typing to search.']);
   searchInput.focus();
   render();
 }
 
 function closeSearch() {
+  clearTimeout(state.search.debounceTimer);
+  state.search.debounceTimer = undefined;
+  state.search.requestGeneration += 1;
   state.search.visible = false;
   searchOverlay.hide();
   render();
@@ -955,6 +1454,9 @@ function showDashboard() {
 }
 
 function hideSearch() {
+  clearTimeout(state.search.debounceTimer);
+  state.search.debounceTimer = undefined;
+  state.search.requestGeneration += 1;
   state.search.visible = false;
   searchOverlay.hide();
 }
@@ -1024,7 +1526,7 @@ function updateStatusBox() {
     `{cyan-fg}handelsrepublik{/cyan-fg}`,
     `{gray-fg}${state.phase}{/gray-fg}`,
   ];
-  if (state.client?.getSession()) {
+  if (hasUsableSession(state.client?.getSession())) {
     parts.push(`session: {green-fg}ready{/green-fg}`);
   } else if (state.phase === 'booting') {
     parts.push(`{yellow-fg}${escapeTags(state.status || 'Collecting WAF.')}{/yellow-fg}`);
@@ -1074,8 +1576,7 @@ function renderLoginBox() {
 }
 
 function renderDashboardBoxes() {
-  const watchlist = state.dashboard.watchlists[state.dashboard.watchlistIndex];
-  watchlistBox.setContent(formatWatchlistBox(watchlist));
+  watchlistBox.setContent(formatWatchlistBox());
   instrumentBox.setContent(formatInstrumentBox());
   accountBox.setContent(formatAccountBox());
   quoteBox.setContent(formatQuoteBox());
@@ -1092,7 +1593,8 @@ function renderKeysBox() {
     : [
         '/ or s: search instrument',
         'q: close search',
-        '[ ]: cycle watchlist',
+        'Up/Down or j/k: select watchlist item',
+        'o: place buy/sell order',
         'r: refresh data',
         'l: clear session and relogin',
         'Ctrl-C: quit',
@@ -1100,24 +1602,30 @@ function renderKeysBox() {
   keysBox.setContent(lines.join('   |   '));
 }
 
-function formatWatchlistBox(watchlist) {
+function formatWatchlistBox() {
   const lines = [];
-  if (!state.dashboard.watchlists.length) {
-    lines.push('No watchlists available.');
+  const watchlist = state.dashboard.watchlist;
+  if (state.dashboard.loading.watchlists && !watchlist) lines.push('Loading cloud watchlist...');
+  if (!watchlist) {
+    if (!state.dashboard.loading.watchlists) lines.push('No cloud watchlist available.');
     if (state.dashboard.watchlistsError) lines.push(`Error: ${state.dashboard.watchlistsError}`);
     return lines.join('\n');
   }
-  lines.push(`Selected: ${watchlist?.name || watchlist?.id || 'unknown'}`);
+  lines.push(`${watchlist.name || 'Cloud watchlist'}`);
   lines.push(`Count: ${Array.isArray(watchlist?.items) ? watchlist.items.length : 0}`);
   lines.push('');
-  const items = Array.isArray(watchlist?.items) ? watchlist.items.slice(0, 8) : [];
+  const allItems = Array.isArray(watchlist?.items) ? watchlist.items : [];
+  const start = clamp(state.dashboard.watchlistItemIndex - 3, 0, Math.max(0, allItems.length - 8));
+  const items = allItems.slice(start, start + 8);
   if (!items.length) {
-    lines.push('No items to display.');
+    lines.push('The cloud watchlist is empty.');
     return lines.join('\n');
   }
-  for (const item of items) {
-    lines.push(`- ${formatWatchlistItem(item)}`);
+  for (const [offset, item] of items.entries()) {
+    const selected = start + offset === state.dashboard.watchlistItemIndex;
+    lines.push(`${selected ? '{cyan-fg}>{/cyan-fg}' : ' '} ${formatWatchlistItem(item)}`);
   }
+  if (state.dashboard.watchlistsError) lines.push(`Error: ${state.dashboard.watchlistsError}`);
   return lines.join('\n');
 }
 
@@ -1144,31 +1652,48 @@ function formatAccountBox() {
   lines.push(`Session: ${session?.securitiesAccountNumber || 'unknown'}`);
   if (state.dashboard.loading.account) lines.push('Loading account data...');
   if (state.dashboard.account) {
-    lines.push(...summarizeObject(state.dashboard.account, ['name', 'displayName', 'account', 'type', 'status'], 4));
+    const accountName = formatAccountName(state.dashboard.account);
+    if (accountName) lines.push(`Name: ${accountName}`);
   }
+  if (state.dashboard.accountProfileError) lines.push(`Profile unavailable: ${state.dashboard.accountProfileError}`);
   if (state.dashboard.cash) {
     lines.push('');
     lines.push(`Cash: ${formatMoney(state.dashboard.cash.amount, state.dashboard.cash.currency)}`);
   }
+  if (state.dashboard.cashError) lines.push(`Cash unavailable: ${state.dashboard.cashError}`);
   if (state.dashboard.portfolio) {
     const positions = Array.isArray(state.dashboard.portfolio.positions) ? state.dashboard.portfolio.positions : [];
     lines.push(`Positions: ${positions.length}`);
     const total = positions.reduce((sum, position) => sum + (Number.isFinite(position.value) ? Number(position.value) : 0), 0);
     if (total > 0) lines.push(`Value: ${formatMoney(total, guessCurrency(state.dashboard.cash?.currency))}`);
   }
-  if (state.dashboard.accountError) lines.push(`Error: ${state.dashboard.accountError}`);
+  if (state.dashboard.portfolioError) lines.push(`Portfolio unavailable: ${state.dashboard.portfolioError}`);
   return lines.join('\n');
 }
 
 function formatQuoteBox() {
   const lines = [];
   const quote = state.dashboard.quote;
+  const instrument = state.dashboard.instrument;
+  if (instrument) {
+    lines.push(`${instrument.name || instrument.assetId}`);
+    lines.push(`${instrument.assetId} @ ${quote?.exchangeId || instrument.exchangeId || 'unknown'}`);
+    lines.push('');
+  }
   if (state.dashboard.loading.quote) lines.push('Refreshing quote...');
   if (!quote) {
-    lines.push('No quote data yet.');
+    if (!state.dashboard.loading.quote) lines.push('Quote unavailable.');
+    if (state.dashboard.quoteError) lines.push(`Error: ${state.dashboard.quoteError}`);
     return lines.join('\n');
   }
-  lines.push(...summarizeObject(quote, ['price', 'last', 'bid', 'ask', 'change', 'changePercent', 'currency', 'time', 'timestamp', 'updatedAt'], 6));
+  const currency = quote.currency || 'EUR';
+  lines.push(`Last: ${formatPriceAndSize(quote.last, quote.lastSize, currency)}`);
+  lines.push(`Bid:  ${formatPriceAndSize(quote.bid, quote.bidSize, currency)}`);
+  lines.push(`Ask:  ${formatPriceAndSize(quote.ask, quote.askSize, currency)}`);
+  if (Number.isFinite(quote.bid) && Number.isFinite(quote.ask)) {
+    lines.push(`Spread: ${formatMoney(quote.ask - quote.bid, currency)}`);
+  }
+  if (quote.time) lines.push(`Time: ${formatShortDate(quote.time)}`);
   if (state.dashboard.quoteError) lines.push(`Error: ${state.dashboard.quoteError}`);
   return lines.join('\n');
 }
@@ -1182,10 +1707,13 @@ function formatTradesBox() {
     return lines.join('\n');
   }
   for (const trade of state.dashboard.trades.slice(0, 6)) {
-    const qty = trade.quantity != null ? ` x${trade.quantity}` : '';
-    const amount = trade.amount != null ? ` ${formatMoney(trade.amount, trade.currency)}` : '';
+    const name = trade.displayName || trade.name || trade.isin || trade.instrumentId || 'Unknown asset';
+    const quantity = trade.executedQuantity ?? trade.quantity;
+    const qty = quantity != null ? ` x${formatNumber(quantity)}` : '';
+    const price = trade.executionPrice != null ? ` @ ${formatMoney(trade.executionPrice, trade.currency)}` : '';
     const when = trade.executedAt ? ` ${formatShortDate(trade.executedAt)}` : '';
-    lines.push(`- ${trade.side || 'TRADE'}${qty}${amount}${when}`.trim());
+    lines.push(`- ${name}`);
+    lines.push(`  ${trade.side || 'TRADE'}${qty}${price}${when}`.trimEnd());
   }
   return lines.join('\n');
 }
@@ -1194,7 +1722,8 @@ function formatDomBox() {
   const lines = [];
   if (state.dashboard.loading.book) lines.push('Refreshing DOM...');
   if (!state.dashboard.orderBook) {
-    lines.push('No order book data yet.');
+    if (state.dashboard.bookUnavailable) lines.push('L2 unavailable for this asset.');
+    else if (!state.dashboard.loading.book) lines.push('No order book data yet.');
     if (state.dashboard.bookError) lines.push(`Error: ${state.dashboard.bookError}`);
     return lines.join('\n');
   }
@@ -1229,7 +1758,7 @@ function formatSearchResult(item, index) {
 }
 
 function formatWatchlistItem(item) {
-  return firstString(item?.name, item?.title, item?.instrumentName, item?.isin, item?.instrumentId, item?.id) || safeInspect(item, 1);
+  return firstString(item?.name, item?.title, item?.instrumentName) || 'Unknown instrument';
 }
 
 function summarizeObject(value, preferredKeys, maxLines = 6) {
@@ -1256,11 +1785,13 @@ function resolveInstrument(client, query) {
   return client.assets.search(query, { limit: 10 }).then((results) => {
     const asset = results[0];
     if (!asset) throw new Error(`No instrument found for "${query}".`);
+    const exchangeIds = firstStringArray(asset.exchangeIds);
     return {
       assetId: asset.isin || asset.id,
       isin: asset.isin || asset.id,
       name: asset.name || asset.id,
-      exchangeId: firstString(asset.exchangeIds) || 'LSX',
+      exchangeId: exchangeIds[0] || 'LSX',
+      exchangeIds,
     };
   });
 }
@@ -1268,14 +1799,22 @@ function resolveInstrument(client, query) {
 async function resolveQrChallengeDetails(client, challenge) {
   const inlinePayload = extractQrPayloadCandidate(challenge, challenge.raw);
   const inlineExpiresAt = firstString(
+    deepFindString(challenge, 'challengeExpiresAt'),
+    deepFindString(challenge.raw, 'challengeExpiresAt'),
     deepFindString(challenge, 'qrCodeTokenExpiresAt'),
     deepFindString(challenge.raw, 'qrCodeTokenExpiresAt'),
     challenge.expiresAt,
+  );
+  const inlineTokenExpiresAt = firstString(
+    deepFindString(challenge, 'qrCodeTokenExpiresAt'),
+    deepFindString(challenge.raw, 'qrCodeTokenExpiresAt'),
   );
   if (inlinePayload) {
     return {
       payload: inlinePayload,
       expiresAt: inlineExpiresAt,
+      tokenExpiresAt: inlineTokenExpiresAt,
+      serverTime: challenge.serverTime,
       rawDetail: challenge.raw,
     };
   }
@@ -1287,6 +1826,8 @@ async function resolveQrChallengeDetails(client, challenge) {
       return {
         payload: decoded,
         expiresAt: inlineExpiresAt,
+        tokenExpiresAt: inlineTokenExpiresAt,
+        serverTime: challenge.serverTime,
         rawDetail: challenge.raw,
       };
     }
@@ -1294,21 +1835,31 @@ async function resolveQrChallengeDetails(client, challenge) {
 
   if (!challenge.id) return { rawDetail: challenge.raw };
   try {
-    const detail = await client.raw.request({
-      path: `/api/v2/auth/web/login/qr-challenges/${encodeURIComponent(challenge.id)}`,
-    });
+    const response = await client.web.requestDetailed('GET', `/api/v2/auth/web/login/qr-challenges/${encodeURIComponent(challenge.id)}`);
+    const detail = response.body;
     if (!detail || typeof detail !== 'object') return { rawDetail: detail };
     const detailDataUrl = extractQrDataUrlCandidate(detail);
     const detailPayload = extractQrPayloadCandidate(detail);
     const decoded = detailDataUrl ? decodeQrDataUrl(detailDataUrl) : undefined;
     return {
       payload: detailPayload || decoded,
-      expiresAt: firstString(detail.qrCodeTokenExpiresAt, detail.expiresAt, detail.expiration, detail.challengeExpiresAt),
+      // Trade Republic uses challengeExpiresAt for the QR display lifetime;
+      // qrCodeTokenExpiresAt is a separate polling/token deadline.
+      expiresAt: firstString(detail.challengeExpiresAt, detail.expiresAt, detail.expiration, detail.qrCodeTokenExpiresAt),
+      tokenExpiresAt: firstString(detail.qrCodeTokenExpiresAt),
+      serverTime: response.headers.get('date'),
       rawDetail: detail,
     };
   } catch (error) {
     return { rawDetail: { error: formatError(error) } };
   }
+}
+
+function calibratedExpiryMs(expiresAt, serverTime) {
+  const expiryMs = parseDateMs(expiresAt);
+  const serverMs = serverTime ? Date.parse(serverTime) : NaN;
+  if (!expiryMs || !Number.isFinite(serverMs)) return expiryMs;
+  return expiryMs - (serverMs - Date.now());
 }
 
 function hasPinLoginConfig() {
@@ -1429,26 +1980,6 @@ function previewString(value) {
   return JSON.stringify(`${value.slice(0, 18)}...${value.slice(-4)}`);
 }
 
-function normalizeWatchlists(payload) {
-  const record = payload && typeof payload === 'object' ? payload : {};
-  const watchlists = Array.isArray(record.watchlists) ? record.watchlists : Array.isArray(payload) ? payload : [];
-  return watchlists.map((watchlist) => ({
-    id: firstString(watchlist.id, watchlist.watchlistId, watchlist.slug) || 'unknown',
-    name: firstString(watchlist.name, watchlist.title) || 'Unnamed watchlist',
-    items: Array.isArray(watchlist.items) ? watchlist.items : [],
-    raw: watchlist,
-  }));
-}
-
-function pickVenue(venues, preferredId) {
-  if (!Array.isArray(venues) || venues.length === 0) return undefined;
-  if (preferredId) {
-    const match = venues.find((venue) => venue.exchangeId === preferredId);
-    if (match) return match;
-  }
-  return venues[0];
-}
-
 function formatCountdown(expiresAtMs) {
   const remainingMs = expiresAtMs - Date.now();
   if (remainingMs <= 0) return '00:00';
@@ -1477,6 +2008,23 @@ function formatMoney(amount, currency) {
     maximumFractionDigits: 4,
   }).format(value);
   return currency ? `${formatted} ${currency}` : formatted;
+}
+
+function formatPriceAndSize(price, size, currency) {
+  const formattedPrice = formatMoney(price, currency);
+  return size == null ? formattedPrice : `${formattedPrice} x ${formatNumber(size)}`;
+}
+
+function formatAccountName(account) {
+  const name = deepFind(account, 'name');
+  if (typeof name === 'string') return cleanString(name);
+  if (name && typeof name === 'object') {
+    return [name.first, name.firstName, name.givenName, name.last, name.lastName, name.familyName]
+      .map(cleanString)
+      .filter((value, index, values) => value && values.indexOf(value) === index)
+      .join(' ');
+  }
+  return firstString(deepFindString(account, 'displayName'));
 }
 
 function formatNumber(value) {
@@ -1628,13 +2176,6 @@ function panel(title) {
     hidden: true,
     content: '',
   });
-}
-
-function cycleWatchlist(direction) {
-  const list = state.dashboard.watchlists;
-  if (!list.length) return;
-  state.dashboard.watchlistIndex = (state.dashboard.watchlistIndex + direction + list.length) % list.length;
-  render();
 }
 
 async function shutdown(code = 0) {

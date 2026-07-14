@@ -21,7 +21,6 @@ describe('collectTradeRepublicWebContext', () => {
       awsWafToken: 'waf-token',
       xsrfToken: 'xsrf-cookie',
       headers: {
-        'x-aws-waf-token': 'waf-token',
         'x-tr-app-version': '1.2.3',
         'x-tr-platform': 'web',
         'x-tr-device-info': 'test-device',
@@ -34,13 +33,26 @@ describe('collectTradeRepublicWebContext', () => {
     expect(context.cookieHeader).toContain('tr_session=session-cookie');
     expect(browser.context?.closed).toBe(true);
   });
+
+  it('decodes the WAF token storage value without confusing it with the refresh timestamp', async () => {
+    const browser = new FakeBrowser(false);
+
+    const context = await collectTradeRepublicWebContext(browser, {
+      timeoutMs: 1_000,
+      settleMs: 0,
+    });
+
+    expect(context.awsWafToken).toBe('storage-waf-token');
+  });
 });
 
 class FakeBrowser implements TradeRepublicBrowserLike {
   context: FakeContext | undefined;
 
+  constructor(private readonly includeWafCookie = true) {}
+
   async newContext(): Promise<TradeRepublicBrowserContextLike> {
-    this.context = new FakeContext();
+    this.context = new FakeContext(this.includeWafCookie);
     return this.context;
   }
 }
@@ -48,6 +60,8 @@ class FakeBrowser implements TradeRepublicBrowserLike {
 class FakeContext implements TradeRepublicBrowserContextLike {
   closed = false;
   private requestListeners: Array<(request: TradeRepublicRequestLike) => void> = [];
+
+  constructor(private readonly includeWafCookie: boolean) {}
 
   async newPage(): Promise<TradeRepublicPageLike> {
     return new FakePage((request) => this.emitRequest(request));
@@ -57,6 +71,7 @@ class FakeContext implements TradeRepublicBrowserContextLike {
     return [
       { name: 'tr_session', value: 'session-cookie', domain: '.traderepublic.com' },
       { name: 'XSRF-TOKEN', value: 'xsrf-cookie', domain: '.traderepublic.com' },
+      ...(this.includeWafCookie ? [{ name: 'aws-waf-token', value: 'waf-token', domain: '.traderepublic.com' }] : []),
     ];
   }
 
@@ -80,7 +95,6 @@ class FakePage implements TradeRepublicPageLike {
 
   async goto(): Promise<void> {
     const request = new FakeRequest('https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges', {
-      'x-aws-waf-token': 'waf-token',
       'x-tr-app-version': '1.2.3',
       'x-tr-platform': 'web',
       'x-tr-device-info': 'test-device',
@@ -90,12 +104,17 @@ class FakePage implements TradeRepublicPageLike {
     for (const listener of this.requestListeners) listener(request);
   }
 
-  async waitForLoadState(): Promise<void> {}
+  async waitForLoadState(): Promise<void> {
+    throw new Error('WAF collection must not wait for networkidle');
+  }
 
   async waitForTimeout(): Promise<void> {}
 
   async evaluate<T>(): Promise<T> {
-    return { awsWafToken: 'storage-waf-token' } as T;
+    return {
+      awswaf_token_refresh_timestamp: 'not-a-token',
+      awswaf_session_storage: JSON.stringify('storage-waf-token'),
+    } as T;
   }
 
   on(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void {

@@ -50,18 +50,18 @@ export class AuthApi {
       phoneNumber: options.phoneNumber,
       deviceName: options.deviceName,
     });
-    let raw: unknown;
     try {
-      raw = await this.http.request<unknown>(
+      const response = await this.http.requestDetailed<unknown>(
         'POST',
         this.endpoints.resolve('auth.qrChallenge'),
         basePayload,
         undefined,
         { signal: options.signal },
       );
+      return normalizeChallenge(response.body, response.headers.get('date'));
     } catch (error) {
       if (!(error instanceof TradeRepublicHttpError) || options.phoneNumber !== undefined) throw error;
-      raw = await this.http.request<unknown>(
+      const response = await this.http.requestDetailed<unknown>(
         'POST',
         this.endpoints.resolve('auth.qrChallenge'),
         {
@@ -71,8 +71,8 @@ export class AuthApi {
         undefined,
         { signal: options.signal },
       );
+      return normalizeChallenge(response.body, response.headers.get('date'));
     }
-    return normalizeChallenge(raw);
   }
 
   async startLoginWithPin(options: StartLoginWithPinOptions): Promise<LoginProgressState> {
@@ -102,6 +102,7 @@ export class AuthApi {
     const timeoutMs = options.timeoutMs ?? 120_000;
     const startedAt = Date.now();
     let processId: string | undefined;
+    let confirmedPolls = 0;
     let accumulatedSession: Session | undefined = this.getSession();
     debugLog(options.debug, 'poll:start', { challengeId: challenge.id, intervalMs, timeoutMs });
     while (Date.now() - startedAt <= timeoutMs) {
@@ -117,6 +118,7 @@ export class AuthApi {
         const processRaw = processResponse.body;
         const processState = extractLoginProgressState(processRaw);
         const processStatus = normalizeStatus(processState.status);
+        confirmedPolls = processStatus === 'CONFIRMED' ? confirmedPolls + 1 : 0;
         const processCookieSession = extractCookieSession(processResponse.headers);
         accumulatedSession = rememberProgressSession(accumulatedSession, processCookieSession, this.setSession);
         debugLog(options.debug, 'poll:process', {
@@ -127,7 +129,8 @@ export class AuthApi {
           setCookieNames: Object.keys(processCookieSession?.cookies ?? {}),
           hasSession: Boolean(processState.session),
         });
-        const processSession = processState.session ?? (isAuthenticatedStatus(processStatus) ? accumulatedSession : undefined);
+        const processSession = processState.session
+          ?? ((isAuthenticatedStatus(processStatus) || confirmedPolls >= 2) ? accumulatedSession : undefined);
         if (processSession) {
           const completedSession = await this.completeWebSession(processSession, options);
           const finalizedSession = await this.finalizeSession(completedSession);
@@ -247,6 +250,7 @@ export class AuthApi {
     const timeoutMs = options.timeoutMs ?? 120_000;
     const startedAt = Date.now();
     let processId = progress.processId;
+    let confirmedPolls = 0;
     let accumulatedSession: Session | undefined = mergeSessions(this.getSession(), progress.session);
     if (accumulatedSession) this.setSession(accumulatedSession);
     debugLog(options.debug, 'poll:process:start', {
@@ -257,7 +261,9 @@ export class AuthApi {
     while (Date.now() - startedAt <= timeoutMs) {
       if (options.signal?.aborted) throw options.signal.reason;
       const status = normalizeStatus(progress.status);
-      const processSession = progress.session ?? (isAuthenticatedStatus(status) ? accumulatedSession : undefined);
+      confirmedPolls = status === 'CONFIRMED' ? confirmedPolls + 1 : 0;
+      const processSession = progress.session
+        ?? ((isAuthenticatedStatus(status) || confirmedPolls >= 2) ? accumulatedSession : undefined);
       if (processSession) {
         const completedSession = await this.completeWebSession(processSession, options);
         const finalizedSession = await this.finalizeSession(completedSession);
@@ -297,7 +303,7 @@ export class AuthApi {
   }
 }
 
-function normalizeChallenge(raw: unknown): InstantLoginChallenge {
+function normalizeChallenge(raw: unknown, serverTime?: string | null): InstantLoginChallenge {
   const record = asRecord(raw);
   const id = stringValue(record.id, record.challengeId, record.processId);
   return {
@@ -306,6 +312,7 @@ function normalizeChallenge(raw: unknown): InstantLoginChallenge {
     qrCodeDataUrl: optionalString(record.qrCodeDataUrl, record.qrDataUrl),
     deepLink: optionalString(record.deepLink, record.loginUrl, record.url),
     expiresAt: optionalString(record.expiresAt, record.challengeExpiresAt, record.qrCodeTokenExpiresAt, record.expiration),
+    serverTime: serverTime ?? undefined,
     raw,
   };
 }

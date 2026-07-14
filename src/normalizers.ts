@@ -13,6 +13,7 @@ import type {
   L2OrderBook,
   L2Venue,
   LiveFeedEvent,
+  MarketQuote,
   MarketSubscription,
   Order,
   OrderDestination,
@@ -25,6 +26,8 @@ import type {
   TimelineDetail,
   TimelineItem,
   Trade,
+  Watchlist,
+  WatchlistItem,
 } from './types.js';
 
 export function arrayPayload(value: unknown): unknown[] {
@@ -55,17 +58,55 @@ export function arrayPayload(value: unknown): unknown[] {
   }
   const objItems = asRecord(record.obj).items;
   if (Array.isArray(objItems)) return objItems;
+  const nestedData = asRecord(record.data);
+  if (Array.isArray(nestedData.data)) return nestedData.data;
+  if (Array.isArray(nestedData.items)) return nestedData.items;
   return [];
 }
 
 export function normalizeAsset(value: unknown): Asset {
   const record = asRecord(value);
+  const instrument = asRecord(record.instrument);
+  const core = asRecord(record.core);
   return {
-    id: stringValue(record.id, record.instrumentId, record.isin, record.slug),
-    isin: optionalString(record.isin),
-    name: optionalString(record.name, record.shortName, record.title),
-    type: optionalString(record.type, record.instrumentType, record.assetType),
-    exchangeIds: arrayOfStrings(record.exchangeIds, record.exchanges),
+    id: stringValue(record.id, record.instrumentId, record.isin, instrument.id, instrument.instrumentId, instrument.isin, record.slug),
+    isin: optionalString(record.isin, record.instrumentId, instrument.isin, instrument.instrumentId),
+    name: optionalString(
+      record.name,
+      record.shortName,
+      record.title,
+      record['core.shortName'],
+      record['core.officialName'],
+      core.shortName,
+      core.officialName,
+      instrument.name,
+      instrument.shortName,
+      instrument.title,
+    ),
+    type: optionalString(record.type, record.instrumentType, record.assetType, instrument.type, instrument.instrumentType, instrument.assetType),
+    exchangeIds: uniqueStrings(
+      arrayOfStrings(record.exchangeIds, record.exchanges, record.tradingVenues),
+      arrayOfStrings(instrument.exchangeIds, instrument.exchanges, instrument.tradingVenues),
+    ),
+    raw: value,
+  };
+}
+
+export function normalizeWatchlistItem(value: unknown): WatchlistItem {
+  const record = asRecord(value);
+  return {
+    ...normalizeAsset(value),
+    rank: optionalNumber(record.rank, record.itemRank, record.item_rank),
+  };
+}
+
+export function normalizeWatchlist(value: unknown, items: unknown[] = []): Watchlist {
+  const record = asRecord(value);
+  const inlineItems = Array.isArray(record.items) ? record.items : items;
+  return {
+    id: stringValue(record.id, record.watchlistId, record.slug),
+    name: optionalString(record.name, record.title),
+    items: inlineItems.map(normalizeWatchlistItem).sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER)),
     raw: value,
   };
 }
@@ -96,6 +137,7 @@ export function normalizeDerivative(value: unknown): Derivative {
 
 export function normalizeOrder(value: unknown): Order {
   const record = asRecord(value);
+  const instrument = asRecord(record.instrument);
   const amount = moneyAmount(record.amount)
     ?? moneyAmount(record.cashQuantity)
     ?? optionalNumber(record.amount, asRecord(record.amount).value, asRecord(record.cashQuantity).amount);
@@ -106,26 +148,58 @@ export function normalizeOrder(value: unknown): Order {
   const cancelledAt = optionalString(record.cancelledAt, record.canceledAt);
   const expiredAt = optionalString(record.expiredAt);
   const rejectedAt = optionalString(record.rejectedAt);
+  const executions = normalizeExecutions(record.trades, record.executions, record.fills);
+  const executedQuantity = optionalNumber(record.executedQuantity, record.executedSize, record.filledQuantity, record.filledSize)
+    ?? (executions.length ? executions.reduce((sum, execution) => sum + execution.size, 0) : undefined);
+  const executionPrice = optionalNumber(record.executionPrice, record.executedPrice, record.averageExecutionPrice, record.averagePrice)
+    ?? weightedExecutionPrice(executions);
   return {
     id: stringValue(record.id, record.orderId),
     status: optionalString(record.status, record.state) ?? inferOrderStatus(record),
-    isin: optionalString(record.isin, record.instrumentId),
-    instrumentId: optionalString(record.instrumentId, record.isin),
+    isin: optionalString(record.isin, record.instrumentId, instrument.isin, instrument.instrumentId),
+    instrumentId: optionalString(record.instrumentId, record.isin, instrument.instrumentId, instrument.isin),
+    name: optionalString(record.name, record.instrumentName, instrument.name, instrument.shortName),
     side: optionalString(record.side, record.action),
     type: optionalString(record.type, record.mode, record.orderType),
     createdAt: optionalString(record.createdAt, record.created, record.createdTime, record.submittedAt),
     submittedAt: optionalString(record.submittedAt),
     updatedAt: optionalString(record.updatedAt),
     closedAt: optionalString(record.closedAt, executedAt, cancelledAt, expiredAt, rejectedAt),
-    executedAt,
+    executedAt: executedAt ?? executions.map((execution) => execution.time).filter((time): time is string => Boolean(time)).sort().at(-1),
     cancelledAt,
     expiredAt,
     rejectedAt,
     quantity: optionalNumber(record.quantity, record.size, record.estimatedSize),
+    executedQuantity,
+    executionPrice,
     amount,
     currency,
     raw: value,
   };
+}
+
+function normalizeExecutions(...values: unknown[]): Array<{ size: number; price?: number | undefined; time?: string | undefined }> {
+  for (const value of values) {
+    if (!Array.isArray(value)) continue;
+    const executions = value.flatMap((item) => {
+      const record = asRecord(item);
+      const size = optionalNumber(record.executionSize, record.executedSize, record.quantity, record.size);
+      if (size === undefined || size <= 0) return [];
+      return [{
+        size,
+        price: optionalNumber(record.executionPrice, record.price, record.executedPrice),
+        time: optionalString(record.executedAt, record.executionTime, record.createdAt, record.time),
+      }];
+    });
+    if (executions.length) return executions;
+  }
+  return [];
+}
+
+function weightedExecutionPrice(executions: Array<{ size: number; price?: number | undefined }>): number | undefined {
+  const priced = executions.filter((execution): execution is { size: number; price: number } => execution.price !== undefined);
+  const size = priced.reduce((sum, execution) => sum + execution.size, 0);
+  return size > 0 ? priced.reduce((sum, execution) => sum + execution.price * execution.size, 0) / size : undefined;
 }
 
 function inferOrderStatus(record: Record<string, unknown>): string | undefined {
@@ -171,7 +245,9 @@ export function normalizeBoardWidget(value: unknown): BoardWidget {
 }
 
 export function normalizePortfolio(value: unknown): Portfolio {
-  const positions = arrayPayload(value).flatMap((item) => {
+  const record = asRecord(value);
+  const source = Array.isArray(record.categories) ? record.categories : arrayPayload(value);
+  const positions = source.flatMap((item) => {
     const record = asRecord(item);
     if (Array.isArray(record.positions)) return record.positions.map((position) => normalizePortfolioPosition({ ...asRecord(position), categoryType: record.categoryType }));
     return [normalizePortfolioPosition(item)];
@@ -188,6 +264,7 @@ export function normalizePortfolioPosition(value: unknown): PortfolioPosition {
     quantity: optionalNumber(record.quantity, record.shares, record.size),
     value: optionalNumber(record.value, record.netValue, asRecord(record.marketValue).amount),
     currency: optionalString(record.currency, asRecord(record.marketValue).currency),
+    categoryType: optionalString(record.categoryType),
     raw: value,
   };
 }
@@ -408,6 +485,51 @@ export function normalizeLiveFeedEvent(value: unknown): LiveFeedEvent {
   };
 }
 
+export function normalizeMarketQuote(value: unknown, assetId: string, exchangeId: string): MarketQuote {
+  const record = asRecord(value);
+  const last = asRecord(record.last);
+  const bid = asRecord(record.bid);
+  const ask = asRecord(record.ask);
+  const timeValue = optionalString(record.time, record.timestamp, record.updatedAt, last.time, bid.time, ask.time)
+    ?? optionalNumber(record.time, record.timestamp, last.time, bid.time, ask.time);
+  return {
+    assetId,
+    exchangeId,
+    currency: optionalString(record.currency, record.unit, last.currency, bid.currency, ask.currency),
+    last: priceValue(record.last, record.price),
+    lastSize: sizeValue(record.last, record.lastSize, record.size),
+    bid: priceValue(record.bid),
+    bidSize: sizeValue(record.bid, record.bidSize),
+    ask: priceValue(record.ask),
+    askSize: sizeValue(record.ask, record.askSize),
+    time: normalizeTimestamp(timeValue),
+    raw: value,
+  };
+}
+
+export function normalizeL2Venues(value: unknown): L2Venue[] {
+  const record = asRecord(value);
+  const instrument = asRecord(record.instrument);
+  const candidates = [
+    record.exchangeIds,
+    record.exchanges,
+    record.tradingVenues,
+    record.availableExchanges,
+    record.venues,
+    instrument.exchangeIds,
+    instrument.exchanges,
+    instrument.tradingVenues,
+  ];
+  const venues = candidates.flatMap((candidate) => {
+    if (!Array.isArray(candidate)) return [];
+    return candidate.map((item) => typeof item === 'string' ? normalizeL2Venue({ exchangeId: item }) : normalizeL2Venue(item));
+  });
+  const exchange = asRecord(record.exchange);
+  const direct = optionalString(record.exchangeId, exchange.id, exchange.exchangeId);
+  if (direct) venues.unshift(normalizeL2Venue({ exchangeId: direct, name: exchange.name }));
+  return venues.filter((venue, index) => venue.exchangeId && venues.findIndex((candidate) => candidate.exchangeId === venue.exchangeId) === index);
+}
+
 export function normalizeL2Venue(value: unknown): L2Venue {
   const record = asRecord(value);
   return {
@@ -476,12 +598,44 @@ function arrayOfStrings(...values: unknown[]): string[] | undefined {
       const strings = value.flatMap((item) => {
         if (typeof item === 'string') return [item];
         const record = asRecord(item);
-        return optionalString(record.id, record.exchangeId) ? [optionalString(record.id, record.exchangeId)!] : [];
+        return optionalString(record.id, record.exchangeId, record.exchange, record.slug) ? [optionalString(record.id, record.exchangeId, record.exchange, record.slug)!] : [];
       });
       if (strings.length) return strings;
     }
   }
   return undefined;
+}
+
+function uniqueStrings(...values: Array<string[] | undefined>): string[] | undefined {
+  const result = [...new Set(values.flatMap((value) => value ?? []))];
+  return result.length ? result : undefined;
+}
+
+function priceValue(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const number = optionalNumber(value, asRecord(value).price, asRecord(value).value, asRecord(value).amount, asRecord(value).decimal);
+    if (number !== undefined) return number;
+  }
+  return undefined;
+}
+
+function sizeValue(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const number = optionalNumber(value, asRecord(value).size, asRecord(value).quantity, asRecord(value).volume);
+    if (number !== undefined) return number;
+  }
+  return undefined;
+}
+
+function normalizeTimestamp(value: string | number | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number') {
+    const milliseconds = value < 10_000_000_000 ? value * 1000 : value;
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+  }
+  if (/^\d+$/.test(value)) return normalizeTimestamp(Number(value));
+  return value;
 }
 
 function objectPayload(value: unknown): Record<string, unknown> | undefined {

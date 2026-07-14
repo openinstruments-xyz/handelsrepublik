@@ -5,6 +5,7 @@ export interface HttpClientOptions {
   apiBaseUrl: string;
   locale: string;
   userAgent: string;
+  sdkHeaders?: Record<string, string> | undefined;
   defaultHeaders?: Record<string, string> | undefined;
   fetch: typeof fetch;
   getSession: () => Session | undefined;
@@ -77,8 +78,9 @@ export class HttpClient {
       origin: 'https://app.traderepublic.com',
       referer: 'https://app.traderepublic.com/',
       'user-agent': this.options.userAgent,
-      ...normalizeHeaderRecord(this.options.defaultHeaders),
       ...normalizeHeaderRecord(webContext?.headers),
+      ...normalizeHeaderRecord(this.options.sdkHeaders),
+      ...normalizeHeaderRecord(this.options.defaultHeaders),
       ...extra,
     };
     if (hasJsonBody && !hasHeader(headers, 'content-type')) headers['content-type'] = 'application/json';

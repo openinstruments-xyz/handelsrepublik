@@ -33,6 +33,7 @@ describe('schema registry', () => {
 
   it('documents live-safe and blocked mutation risk classes', () => {
     const lowRisk = schemaRegistry.filter((entry) => entry.risk === 'lowRiskMutation').map((entry) => entry.name);
+    const highRisk = schemaRegistry.filter((entry) => entry.risk === 'highRiskMutation').map((entry) => entry.name);
     const blocked = schemaRegistry.filter((entry) => entry.risk === 'blockedMutation').map((entry) => entry.name);
 
     assert.deepEqual(lowRisk.sort(), [
@@ -44,6 +45,7 @@ describe('schema registry', () => {
       'priceAlarms.cancel',
       'priceAlarms.create',
     ].sort());
+    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.submit']);
     assert.ok(blocked.includes('blocked.orderMutations'));
     assert.ok(blocked.includes('blocked.bankTransfers'));
     assert.ok(blocked.includes('blocked.documentAcceptance'));
@@ -61,6 +63,7 @@ describe('schema registry', () => {
     const catalog = schemaCatalogMarkdown();
     assert.match(catalog, /`portfolio\.cash`/);
     assert.match(catalog, /`blockedMutation`/);
+    assert.match(catalog, /`highRiskMutation`/);
     assert.match(catalog, /websocket/);
   });
 });

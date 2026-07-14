@@ -65,16 +65,52 @@ function arrayPayload(value) {
   }
   const objItems = asRecord(record.obj).items;
   if (Array.isArray(objItems)) return objItems;
+  const nestedData = asRecord(record.data);
+  if (Array.isArray(nestedData.data)) return nestedData.data;
+  if (Array.isArray(nestedData.items)) return nestedData.items;
   return [];
 }
 function normalizeAsset(value) {
   const record = asRecord(value);
+  const instrument = asRecord(record.instrument);
+  const core = asRecord(record.core);
   return {
-    id: stringValue(record.id, record.instrumentId, record.isin, record.slug),
-    isin: optionalString(record.isin),
-    name: optionalString(record.name, record.shortName, record.title),
-    type: optionalString(record.type, record.instrumentType, record.assetType),
-    exchangeIds: arrayOfStrings(record.exchangeIds, record.exchanges),
+    id: stringValue(record.id, record.instrumentId, record.isin, instrument.id, instrument.instrumentId, instrument.isin, record.slug),
+    isin: optionalString(record.isin, record.instrumentId, instrument.isin, instrument.instrumentId),
+    name: optionalString(
+      record.name,
+      record.shortName,
+      record.title,
+      record["core.shortName"],
+      record["core.officialName"],
+      core.shortName,
+      core.officialName,
+      instrument.name,
+      instrument.shortName,
+      instrument.title
+    ),
+    type: optionalString(record.type, record.instrumentType, record.assetType, instrument.type, instrument.instrumentType, instrument.assetType),
+    exchangeIds: uniqueStrings(
+      arrayOfStrings(record.exchangeIds, record.exchanges, record.tradingVenues),
+      arrayOfStrings(instrument.exchangeIds, instrument.exchanges, instrument.tradingVenues)
+    ),
+    raw: value
+  };
+}
+function normalizeWatchlistItem(value) {
+  const record = asRecord(value);
+  return {
+    ...normalizeAsset(value),
+    rank: optionalNumber(record.rank, record.itemRank, record.item_rank)
+  };
+}
+function normalizeWatchlist(value, items = []) {
+  const record = asRecord(value);
+  const inlineItems = Array.isArray(record.items) ? record.items : items;
+  return {
+    id: stringValue(record.id, record.watchlistId, record.slug),
+    name: optionalString(record.name, record.title),
+    items: inlineItems.map(normalizeWatchlistItem).sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER)),
     raw: value
   };
 }
@@ -102,32 +138,61 @@ function normalizeDerivative(value) {
 }
 function normalizeOrder(value) {
   const record = asRecord(value);
+  const instrument = asRecord(record.instrument);
   const amount = moneyAmount(record.amount) ?? moneyAmount(record.cashQuantity) ?? optionalNumber(record.amount, asRecord(record.amount).value, asRecord(record.cashQuantity).amount);
   const currency = moneyCurrency(record.amount) ?? moneyCurrency(record.cashQuantity) ?? optionalString(record.currency, record.currencyId, asRecord(record.amount).currency, asRecord(record.cashQuantity).currency);
   const executedAt = optionalString(record.executedAt);
   const cancelledAt = optionalString(record.cancelledAt, record.canceledAt);
   const expiredAt = optionalString(record.expiredAt);
   const rejectedAt = optionalString(record.rejectedAt);
+  const executions = normalizeExecutions(record.trades, record.executions, record.fills);
+  const executedQuantity = optionalNumber(record.executedQuantity, record.executedSize, record.filledQuantity, record.filledSize) ?? (executions.length ? executions.reduce((sum, execution) => sum + execution.size, 0) : void 0);
+  const executionPrice = optionalNumber(record.executionPrice, record.executedPrice, record.averageExecutionPrice, record.averagePrice) ?? weightedExecutionPrice(executions);
   return {
     id: stringValue(record.id, record.orderId),
     status: optionalString(record.status, record.state) ?? inferOrderStatus(record),
-    isin: optionalString(record.isin, record.instrumentId),
-    instrumentId: optionalString(record.instrumentId, record.isin),
+    isin: optionalString(record.isin, record.instrumentId, instrument.isin, instrument.instrumentId),
+    instrumentId: optionalString(record.instrumentId, record.isin, instrument.instrumentId, instrument.isin),
+    name: optionalString(record.name, record.instrumentName, instrument.name, instrument.shortName),
     side: optionalString(record.side, record.action),
     type: optionalString(record.type, record.mode, record.orderType),
     createdAt: optionalString(record.createdAt, record.created, record.createdTime, record.submittedAt),
     submittedAt: optionalString(record.submittedAt),
     updatedAt: optionalString(record.updatedAt),
     closedAt: optionalString(record.closedAt, executedAt, cancelledAt, expiredAt, rejectedAt),
-    executedAt,
+    executedAt: executedAt ?? executions.map((execution) => execution.time).filter((time) => Boolean(time)).sort().at(-1),
     cancelledAt,
     expiredAt,
     rejectedAt,
     quantity: optionalNumber(record.quantity, record.size, record.estimatedSize),
+    executedQuantity,
+    executionPrice,
     amount,
     currency,
     raw: value
   };
+}
+function normalizeExecutions(...values) {
+  for (const value of values) {
+    if (!Array.isArray(value)) continue;
+    const executions = value.flatMap((item) => {
+      const record = asRecord(item);
+      const size = optionalNumber(record.executionSize, record.executedSize, record.quantity, record.size);
+      if (size === void 0 || size <= 0) return [];
+      return [{
+        size,
+        price: optionalNumber(record.executionPrice, record.price, record.executedPrice),
+        time: optionalString(record.executedAt, record.executionTime, record.createdAt, record.time)
+      }];
+    });
+    if (executions.length) return executions;
+  }
+  return [];
+}
+function weightedExecutionPrice(executions) {
+  const priced = executions.filter((execution) => execution.price !== void 0);
+  const size = priced.reduce((sum, execution) => sum + execution.size, 0);
+  return size > 0 ? priced.reduce((sum, execution) => sum + execution.price * execution.size, 0) / size : void 0;
 }
 function inferOrderStatus(record) {
   if (optionalString(record.executedAt)) return "executed";
@@ -168,9 +233,11 @@ function normalizeBoardWidget(value) {
   };
 }
 function normalizePortfolio(value) {
-  const positions = arrayPayload(value).flatMap((item) => {
-    const record = asRecord(item);
-    if (Array.isArray(record.positions)) return record.positions.map((position) => normalizePortfolioPosition({ ...asRecord(position), categoryType: record.categoryType }));
+  const record = asRecord(value);
+  const source = Array.isArray(record.categories) ? record.categories : arrayPayload(value);
+  const positions = source.flatMap((item) => {
+    const record2 = asRecord(item);
+    if (Array.isArray(record2.positions)) return record2.positions.map((position) => normalizePortfolioPosition({ ...asRecord(position), categoryType: record2.categoryType }));
     return [normalizePortfolioPosition(item)];
   });
   return { positions, raw: value };
@@ -184,6 +251,7 @@ function normalizePortfolioPosition(value) {
     quantity: optionalNumber(record.quantity, record.shares, record.size),
     value: optionalNumber(record.value, record.netValue, asRecord(record.marketValue).amount),
     currency: optionalString(record.currency, asRecord(record.marketValue).currency),
+    categoryType: optionalString(record.categoryType),
     raw: value
   };
 }
@@ -374,6 +442,48 @@ function normalizeLiveFeedEvent(value) {
     raw: value
   };
 }
+function normalizeMarketQuote(value, assetId, exchangeId) {
+  const record = asRecord(value);
+  const last = asRecord(record.last);
+  const bid = asRecord(record.bid);
+  const ask = asRecord(record.ask);
+  const timeValue = optionalString(record.time, record.timestamp, record.updatedAt, last.time, bid.time, ask.time) ?? optionalNumber(record.time, record.timestamp, last.time, bid.time, ask.time);
+  return {
+    assetId,
+    exchangeId,
+    currency: optionalString(record.currency, record.unit, last.currency, bid.currency, ask.currency),
+    last: priceValue(record.last, record.price),
+    lastSize: sizeValue(record.last, record.lastSize, record.size),
+    bid: priceValue(record.bid),
+    bidSize: sizeValue(record.bid, record.bidSize),
+    ask: priceValue(record.ask),
+    askSize: sizeValue(record.ask, record.askSize),
+    time: normalizeTimestamp(timeValue),
+    raw: value
+  };
+}
+function normalizeL2Venues(value) {
+  const record = asRecord(value);
+  const instrument = asRecord(record.instrument);
+  const candidates = [
+    record.exchangeIds,
+    record.exchanges,
+    record.tradingVenues,
+    record.availableExchanges,
+    record.venues,
+    instrument.exchangeIds,
+    instrument.exchanges,
+    instrument.tradingVenues
+  ];
+  const venues = candidates.flatMap((candidate) => {
+    if (!Array.isArray(candidate)) return [];
+    return candidate.map((item) => typeof item === "string" ? normalizeL2Venue({ exchangeId: item }) : normalizeL2Venue(item));
+  });
+  const exchange = asRecord(record.exchange);
+  const direct = optionalString(record.exchangeId, exchange.id, exchange.exchangeId);
+  if (direct) venues.unshift(normalizeL2Venue({ exchangeId: direct, name: exchange.name }));
+  return venues.filter((venue, index) => venue.exchangeId && venues.findIndex((candidate) => candidate.exchangeId === venue.exchangeId) === index);
+}
 function normalizeL2Venue(value) {
   const record = asRecord(value);
   return {
@@ -434,12 +544,40 @@ function arrayOfStrings(...values) {
       const strings = value.flatMap((item) => {
         if (typeof item === "string") return [item];
         const record = asRecord(item);
-        return optionalString(record.id, record.exchangeId) ? [optionalString(record.id, record.exchangeId)] : [];
+        return optionalString(record.id, record.exchangeId, record.exchange, record.slug) ? [optionalString(record.id, record.exchangeId, record.exchange, record.slug)] : [];
       });
       if (strings.length) return strings;
     }
   }
   return void 0;
+}
+function uniqueStrings(...values) {
+  const result = [...new Set(values.flatMap((value) => value ?? []))];
+  return result.length ? result : void 0;
+}
+function priceValue(...values) {
+  for (const value of values) {
+    const number = optionalNumber(value, asRecord(value).price, asRecord(value).value, asRecord(value).amount, asRecord(value).decimal);
+    if (number !== void 0) return number;
+  }
+  return void 0;
+}
+function sizeValue(...values) {
+  for (const value of values) {
+    const number = optionalNumber(value, asRecord(value).size, asRecord(value).quantity, asRecord(value).volume);
+    if (number !== void 0) return number;
+  }
+  return void 0;
+}
+function normalizeTimestamp(value) {
+  if (value === void 0) return void 0;
+  if (typeof value === "number") {
+    const milliseconds = value < 1e10 ? value * 1e3 : value;
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+  }
+  if (/^\d+$/.test(value)) return normalizeTimestamp(Number(value));
+  return value;
 }
 function objectPayload(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
@@ -464,7 +602,8 @@ function normalizeDirection(...values) {
 var DEFAULT_APP_URL = "https://app.traderepublic.com/";
 var DEFAULT_API_URL = "https://api.traderepublic.com/";
 var DEFAULT_TIMEOUT_MS = 6e4;
-var DEFAULT_SETTLE_MS = 1e3;
+var DEFAULT_SETTLE_MS = 0;
+var WAF_POLL_INTERVAL_MS = 50;
 var RELEVANT_HEADER_NAMES = /* @__PURE__ */ new Set([
   "accept-language",
   "cookie",
@@ -490,17 +629,16 @@ async function collectTradeRepublicWebContext(browser, options = {}) {
     page.on?.("request", (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
     await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
     let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
-    if (!hasLoginContext(webContext)) {
-      await page.waitForLoadState?.("networkidle", { timeout: Math.min(timeoutMs, 1e4) }).catch(() => void 0);
-      if (settleMs > 0) await wait(page, settleMs);
+    if (!hasWafContext(webContext) && settleMs > 0) {
+      await wait(page, settleMs);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    while (!hasLoginContext(webContext) && Date.now() - startedAt < timeoutMs) {
-      await wait(page, 250);
+    while (!hasWafContext(webContext) && Date.now() - startedAt < timeoutMs) {
+      await wait(page, WAF_POLL_INTERVAL_MS);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    if (!hasLoginContext(webContext)) {
-      const missing = missingLoginContext(webContext);
+    if (!hasWafContext(webContext)) {
+      const missing = missingWafContext(webContext);
       throw new Error(formatLoginContextError(webContext, missing));
     }
     return webContext;
@@ -558,7 +696,7 @@ async function buildWebContext(context, appUrl, apiUrl, headers, requestCookies,
   return normalizeTradeRepublicWebContext({
     headers,
     cookies: { ...requestCookies, ...browserCookies },
-    awsWafToken: headers["x-aws-waf-token"] ?? storageTokens.awsWafToken,
+    awsWafToken: headers["x-aws-waf-token"] ?? browserCookies["aws-waf-token"] ?? storageTokens.awsWafToken,
     xsrfToken: headers["x-xsrf-token"] ?? browserCookies["XSRF-TOKEN"] ?? storageTokens.xsrfToken,
     capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
     metadata: {
@@ -583,7 +721,12 @@ async function readStorageTokens(page) {
       }
       return entries;
     });
-    const awsWafToken = firstStorageValue(storage, ["x-aws-waf-token", "awsWafToken", "aws-waf-token", "waf"]);
+    const awsWafToken = decodeStorageToken(firstStorageValue(storage, [
+      "awswaf_session_storage",
+      "x-aws-waf-token",
+      "awsWafToken",
+      "aws-waf-token"
+    ]));
     const xsrfToken = firstStorageValue(storage, ["x-xsrf-token", "xsrf"]);
     return {
       ...awsWafToken ? { awsWafToken } : {},
@@ -594,23 +737,41 @@ async function readStorageTokens(page) {
   }
 }
 function firstStorageValue(storage, needles) {
-  for (const [key, value] of Object.entries(storage)) {
-    const normalizedKey = key.toLowerCase();
-    if (needles.some((needle) => normalizedKey.includes(needle.toLowerCase())) && value.trim()) return value.trim();
+  const entries = Object.entries(storage);
+  for (const needle of needles) {
+    const normalizedNeedle = needle.toLowerCase();
+    const exact = entries.find(([key, value]) => key.toLowerCase() === normalizedNeedle && value.trim());
+    if (exact) return exact[1].trim();
+  }
+  for (const needle of needles) {
+    const normalizedNeedle = needle.toLowerCase();
+    const partial = entries.find(([key, value]) => key.toLowerCase().includes(normalizedNeedle) && value.trim());
+    if (partial) return partial[1].trim();
   }
   return void 0;
 }
-function hasLoginContext(context) {
-  return missingLoginContext(context).length === 0;
+function decodeStorageToken(value) {
+  let current = value?.trim();
+  if (!current) return void 0;
+  for (let depth = 0; depth < 2; depth += 1) {
+    try {
+      const parsed = JSON.parse(current);
+      if (typeof parsed !== "string" || !parsed.trim()) break;
+      current = parsed.trim();
+    } catch {
+      break;
+    }
+  }
+  return current;
 }
-function missingLoginContext(context) {
+function hasWafContext(context) {
+  return missingWafContext(context).length === 0;
+}
+function missingWafContext(context) {
   const headers = context.headers ?? {};
   const missing = [];
   if (!(context.awsWafToken || headers["x-aws-waf-token"])) missing.push("x-aws-waf-token");
   if (!(context.cookieHeader || Object.keys(context.cookies ?? {}).length > 0)) missing.push("cookie");
-  if (!headers["x-tr-app-version"]) missing.push("x-tr-app-version");
-  if (!headers["x-tr-platform"]) missing.push("x-tr-platform");
-  if (!headers["x-tr-device-info"]) missing.push("x-tr-device-info");
   return missing;
 }
 function formatLoginContextError(context, missing) {
@@ -714,18 +875,18 @@ var AuthApi = class {
       phoneNumber: options.phoneNumber,
       deviceName: options.deviceName
     });
-    let raw;
     try {
-      raw = await this.http.request(
+      const response = await this.http.requestDetailed(
         "POST",
         this.endpoints.resolve("auth.qrChallenge"),
         basePayload,
         void 0,
         { signal: options.signal }
       );
+      return normalizeChallenge(response.body, response.headers.get("date"));
     } catch (error) {
       if (!(error instanceof TradeRepublicHttpError) || options.phoneNumber !== void 0) throw error;
-      raw = await this.http.request(
+      const response = await this.http.requestDetailed(
         "POST",
         this.endpoints.resolve("auth.qrChallenge"),
         {
@@ -735,8 +896,8 @@ var AuthApi = class {
         void 0,
         { signal: options.signal }
       );
+      return normalizeChallenge(response.body, response.headers.get("date"));
     }
-    return normalizeChallenge(raw);
   }
   async startLoginWithPin(options) {
     const raw = await this.http.request(
@@ -763,6 +924,7 @@ var AuthApi = class {
     const timeoutMs = options.timeoutMs ?? 12e4;
     const startedAt = Date.now();
     let processId;
+    let confirmedPolls = 0;
     let accumulatedSession = this.getSession();
     debugLog(options.debug, "poll:start", { challengeId: challenge.id, intervalMs, timeoutMs });
     while (Date.now() - startedAt <= timeoutMs) {
@@ -778,6 +940,7 @@ var AuthApi = class {
         const processRaw = processResponse.body;
         const processState = extractLoginProgressState(processRaw);
         const processStatus = normalizeStatus(processState.status);
+        confirmedPolls = processStatus === "CONFIRMED" ? confirmedPolls + 1 : 0;
         const processCookieSession = extractCookieSession(processResponse.headers);
         accumulatedSession = rememberProgressSession(accumulatedSession, processCookieSession, this.setSession);
         debugLog(options.debug, "poll:process", {
@@ -788,7 +951,7 @@ var AuthApi = class {
           setCookieNames: Object.keys(processCookieSession?.cookies ?? {}),
           hasSession: Boolean(processState.session)
         });
-        const processSession = processState.session ?? (isAuthenticatedStatus(processStatus) ? accumulatedSession : void 0);
+        const processSession = processState.session ?? (isAuthenticatedStatus(processStatus) || confirmedPolls >= 2 ? accumulatedSession : void 0);
         if (processSession) {
           const completedSession = await this.completeWebSession(processSession, options);
           const finalizedSession = await this.finalizeSession(completedSession);
@@ -900,6 +1063,7 @@ var AuthApi = class {
     const timeoutMs = options.timeoutMs ?? 12e4;
     const startedAt = Date.now();
     let processId = progress.processId;
+    let confirmedPolls = 0;
     let accumulatedSession = mergeSessions(this.getSession(), progress.session);
     if (accumulatedSession) this.setSession(accumulatedSession);
     debugLog(options.debug, "poll:process:start", {
@@ -910,7 +1074,8 @@ var AuthApi = class {
     while (Date.now() - startedAt <= timeoutMs) {
       if (options.signal?.aborted) throw options.signal.reason;
       const status = normalizeStatus(progress.status);
-      const processSession = progress.session ?? (isAuthenticatedStatus(status) ? accumulatedSession : void 0);
+      confirmedPolls = status === "CONFIRMED" ? confirmedPolls + 1 : 0;
+      const processSession = progress.session ?? (isAuthenticatedStatus(status) || confirmedPolls >= 2 ? accumulatedSession : void 0);
       if (processSession) {
         const completedSession = await this.completeWebSession(processSession, options);
         const finalizedSession = await this.finalizeSession(completedSession);
@@ -949,7 +1114,7 @@ var AuthApi = class {
     throw new Error("Timed out while waiting for Trade Republic login approval.");
   }
 };
-function normalizeChallenge(raw) {
+function normalizeChallenge(raw, serverTime) {
   const record = asRecord(raw);
   const id = stringValue2(record.id, record.challengeId, record.processId);
   return {
@@ -958,6 +1123,7 @@ function normalizeChallenge(raw) {
     qrCodeDataUrl: optionalString2(record.qrCodeDataUrl, record.qrDataUrl),
     deepLink: optionalString2(record.deepLink, record.loginUrl, record.url),
     expiresAt: optionalString2(record.expiresAt, record.challengeExpiresAt, record.qrCodeTokenExpiresAt, record.expiration),
+    serverTime: serverTime ?? void 0,
     raw
   };
 }
@@ -1094,6 +1260,9 @@ function parseSetCookie(value) {
   return [firstPart.slice(0, separator), firstPart.slice(separator + 1)];
 }
 
+// src/traderepublic-client.ts
+import { randomUUID } from "crypto";
+
 // src/market-specs.ts
 var marketSubscriptionsSpec = {
   schemaName: "market.subscriptions",
@@ -1122,7 +1291,12 @@ var candlesSpec = {
 var availableL2BooksSpec = {
   schemaName: "market.availableL2Books",
   resource: (params) => ({ type: "instrument", id: params.assetId }),
-  normalize: (raw) => arrayPayload(raw).map(normalizeL2Venue)
+  normalize: (raw) => normalizeL2Venues(raw)
+};
+var quoteSpec = {
+  schemaName: "market.quote",
+  resource: (params) => ({ type: "ticker", id: `${params.assetId}.${params.exchangeId}` }),
+  normalize: (raw, params) => normalizeMarketQuote(raw, params.assetId, params.exchangeId)
 };
 var liveFeedSpec = {
   schemaName: "market.liveFeed",
@@ -1303,8 +1477,9 @@ var HttpClient = class {
       origin: "https://app.traderepublic.com",
       referer: "https://app.traderepublic.com/",
       "user-agent": this.options.userAgent,
-      ...normalizeHeaderRecord(this.options.defaultHeaders),
       ...normalizeHeaderRecord(webContext?.headers),
+      ...normalizeHeaderRecord(this.options.sdkHeaders),
+      ...normalizeHeaderRecord(this.options.defaultHeaders),
       ...extra
     };
     if (hasJsonBody && !hasHeader(headers, "content-type")) headers["content-type"] = "application/json";
@@ -1660,6 +1835,9 @@ var schemaRegistry = [
   entry("orders.mutualFunds", "Mutual fund orders", "rest", "read", "GET /api-gateway/mutual-funds/api/v1/orders", normalizedArrayWrappers),
   entry("orders.privateMarkets", "Private market orders", "rest", "read", "GET /api/v1/private-markets/orders/all", normalizedArrayWrappers),
   entry("orders.orderUpdates", "Order update stream", "websocket", "read", "orderUpdates", jsonValue, { live: { sample: "stream" } }),
+  entry("orders.fees", "Order fee preview", "websocket", "read", "orderFeesV2", jsonValue),
+  entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", jsonValue),
+  entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", jsonValue),
   entry("portfolio.current", "Portfolio positions", "websocket", "read", "compactPortfolioByTypeV2", z.union([jsonRecord, normalizedArrayWrappers])),
   entry("portfolio.cash", "Available cash", "websocket", "read", "availableCash", z.array(availableCashItemSchema)),
   entry("portfolio.markToMarketValue", "Portfolio status", "websocket", "read", "portfolioStatus", jsonValue),
@@ -1668,6 +1846,7 @@ var schemaRegistry = [
   entry("portfolio.portfolioChart", "Portfolio chart", "rest", "read", "GET /api-gateway/portfolio-chart/v2/chart", jsonValue),
   entry("market.subscriptions", "Market subscriptions", "websocket", "read", "accountPairs", z.union([z.array(accountPairSchema), normalizedArrayWrappers])),
   entry("market.candles", "Price history candles", "websocket", "read", "aggregateHistoryLightV2", jsonValue, { variants: ["stock", "crypto"] }),
+  entry("market.quote", "Market quote", "websocket", "read", "ticker", jsonValue, { variants: ["stock", "crypto"] }),
   entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
   entry("market.availableL2Books", "Available L2 books", "websocket", "read", "instrument", jsonValue),
   entry("market.l2OrderBook", "L2 order book stream", "websocket", "read", "L2", jsonValue, { live: { sample: "stream" } }),
@@ -1687,13 +1866,14 @@ var schemaRegistry = [
   entry("instruments.yieldToMaturity", "Yield to maturity", "websocket", "read", "yieldToMaturity", jsonValue),
   entry("trading.priceForOrder", "Price for order quote", "websocket", "read", "priceForOrderV2", jsonValue),
   entry("trading.availableSize", "Available size", "websocket", "read", "availableSize", jsonValue),
-  entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations", normalizedArrayWrappers),
+  entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", normalizedArrayWrappers),
   entry("trading.trades", "Trades", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades", normalizedArrayWrappers),
   entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", jsonValue),
   entry("discovery.exchangeDetails", "Exchange details", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges-details", normalizedArrayWrappers),
   entry("discovery.exchangeSchedule", "Exchange schedule", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule", jsonRecord),
   entry("discovery.instrumentStatus", "Instrument status", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}", jsonRecord),
   entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", jsonValue),
+  entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", jsonValue),
   entry("discovery.watchlists.create", "Create watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.delete", "Delete watchlist", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
@@ -1710,7 +1890,7 @@ var schemaRegistry = [
   entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
   entry("payments.iban", "IBAN", "rest", "read", "GET /api/v1/auth/account/iban", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
   entry("payments.interestDetails", "Interest details", "rest", "read", "GET /api/v1/interest/details", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
-  entry("blocked.orderMutations", "Order placement/change/cancel/confirm", "websocket", "blockedMutation", "simpleCreateOrder|confirmOrder|cancelOrder|changeOrder", jsonValue),
+  entry("blocked.orderMutations", "Unsupported legacy order change/confirm resources", "websocket", "blockedMutation", "confirmOrder|changeOrder", jsonValue),
   entry("blocked.bankTransfers", "Payouts and bank transfers", "rest", "blockedMutation", "POST /api/v1/payout and payment authorization paths", jsonValue),
   entry("blocked.documentAcceptance", "Document acceptance", "rest", "blockedMutation", "api/v1/documents/group/accept and terms accept paths", jsonValue),
   entry("blocked.accountSecurity", "Account identity, tax, PIN, login security mutations", "rest", "blockedMutation", "change account/tax/security paths", jsonValue)
@@ -1742,7 +1922,7 @@ function schemaCatalogMarkdown() {
     lines.push(`| \`${entry2.name}\` | \`${entry2.risk}\` | \`${entry2.transport}\` | \`${entry2.request.replaceAll("|", "\\|")}\` | ${entry2.variants?.join(", ") ?? ""} |`);
   }
   lines.push("");
-  lines.push("`blockedMutation` entries are documented so integration tests can assert they are not executed live.");
+  lines.push("`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.");
   return `${lines.join("\n")}
 `;
 }
@@ -1813,6 +1993,11 @@ var DEFAULT_API_BASE_URL = "https://api.traderepublic.com";
 var DEFAULT_WEBSOCKET_URL = "wss://api.traderepublic.com";
 var DEFAULT_LOCALE = "en";
 var DEFAULT_USER_AGENT = "handelsrepublik/0.1.0";
+var DEFAULT_TR_HEADERS = {
+  "x-tr-app-version": "15.101.0",
+  "x-tr-platform": "web-pro",
+  "x-tr-device-info": "eyJzdGFibGVEZXZpY2VJZCI6IjFlMTEyMjA3ZmNlZDhhZTNhZDRlY2ZiNGNiYjlmZTIyZDhkYjI1NDk5YmUwMzk4OGU2ODlmOTVmMmVlYTBlYTg4NWJhOTI2NmU2YWIwMTE5ZmRjZGQ1MDI2NGIzMDgyZWZmZDgxZGViZmEwYmQ1YTMzNjdmN2QwNzljMDZjMDcwIiwiYnJvd3NlciI6IkNocm9tZSIsImJyb3dzZXJWZXJzaW9uIjoiMTUwLjAuMC4wIiwib3MiOiJXaW5kb3dzIiwib3NWZXJzaW9uIjoiMTAiLCJ0aW1lem9uZSI6IkV1cm9wZS9CZXJsaW4iLCJ0aW1lem9uZU9mZnNldCI6LTEyMCwic2NyZWVuIjoiMTI4MHg3MjB4MjQiLCJwcmVmZXJyZWRMYW5ndWFnZXMiOlsiZW4tVVMiLCJlbiJdLCJudW1iZXJPZkNvcmVzIjoxMiwiZGV2aWNlTWVtb3J5IjozMn0="
+};
 var TradeRepublicClient = class _TradeRepublicClient {
   auth;
   raw;
@@ -1847,6 +2032,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
       locale: options.locale ?? DEFAULT_LOCALE,
       userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+      sdkHeaders: DEFAULT_TR_HEADERS,
       defaultHeaders: options.defaultHeaders,
       fetch: options.fetch ?? fetch,
       getSession: () => this.session
@@ -2080,6 +2266,10 @@ var OrdersApi = class {
     const orders = await this.all(options);
     return orders.filter((order) => !isOpenOrder(order));
   }
+  async executed(options = {}) {
+    const orders = await this.all(options);
+    return orders.filter(isExecutedOrder);
+  }
   async all(options = {}) {
     return arrayPayload(await this.rawAll(options)).map(normalizeOrder);
   }
@@ -2138,10 +2328,317 @@ var OrdersApi = class {
       selector: { case: "bySecAccNo", value: { accountNumber } }
     }));
   }
+  async prepare(options) {
+    const normalizedOptions = options.amount !== void 0 && options.sizeStep === void 0 ? { ...options, sizeStep: await this.resolveAmountSizeStep(options.instrumentId, options.exchangeId) } : options;
+    const normalized = normalizeCreateOrderOptions(normalizedOptions);
+    const secAccNo = options.secAccNo ?? await resolveSecuritiesAccountNumber(
+      this.raw,
+      this.getSecuritiesAccountNumber?.(),
+      this.setSecuritiesAccountNumber,
+      void 0,
+      this.resolveSecuritiesAccountNumberFallback
+    );
+    return {
+      parameters: normalized.parameters,
+      clientProcessId: options.clientProcessId ?? createClientProcessId(),
+      secAccNo,
+      warningsShown: options.warningsShown ?? [],
+      ...options.lastClientPrice !== void 0 ? { lastClientPrice: positiveNumber(options.lastClientPrice, "lastClientPrice") } : {}
+    };
+  }
+  async preview(options) {
+    const order = await this.prepare(options);
+    const currency = options.settlementCurrency?.trim() || "EUR";
+    const feeParameters = {
+      ...order.parameters,
+      currency
+    };
+    delete feeParameters.expiry;
+    delete feeParameters.settlementCurrency;
+    delete feeParameters.tradingCurrency;
+    delete feeParameters.acceptedTerms;
+    const unitPrice = options.mode === "limit" ? options.limit : options.mode === "stopMarket" ? options.stop : options.lastClientPrice;
+    if (options.amount !== void 0) {
+      if (unitPrice === void 0) throw new TypeError("Amount-based order previews require lastClientPrice for market orders.");
+      delete feeParameters.amount;
+    }
+    const raw = await validated(this.validateRaw, "orders.fees", this.raw.query({
+      type: "orderFeesV2",
+      parameters: feeParameters,
+      secAccNo: order.secAccNo
+    }, options.timeoutMs === void 0 ? {} : { timeoutMs: options.timeoutMs }));
+    const fees = normalizeOrderFees(raw);
+    const totalFees = firstNumberAtPaths(raw, ["total.absolute.value"], ["total.value"], ["totalFees"], ["total"]);
+    const feeCurrency = firstStringAtPaths(raw, ["total.absolute.currency"], ["total.currency"], ["currency"], ["currencyId"]) ?? currency;
+    const estimatedGross = options.amount !== void 0 ? options.amount : unitPrice === void 0 || options.size === void 0 ? void 0 : unitPrice * options.size;
+    const estimatedTotal = estimatedGross === void 0 ? void 0 : options.side === "buy" ? estimatedGross + (totalFees ?? 0) : estimatedGross - (totalFees ?? 0);
+    return {
+      order,
+      fees,
+      ...totalFees !== void 0 ? { totalFees } : {},
+      ...feeCurrency ? { currency: feeCurrency } : {},
+      ...estimatedGross !== void 0 ? { estimatedGross } : {},
+      ...estimatedTotal !== void 0 ? { estimatedTotal } : {},
+      raw
+    };
+  }
+  async submit(options) {
+    const order = isPreparedOrder(options) ? options : await this.prepare(options);
+    const timeoutMs = isPreparedOrder(options) ? 12e4 : options.timeoutMs ?? 12e4;
+    const payload = {
+      type: "simpleCreateOrder",
+      parameters: order.parameters,
+      warningsShown: order.warningsShown,
+      ...order.lastClientPrice !== void 0 ? { lastClientPrice: order.lastClientPrice } : {},
+      clientProcessId: order.clientProcessId,
+      secAccNo: order.secAccNo
+    };
+    const subscription = this.raw.subscribeResource(payload);
+    const iterator = subscription[Symbol.asyncIterator]();
+    const updates = [];
+    const deadline = Date.now() + timeoutMs;
+    try {
+      while (Date.now() < deadline) {
+        const remaining = Math.max(1, deadline - Date.now());
+        const result = await nextOrderUpdate(iterator, remaining);
+        if (result.done || "timedOut" in result && result.timedOut) break;
+        const raw = this.validateRaw("orders.submit", result.value);
+        throwResourceErrors(raw, "simpleCreateOrder");
+        updates.push(raw);
+        const status = orderMutationStatus(raw);
+        const orderId = firstStringAtPaths(raw, ["orderId"], ["id"], ["order.id"]);
+        if (status === "succeeded" || orderId && !status) {
+          return { status: "succeeded", orderId, clientProcessId: order.clientProcessId, updates, raw };
+        }
+        if (status === "failed") {
+          return {
+            status,
+            ...orderId ? { orderId } : {},
+            clientProcessId: order.clientProcessId,
+            updates,
+            error: firstValueAtPaths(raw, ["error"], ["errors"], ["message"]),
+            raw
+          };
+        }
+      }
+      const lastStatus = updates.length > 0 ? orderMutationStatus(updates.at(-1)) : void 0;
+      throw new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ""}. The order may still be pending; inspect orders.open() before retrying.`);
+    } finally {
+      subscription.close();
+    }
+  }
+  async cancel(orderId, options = {}) {
+    const id = requiredString(orderId, "orderId");
+    const raw = await validated(this.validateRaw, "orders.cancel", this.raw.query({ type: "cancelOrder", orderId: id }, pickTimeoutOptions(options)));
+    return {
+      orderId: firstStringAtPaths(raw, ["orderId"], ["id"]) ?? id,
+      ...orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {},
+      raw
+    };
+  }
+  async resolveAmountSizeStep(instrumentId, exchangeId) {
+    const id = requiredString(instrumentId, "instrumentId");
+    const venue = requiredString(exchangeId, "exchangeId");
+    const instrument = await this.raw.query({ type: "instrument", id });
+    const exchange = findNestedRecordById(instrument, venue);
+    const explicit = firstNumberAtPaths(exchange, ["stepSize"], ["fractionalTrading.stepSize"], ["orderSizeStep"], ["sizeStep"]);
+    if (explicit !== void 0 && explicit > 0) return explicit;
+    const assetType = (normalizeAsset(instrument).type ?? firstNestedStringByKeys(instrument, "instrumentType", "assetType", "category", "type"))?.toLowerCase();
+    if (assetType?.includes("crypto") || assetType?.includes("fund")) return 1e-6;
+    throw new TradeRepublicProtocolError(`Could not determine the order size step for amount-based order ${id}.${venue}. Pass sizeStep explicitly.`);
+  }
 };
+function normalizeCreateOrderOptions(options) {
+  const instrumentId = requiredString(options.instrumentId, "instrumentId");
+  const exchangeId = requiredString(options.exchangeId, "exchangeId");
+  const side = options.side?.toLowerCase();
+  if (side !== "buy" && side !== "sell") throw new TypeError('side must be "buy" or "sell".');
+  if (options.mode !== "market" && options.mode !== "limit" && options.mode !== "stopMarket") {
+    throw new TypeError('mode must be "market", "limit", or "stopMarket".');
+  }
+  const hasSize = options.size !== void 0;
+  const hasAmount = options.amount !== void 0;
+  if (hasSize === hasAmount) throw new TypeError("Provide exactly one of size or amount.");
+  const amount = hasAmount ? roundCurrency(positiveNumber(options.amount, "amount")) : void 0;
+  const amountUnitPrice = options.mode === "limit" ? options.limit : options.mode === "stopMarket" ? options.stop : options.lastClientPrice;
+  if (hasAmount && amountUnitPrice === void 0) throw new TypeError("Amount-based market orders require lastClientPrice.");
+  const size = hasSize ? positiveNumber(options.size, "size") : floorToStep(
+    positiveNumber(Number(amount) / positiveNumber(amountUnitPrice, "order price"), "derived size"),
+    positiveNumber(options.sizeStep, "sizeStep")
+  );
+  if (options.mode === "limit" && options.limit === void 0) throw new TypeError("limit is required for a limit order.");
+  if (options.mode === "stopMarket" && options.stop === void 0) throw new TypeError("stop is required for a stop-market order.");
+  if (options.mode === "market" && (options.limit !== void 0 || options.stop !== void 0)) {
+    throw new TypeError("Market orders must not include limit or stop prices.");
+  }
+  const expiry = normalizeOrderExpiry(options.expiry);
+  const parameters = {
+    instrumentId,
+    exchangeId,
+    mode: options.mode,
+    size,
+    type: side,
+    expiry,
+    sellFractions: options.sellFractions ?? false,
+    settlementCurrency: options.settlementCurrency?.trim() || "EUR"
+  };
+  if (amount !== void 0) parameters.amount = amount;
+  if (options.limit !== void 0) parameters.limit = positiveNumber(options.limit, "limit");
+  if (options.stop !== void 0) parameters.stop = positiveNumber(options.stop, "stop");
+  if (options.tradingCurrency?.trim()) parameters.tradingCurrency = options.tradingCurrency.trim();
+  if (options.destinationId?.trim()) parameters.destinationId = options.destinationId.trim();
+  if (options.isDMA !== void 0) parameters.isDMA = options.isDMA;
+  if (options.acceptedTerms?.length) parameters.acceptedTerms = options.acceptedTerms;
+  return { parameters };
+}
+function normalizeOrderExpiry(expiry) {
+  if (!expiry) return { type: "gfd" };
+  if (expiry.type !== "gfd" && expiry.type !== "gtc" && expiry.type !== "eom" && expiry.type !== "gtd") {
+    throw new TypeError('expiry.type must be "gfd", "gtc", "eom", or "gtd".');
+  }
+  if (expiry.type !== "gtd") return { type: expiry.type };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry.value) || Number.isNaN(Date.parse(`${expiry.value}T00:00:00Z`))) {
+    throw new TypeError("A gtd expiry requires value in YYYY-MM-DD format.");
+  }
+  return { type: expiry.type, value: expiry.value };
+}
+function normalizeOrderFees(raw) {
+  const value = firstValueAtPaths(raw, ["fees"], ["data.fees"], ["result.fees"]);
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    ...firstStringAtPaths(item, ["name"], ["title"], ["type"], ["label"]) ? { name: firstStringAtPaths(item, ["name"], ["title"], ["type"], ["label"]) } : {},
+    ...firstNumberAtPaths(item, ["absolute.value"], ["amount.value"], ["amount"], ["value"]) !== void 0 ? { amount: firstNumberAtPaths(item, ["absolute.value"], ["amount.value"], ["amount"], ["value"]) } : {},
+    ...firstStringAtPaths(item, ["absolute.currency"], ["amount.currency"], ["currency"], ["currencyId"]) ? { currency: firstStringAtPaths(item, ["absolute.currency"], ["amount.currency"], ["currency"], ["currencyId"]) } : {},
+    raw: item
+  }));
+}
+function isPreparedOrder(value) {
+  return Boolean(value && typeof value === "object" && "parameters" in value && "clientProcessId" in value && "secAccNo" in value);
+}
+function orderMutationStatus(value) {
+  const status = firstStringAtPaths(value, ["status"], ["state"], ["result.status"]);
+  if (!status) return void 0;
+  const normalized = status.replaceAll("_", "").replaceAll("-", "").toLowerCase();
+  if (normalized === "confirmationneeded") return "confirmationNeeded";
+  return normalized;
+}
+function throwResourceErrors(value, resource) {
+  const errors = firstValueAtPaths(value, ["errors"]);
+  if (Array.isArray(errors) && errors.length > 0) {
+    throw new TradeRepublicProtocolError(`Trade Republic resource failed: ${resource} ${JSON.stringify(errors)}`);
+  }
+}
+function requiredString(value, name) {
+  if (typeof value !== "string" || !value.trim()) throw new TypeError(`${name} must be a non-empty string.`);
+  return value.trim();
+}
+function positiveNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new TypeError(`${name} must be a finite number greater than zero.`);
+  return value;
+}
+function roundCurrency(value) {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return positiveNumber(rounded, "amount rounded to currency precision");
+}
+function floorToStep(value, step) {
+  const decimals = Math.min(12, Math.max(0, decimalPlaces(step)));
+  const floored = Math.floor(value / step + 1e-10) * step;
+  return positiveNumber(Number(floored.toFixed(decimals)), "derived size rounded to sizeStep");
+}
+function decimalPlaces(value) {
+  const text = value.toString().toLowerCase();
+  if (text.includes("e-")) return Number(text.split("e-")[1] ?? 0);
+  return text.includes(".") ? text.split(".")[1]?.length ?? 0 : 0;
+}
+function createClientProcessId() {
+  return randomUUID();
+}
+function firstValueAtPaths(value, ...paths) {
+  for (const path of paths) {
+    let current = value;
+    for (const part of path[0]?.split(".") ?? []) {
+      if (!current || typeof current !== "object" || Array.isArray(current)) {
+        current = void 0;
+        break;
+      }
+      current = current[part];
+    }
+    if (current !== void 0 && current !== null) return current;
+  }
+  return void 0;
+}
+function firstStringAtPaths(value, ...paths) {
+  const candidate = firstValueAtPaths(value, ...paths);
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : void 0;
+}
+function firstNumberAtPaths(value, ...paths) {
+  const candidate = firstValueAtPaths(value, ...paths);
+  if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  if (typeof candidate === "string" && candidate.trim() && Number.isFinite(Number(candidate))) return Number(candidate);
+  return void 0;
+}
+function firstNestedStringByKeys(value, ...keys) {
+  if (!value || typeof value !== "object") return void 0;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstNestedStringByKeys(item, ...keys);
+      if (found) return found;
+    }
+    return void 0;
+  }
+  const record = value;
+  for (const key of keys) {
+    const direct = record[key];
+    if (typeof direct === "string" && direct.trim()) return direct.trim();
+  }
+  for (const item of Object.values(record)) {
+    const found = firstNestedStringByKeys(item, ...keys);
+    if (found) return found;
+  }
+  return void 0;
+}
+function findNestedRecordById(value, id) {
+  if (!value || typeof value !== "object") return void 0;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedRecordById(item, id);
+      if (found) return found;
+    }
+    return void 0;
+  }
+  const record = value;
+  if ([record.id, record.exchangeId, record.slug, record.destinationId].some((candidate) => candidate === id)) return record;
+  for (const item of Object.values(record)) {
+    const found = findNestedRecordById(item, id);
+    if (found) return found;
+  }
+  return void 0;
+}
+function nextOrderUpdate(iterator, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve({ done: true, value: void 0, timedOut: true }), timeoutMs);
+    timer.unref?.();
+    iterator.next().then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 function isOpenOrder(order) {
   const status = order.status?.toUpperCase();
   return status === "OPEN" || status === "OPENED" || status === "PARTIALLYFILLED" || status === "PARTIALLY_FILLED" || status === "RECEIVED";
+}
+function isExecutedOrder(order) {
+  const status = order.status?.toUpperCase().replaceAll("_", "").replaceAll("-", "");
+  return Boolean(
+    order.executedAt || order.executedQuantity !== void 0 && order.executedQuantity > 0 || status === "EXECUTED" || status === "FILLED" || status === "PARTIALLYFILLED"
+  );
 }
 var PortfolioApi = class {
   constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
@@ -2294,6 +2791,9 @@ var MarketApi = class {
   }
   candles(options) {
     return this.resources.query(candlesSpec, options);
+  }
+  quote(assetId, exchangeId) {
+    return this.resources.query(quoteSpec, { assetId, exchangeId });
   }
   downloadCandles(options, paging = {}) {
     return this.candleQuery(options).download(paging);
@@ -2452,7 +2952,10 @@ var TradingApi = class {
     return arrayPayload(await this.rawOrderDestinations(isin, query)).map(normalizeOrderDestination);
   }
   rawOrderDestinations(isin, query = {}) {
-    return validated(this.validateRaw, "trading.orderDestinations", this.http.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, void 0, query));
+    return validated(this.validateRaw, "trading.orderDestinations", this.http.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, void 0, {
+      jurisdiction: "DE",
+      ...query
+    }));
   }
   async trades(query = {}) {
     return arrayPayload(await this.rawTrades(query)).map(normalizeTrade);
@@ -2497,6 +3000,22 @@ var DiscoveryApi = class {
   }
   watchlists() {
     return this.rawWatchlists();
+  }
+  async cloudWatchlist(options = {}) {
+    const watchlist = arrayPayload(await this.rawWatchlists())[0];
+    if (!watchlist) return void 0;
+    const normalized = normalizeWatchlist(watchlist);
+    if (!normalized.id) return normalized;
+    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
+    return normalizeWatchlist(watchlist, items);
+  }
+  rawWatchlistItems(watchlistId, options = {}) {
+    return validated(this.validateRaw, "discovery.watchlists.items", this.http.request(
+      "GET",
+      `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`,
+      void 0,
+      { pageSize: options.pageSize ?? 200 }
+    ));
   }
   rawWatchlists() {
     return validated(this.validateRaw, "discovery.watchlists", this.http.request("GET", "/api-gateway/watchlists/api/v2/watchlists"));
@@ -2637,6 +3156,9 @@ var WebApi = class {
   resolveSecuritiesAccountNumberFallback;
   request(method, path, options = {}) {
     return this.http.request(method, path, options.body, options.query);
+  }
+  requestDetailed(method, path, options = {}) {
+    return this.http.requestDetailed(method, path, options.body, options.query);
   }
   query(payload, options = {}) {
     return this.raw.query(payload, options);

@@ -72,6 +72,20 @@ describe('HttpClient headers', () => {
     expect(headers.cookie).toContain('tr_claims=claims');
   });
 
+  it('lets user headers override SDK and captured browser headers', () => {
+    const client = new HttpClient({
+      apiBaseUrl: 'https://api.traderepublic.com',
+      locale: 'en',
+      userAgent: 'test-agent',
+      sdkHeaders: { 'x-tr-app-version': 'sdk' },
+      defaultHeaders: { 'x-tr-app-version': 'user' },
+      fetch,
+      getSession: () => ({ webContext: { headers: { 'x-tr-app-version': 'browser' } } }),
+    });
+
+    expect(client.headers()['x-tr-app-version']).toBe('user');
+  });
+
   it('only sends content-type for JSON body requests by default', () => {
     const client = new HttpClient({
       apiBaseUrl: 'https://api.traderepublic.com',

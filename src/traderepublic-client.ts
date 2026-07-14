@@ -1,13 +1,16 @@
 import { AuthApi } from './auth.js';
+import { randomUUID } from 'node:crypto';
 import { CandleQuery } from './candles.js';
 import { EndpointResolver } from './endpoints.js';
 import { HttpClient } from './http.js';
+import { TradeRepublicProtocolError } from './errors.js';
 import {
   availableL2BooksSpec,
   candlesSpec,
   l2OrderBookSpec,
   liveFeedSpec,
   marketSubscriptionsSpec,
+  quoteSpec,
 } from './market-specs.js';
 import {
   arrayPayload,
@@ -30,6 +33,7 @@ import {
   normalizeTimelineDetail,
   normalizeTimelineItem,
   normalizeTrade,
+  normalizeWatchlist,
 } from './normalizers.js';
 import { defaultWebSocketFactory, RawApi } from './raw.js';
 import { ResourceClient, toSubscription, type Subscription } from './resource.js';
@@ -53,10 +57,17 @@ import type {
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,
+  MarketQuote,
   MarketSubscription,
   MarketSubscriptionsOptions,
   MutualFundOrdersOptions,
   Order,
+  OrderCancellation,
+  CreateOrderOptions,
+  OrderFeeItem,
+  OrderPreview,
+  OrderSubmission,
+  PreparedOrder,
   OrderDestination,
   OrdersListOptions,
   Portfolio,
@@ -72,6 +83,7 @@ import type {
   Trade,
   TradeRepublicClientOptions,
   TradeRepublicWebContext,
+  Watchlist,
   RawSchemaValidator,
   RawSchemaValidationFailure,
   RawSchemaValidationMode,
@@ -81,6 +93,11 @@ const DEFAULT_API_BASE_URL = 'https://api.traderepublic.com';
 const DEFAULT_WEBSOCKET_URL = 'wss://api.traderepublic.com';
 const DEFAULT_LOCALE = 'en';
 const DEFAULT_USER_AGENT = 'handelsrepublik/0.1.0';
+const DEFAULT_TR_HEADERS = {
+  'x-tr-app-version': '15.101.0',
+  'x-tr-platform': 'web-pro',
+  'x-tr-device-info': 'eyJzdGFibGVEZXZpY2VJZCI6IjFlMTEyMjA3ZmNlZDhhZTNhZDRlY2ZiNGNiYjlmZTIyZDhkYjI1NDk5YmUwMzk4OGU2ODlmOTVmMmVlYTBlYTg4NWJhOTI2NmU2YWIwMTE5ZmRjZGQ1MDI2NGIzMDgyZWZmZDgxZGViZmEwYmQ1YTMzNjdmN2QwNzljMDZjMDcwIiwiYnJvd3NlciI6IkNocm9tZSIsImJyb3dzZXJWZXJzaW9uIjoiMTUwLjAuMC4wIiwib3MiOiJXaW5kb3dzIiwib3NWZXJzaW9uIjoiMTAiLCJ0aW1lem9uZSI6IkV1cm9wZS9CZXJsaW4iLCJ0aW1lem9uZU9mZnNldCI6LTEyMCwic2NyZWVuIjoiMTI4MHg3MjB4MjQiLCJwcmVmZXJyZWRMYW5ndWFnZXMiOlsiZW4tVVMiLCJlbiJdLCJudW1iZXJPZkNvcmVzIjoxMiwiZGV2aWNlTWVtb3J5IjozMn0=',
+} as const;
 
 export class TradeRepublicClient {
   readonly auth: AuthApi;
@@ -119,6 +136,7 @@ export class TradeRepublicClient {
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
       locale: options.locale ?? DEFAULT_LOCALE,
       userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+      sdkHeaders: DEFAULT_TR_HEADERS,
       defaultHeaders: options.defaultHeaders,
       fetch: options.fetch ?? fetch,
       getSession: () => this.session,
@@ -368,6 +386,11 @@ export class OrdersApi {
     return orders.filter((order) => !isOpenOrder(order));
   }
 
+  async executed(options: OrdersListOptions = {}): Promise<Order[]> {
+    const orders = await this.all(options);
+    return orders.filter(isExecutedOrder);
+  }
+
   async all(options: OrdersListOptions = {}): Promise<Order[]> {
     return arrayPayload(await this.rawAll(options)).map(normalizeOrder);
   }
@@ -433,11 +456,361 @@ export class OrdersApi {
       selector: { case: 'bySecAccNo', value: { accountNumber } },
     }));
   }
+
+  async prepare(options: CreateOrderOptions): Promise<PreparedOrder> {
+    const normalizedOptions = options.amount !== undefined && options.sizeStep === undefined
+      ? { ...options, sizeStep: await this.resolveAmountSizeStep(options.instrumentId, options.exchangeId) }
+      : options;
+    const normalized = normalizeCreateOrderOptions(normalizedOptions);
+    const secAccNo = options.secAccNo ?? await resolveSecuritiesAccountNumber(
+      this.raw,
+      this.getSecuritiesAccountNumber?.(),
+      this.setSecuritiesAccountNumber,
+      undefined,
+      this.resolveSecuritiesAccountNumberFallback,
+    );
+    return {
+      parameters: normalized.parameters,
+      clientProcessId: options.clientProcessId ?? createClientProcessId(),
+      secAccNo,
+      warningsShown: options.warningsShown ?? [],
+      ...(options.lastClientPrice !== undefined ? { lastClientPrice: positiveNumber(options.lastClientPrice, 'lastClientPrice') } : {}),
+    };
+  }
+
+  async preview(options: CreateOrderOptions): Promise<OrderPreview> {
+    const order = await this.prepare(options);
+    const currency = options.settlementCurrency?.trim() || 'EUR';
+    const feeParameters: Record<string, unknown> = {
+      ...order.parameters,
+      currency,
+    };
+    delete feeParameters.expiry;
+    delete feeParameters.settlementCurrency;
+    delete feeParameters.tradingCurrency;
+    delete feeParameters.acceptedTerms;
+    const unitPrice = options.mode === 'limit' ? options.limit : options.mode === 'stopMarket' ? options.stop : options.lastClientPrice;
+    if (options.amount !== undefined) {
+      if (unitPrice === undefined) throw new TypeError('Amount-based order previews require lastClientPrice for market orders.');
+      delete feeParameters.amount;
+    }
+    const raw = await validated(this.validateRaw, 'orders.fees', this.raw.query({
+      type: 'orderFeesV2',
+      parameters: feeParameters,
+      secAccNo: order.secAccNo,
+    }, options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }));
+    const fees = normalizeOrderFees(raw);
+    const totalFees = firstNumberAtPaths(raw, ['total.absolute.value'], ['total.value'], ['totalFees'], ['total']);
+    const feeCurrency = firstStringAtPaths(raw, ['total.absolute.currency'], ['total.currency'], ['currency'], ['currencyId']) ?? currency;
+    const estimatedGross = options.amount !== undefined
+      ? options.amount
+      : unitPrice === undefined || options.size === undefined ? undefined : unitPrice * options.size;
+    const estimatedTotal = estimatedGross === undefined
+      ? undefined
+      : options.side === 'buy'
+        ? estimatedGross + (totalFees ?? 0)
+        : estimatedGross - (totalFees ?? 0);
+    return {
+      order,
+      fees,
+      ...(totalFees !== undefined ? { totalFees } : {}),
+      ...(feeCurrency ? { currency: feeCurrency } : {}),
+      ...(estimatedGross !== undefined ? { estimatedGross } : {}),
+      ...(estimatedTotal !== undefined ? { estimatedTotal } : {}),
+      raw,
+    };
+  }
+
+  async submit(options: CreateOrderOptions | PreparedOrder): Promise<OrderSubmission> {
+    const order = isPreparedOrder(options) ? options : await this.prepare(options);
+    const timeoutMs = isPreparedOrder(options) ? 120_000 : options.timeoutMs ?? 120_000;
+    const payload = {
+      type: 'simpleCreateOrder',
+      parameters: order.parameters,
+      warningsShown: order.warningsShown,
+      ...(order.lastClientPrice !== undefined ? { lastClientPrice: order.lastClientPrice } : {}),
+      clientProcessId: order.clientProcessId,
+      secAccNo: order.secAccNo,
+    };
+    const subscription = this.raw.subscribeResource(payload);
+    const iterator = subscription[Symbol.asyncIterator]();
+    const updates: unknown[] = [];
+    const deadline = Date.now() + timeoutMs;
+    try {
+      while (Date.now() < deadline) {
+        const remaining = Math.max(1, deadline - Date.now());
+        const result = await nextOrderUpdate(iterator, remaining);
+        if (result.done || ('timedOut' in result && result.timedOut)) break;
+        const raw = this.validateRaw('orders.submit', result.value);
+        throwResourceErrors(raw, 'simpleCreateOrder');
+        updates.push(raw);
+        const status = orderMutationStatus(raw);
+        const orderId = firstStringAtPaths(raw, ['orderId'], ['id'], ['order.id']);
+        if (status === 'succeeded' || (orderId && !status)) {
+          return { status: 'succeeded', orderId, clientProcessId: order.clientProcessId, updates, raw };
+        }
+        if (status === 'failed') {
+          return {
+            status,
+            ...(orderId ? { orderId } : {}),
+            clientProcessId: order.clientProcessId,
+            updates,
+            error: firstValueAtPaths(raw, ['error'], ['errors'], ['message']),
+            raw,
+          };
+        }
+      }
+      const lastStatus = updates.length > 0 ? orderMutationStatus(updates.at(-1)) : undefined;
+      throw new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ''}. The order may still be pending; inspect orders.open() before retrying.`);
+    } finally {
+      subscription.close();
+    }
+  }
+
+  async cancel(orderId: string, options: { timeoutMs?: number } = {}): Promise<OrderCancellation> {
+    const id = requiredString(orderId, 'orderId');
+    const raw = await validated(this.validateRaw, 'orders.cancel', this.raw.query({ type: 'cancelOrder', orderId: id }, pickTimeoutOptions(options)));
+    return {
+      orderId: firstStringAtPaths(raw, ['orderId'], ['id']) ?? id,
+      ...(orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {}),
+      raw,
+    };
+  }
+
+  private async resolveAmountSizeStep(instrumentId: string, exchangeId: string): Promise<number> {
+    const id = requiredString(instrumentId, 'instrumentId');
+    const venue = requiredString(exchangeId, 'exchangeId');
+    const instrument = await this.raw.query({ type: 'instrument', id });
+    const exchange = findNestedRecordById(instrument, venue);
+    const explicit = firstNumberAtPaths(exchange, ['stepSize'], ['fractionalTrading.stepSize'], ['orderSizeStep'], ['sizeStep']);
+    if (explicit !== undefined && explicit > 0) return explicit;
+    const assetType = (normalizeAsset(instrument).type
+      ?? firstNestedStringByKeys(instrument, 'instrumentType', 'assetType', 'category', 'type'))?.toLowerCase();
+    if (assetType?.includes('crypto') || assetType?.includes('fund')) return 0.000001;
+    throw new TradeRepublicProtocolError(`Could not determine the order size step for amount-based order ${id}.${venue}. Pass sizeStep explicitly.`);
+  }
+}
+
+function normalizeCreateOrderOptions(options: CreateOrderOptions): { parameters: Record<string, unknown> } {
+  const instrumentId = requiredString(options.instrumentId, 'instrumentId');
+  const exchangeId = requiredString(options.exchangeId, 'exchangeId');
+  const side = options.side?.toLowerCase();
+  if (side !== 'buy' && side !== 'sell') throw new TypeError('side must be "buy" or "sell".');
+  if (options.mode !== 'market' && options.mode !== 'limit' && options.mode !== 'stopMarket') {
+    throw new TypeError('mode must be "market", "limit", or "stopMarket".');
+  }
+  const hasSize = options.size !== undefined;
+  const hasAmount = options.amount !== undefined;
+  if (hasSize === hasAmount) throw new TypeError('Provide exactly one of size or amount.');
+  const amount = hasAmount ? roundCurrency(positiveNumber(options.amount, 'amount')) : undefined;
+  const amountUnitPrice = options.mode === 'limit' ? options.limit : options.mode === 'stopMarket' ? options.stop : options.lastClientPrice;
+  if (hasAmount && amountUnitPrice === undefined) throw new TypeError('Amount-based market orders require lastClientPrice.');
+  const size = hasSize
+    ? positiveNumber(options.size, 'size')
+    : floorToStep(
+        positiveNumber(Number(amount) / positiveNumber(amountUnitPrice, 'order price'), 'derived size'),
+        positiveNumber(options.sizeStep, 'sizeStep'),
+      );
+  if (options.mode === 'limit' && options.limit === undefined) throw new TypeError('limit is required for a limit order.');
+  if (options.mode === 'stopMarket' && options.stop === undefined) throw new TypeError('stop is required for a stop-market order.');
+  if (options.mode === 'market' && (options.limit !== undefined || options.stop !== undefined)) {
+    throw new TypeError('Market orders must not include limit or stop prices.');
+  }
+  const expiry = normalizeOrderExpiry(options.expiry);
+  const parameters: Record<string, unknown> = {
+    instrumentId,
+    exchangeId,
+    mode: options.mode,
+    size,
+    type: side,
+    expiry,
+    sellFractions: options.sellFractions ?? false,
+    settlementCurrency: options.settlementCurrency?.trim() || 'EUR',
+  };
+  if (amount !== undefined) parameters.amount = amount;
+  if (options.limit !== undefined) parameters.limit = positiveNumber(options.limit, 'limit');
+  if (options.stop !== undefined) parameters.stop = positiveNumber(options.stop, 'stop');
+  if (options.tradingCurrency?.trim()) parameters.tradingCurrency = options.tradingCurrency.trim();
+  if (options.destinationId?.trim()) parameters.destinationId = options.destinationId.trim();
+  if (options.isDMA !== undefined) parameters.isDMA = options.isDMA;
+  if (options.acceptedTerms?.length) parameters.acceptedTerms = options.acceptedTerms;
+  return { parameters };
+}
+
+function normalizeOrderExpiry(expiry: CreateOrderOptions['expiry']): Record<string, string> {
+  if (!expiry) return { type: 'gfd' };
+  if (expiry.type !== 'gfd' && expiry.type !== 'gtc' && expiry.type !== 'eom' && expiry.type !== 'gtd') {
+    throw new TypeError('expiry.type must be "gfd", "gtc", "eom", or "gtd".');
+  }
+  if (expiry.type !== 'gtd') return { type: expiry.type };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry.value) || Number.isNaN(Date.parse(`${expiry.value}T00:00:00Z`))) {
+    throw new TypeError('A gtd expiry requires value in YYYY-MM-DD format.');
+  }
+  return { type: expiry.type, value: expiry.value };
+}
+
+function normalizeOrderFees(raw: unknown): OrderFeeItem[] {
+  const value = firstValueAtPaths(raw, ['fees'], ['data.fees'], ['result.fees']);
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    ...(firstStringAtPaths(item, ['name'], ['title'], ['type'], ['label']) ? { name: firstStringAtPaths(item, ['name'], ['title'], ['type'], ['label']) } : {}),
+    ...(firstNumberAtPaths(item, ['absolute.value'], ['amount.value'], ['amount'], ['value']) !== undefined
+      ? { amount: firstNumberAtPaths(item, ['absolute.value'], ['amount.value'], ['amount'], ['value']) }
+      : {}),
+    ...(firstStringAtPaths(item, ['absolute.currency'], ['amount.currency'], ['currency'], ['currencyId'])
+      ? { currency: firstStringAtPaths(item, ['absolute.currency'], ['amount.currency'], ['currency'], ['currencyId']) }
+      : {}),
+    raw: item,
+  }));
+}
+
+function isPreparedOrder(value: CreateOrderOptions | PreparedOrder): value is PreparedOrder {
+  return Boolean(value && typeof value === 'object' && 'parameters' in value && 'clientProcessId' in value && 'secAccNo' in value);
+}
+
+function orderMutationStatus(value: unknown): string | undefined {
+  const status = firstStringAtPaths(value, ['status'], ['state'], ['result.status']);
+  if (!status) return undefined;
+  const normalized = status.replaceAll('_', '').replaceAll('-', '').toLowerCase();
+  if (normalized === 'confirmationneeded') return 'confirmationNeeded';
+  return normalized;
+}
+
+function throwResourceErrors(value: unknown, resource: string): void {
+  const errors = firstValueAtPaths(value, ['errors']);
+  if (Array.isArray(errors) && errors.length > 0) {
+    throw new TradeRepublicProtocolError(`Trade Republic resource failed: ${resource} ${JSON.stringify(errors)}`);
+  }
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new TypeError(`${name} must be a non-empty string.`);
+  return value.trim();
+}
+
+function positiveNumber(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new TypeError(`${name} must be a finite number greater than zero.`);
+  return value;
+}
+
+function roundCurrency(value: number): number {
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return positiveNumber(rounded, 'amount rounded to currency precision');
+}
+
+function floorToStep(value: number, step: number): number {
+  const decimals = Math.min(12, Math.max(0, decimalPlaces(step)));
+  const floored = Math.floor(value / step + 1e-10) * step;
+  return positiveNumber(Number(floored.toFixed(decimals)), 'derived size rounded to sizeStep');
+}
+
+function decimalPlaces(value: number): number {
+  const text = value.toString().toLowerCase();
+  if (text.includes('e-')) return Number(text.split('e-')[1] ?? 0);
+  return text.includes('.') ? (text.split('.')[1]?.length ?? 0) : 0;
+}
+
+function createClientProcessId(): string {
+  return randomUUID();
+}
+
+function firstValueAtPaths(value: unknown, ...paths: string[][]): unknown {
+  for (const path of paths) {
+    let current = value;
+    for (const part of path[0]?.split('.') ?? []) {
+      if (!current || typeof current !== 'object' || Array.isArray(current)) {
+        current = undefined;
+        break;
+      }
+      current = (current as Record<string, unknown>)[part];
+    }
+    if (current !== undefined && current !== null) return current;
+  }
+  return undefined;
+}
+
+function firstStringAtPaths(value: unknown, ...paths: string[][]): string | undefined {
+  const candidate = firstValueAtPaths(value, ...paths);
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
+}
+
+function firstNumberAtPaths(value: unknown, ...paths: string[][]): number | undefined {
+  const candidate = firstValueAtPaths(value, ...paths);
+  if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+  if (typeof candidate === 'string' && candidate.trim() && Number.isFinite(Number(candidate))) return Number(candidate);
+  return undefined;
+}
+
+function firstNestedStringByKeys(value: unknown, ...keys: string[]): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstNestedStringByKeys(item, ...keys);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const direct = record[key];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+  }
+  for (const item of Object.values(record)) {
+    const found = firstNestedStringByKeys(item, ...keys);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function findNestedRecordById(value: unknown, id: string): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedRecordById(item, id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if ([record.id, record.exchangeId, record.slug, record.destinationId].some((candidate) => candidate === id)) return record;
+  for (const item of Object.values(record)) {
+    const found = findNestedRecordById(item, id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function nextOrderUpdate(iterator: AsyncIterator<unknown>, timeoutMs: number): Promise<IteratorResult<unknown> | { done: true; value: undefined; timedOut: true }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve({ done: true, value: undefined, timedOut: true }), timeoutMs);
+    timer.unref?.();
+    iterator.next().then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function isOpenOrder(order: Order): boolean {
   const status = order.status?.toUpperCase();
   return status === 'OPEN' || status === 'OPENED' || status === 'PARTIALLYFILLED' || status === 'PARTIALLY_FILLED' || status === 'RECEIVED';
+}
+
+function isExecutedOrder(order: Order): boolean {
+  const status = order.status?.toUpperCase().replaceAll('_', '').replaceAll('-', '');
+  return Boolean(
+    order.executedAt
+    || (order.executedQuantity !== undefined && order.executedQuantity > 0)
+    || status === 'EXECUTED'
+    || status === 'FILLED'
+    || status === 'PARTIALLYFILLED',
+  );
 }
 
 export class PortfolioApi {
@@ -613,6 +986,10 @@ export class MarketApi {
 
   candles(options: CandleDownloadOptions): Promise<Candle[]> {
     return this.resources.query(candlesSpec, options);
+  }
+
+  quote(assetId: string, exchangeId: string): Promise<MarketQuote> {
+    return this.resources.query(quoteSpec, { assetId, exchangeId });
   }
 
   downloadCandles(options: CandleDownloadOptions, paging: { maxCandlesPerRequest?: number } = {}): Promise<Candle[]> {
@@ -801,7 +1178,10 @@ export class TradingApi {
   }
 
   rawOrderDestinations(isin: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
-    return validated(this.validateRaw, 'trading.orderDestinations', this.http.request('GET', `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, undefined, query));
+    return validated(this.validateRaw, 'trading.orderDestinations', this.http.request('GET', `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, undefined, {
+      jurisdiction: 'DE',
+      ...query,
+    }));
   }
 
   async trades(query: Record<string, string | number | boolean | undefined> = {}): Promise<Trade[]> {
@@ -857,6 +1237,24 @@ export class DiscoveryApi {
 
   watchlists(): Promise<unknown> {
     return this.rawWatchlists();
+  }
+
+  async cloudWatchlist(options: { pageSize?: number } = {}): Promise<Watchlist | undefined> {
+    const watchlist = arrayPayload(await this.rawWatchlists())[0];
+    if (!watchlist) return undefined;
+    const normalized = normalizeWatchlist(watchlist);
+    if (!normalized.id) return normalized;
+    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
+    return normalizeWatchlist(watchlist, items);
+  }
+
+  rawWatchlistItems(watchlistId: string, options: { pageSize?: number } = {}): Promise<unknown> {
+    return validated(this.validateRaw, 'discovery.watchlists.items', this.http.request(
+      'GET',
+      `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`,
+      undefined,
+      { pageSize: options.pageSize ?? 200 },
+    ));
   }
 
   rawWatchlists(): Promise<unknown> {
@@ -1028,6 +1426,14 @@ export class WebApi {
     options: { body?: unknown; query?: Record<string, string | number | boolean | undefined> } = {},
   ): Promise<T> {
     return this.http.request<T>(method, path, options.body, options.query);
+  }
+
+  requestDetailed<T = unknown>(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    options: { body?: unknown; query?: Record<string, string | number | boolean | undefined> } = {},
+  ): Promise<{ body: T; headers: Headers; status: number; url: string }> {
+    return this.http.requestDetailed<T>(method, path, options.body, options.query);
   }
 
   query<T = unknown>(payload: Record<string, unknown>, options: { timeoutMs?: number } = {}): Promise<T> {

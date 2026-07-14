@@ -2,6 +2,7 @@ import vm from 'node:vm';
 import readline from 'node:readline';
 import { inspect } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
@@ -31,9 +32,12 @@ let replInterface;
 let replEvaluating = false;
 let replPrompt = 'traderepublic> ';
 let inputQueue = Promise.resolve();
+let pendingOrderConfirmation = null;
+let pendingCancelConfirmation = null;
+const confirmationLifetimeMs = 2 * 60_000;
 
 const helperSignatures = new Map([
-  ['loginQr', 'loginQr(phoneNumber?: string, pinOrOptions?: string | { pin?: string; deviceName?: string; intervalMs?: number; timeoutMs?: number; debug?: boolean })'],
+  ['loginQr', 'loginQr(options?: { deviceName?: string; intervalMs?: number; timeoutMs?: number; debug?: boolean })'],
   ['restore', 'restore()'],
   ['refresh', 'refresh()'],
   ['clear', 'clear()'],
@@ -46,6 +50,13 @@ const helperSignatures = new Map([
   ['orders', 'orders(options?: { limit?: number; secAccNo?: string; cursor?: string; page?: number; pageSize?: number })'],
   ['ordersOpen', 'ordersOpen(options?: { limit?: number; secAccNo?: string })'],
   ['ordersClosed', 'ordersClosed(options?: { limit?: number; secAccNo?: string })'],
+  ['buy', 'buy({ instrumentId, exchangeId?, size? | amount?, mode?: "market" | "limit" | "stopMarket", limit?, stop? }) -> preview only'],
+  ['sell', 'sell({ instrumentId, exchangeId?, size? | amount?, mode?: "market" | "limit" | "stopMarket", limit?, stop? }) -> preview only'],
+  ['confirmOrder', 'confirmOrder(code) -> submits the pending preview'],
+  ['pendingOrder', 'pendingOrder()'],
+  ['discardOrder', 'discardOrder()'],
+  ['cancelOrder', 'cancelOrder(orderId) -> stages cancellation only'],
+  ['confirmCancel', 'confirmCancel(code) -> executes the pending cancellation'],
   ['mutualFundOrders', 'mutualFundOrders(options?: object)'],
   ['privateMarketOrders', 'privateMarketOrders(options?: object)'],
   ['orderUpdates', 'orderUpdates(secAccNo?: string)'],
@@ -143,34 +154,10 @@ function createSessionStore() {
   };
 }
 
-async function loginQr(phoneNumber, pinOrOptions = {}) {
-  const options = typeof pinOrOptions === 'string' ? { pin: pinOrOptions } : pinOrOptions;
-  const resolvedPhoneNumber = phoneNumber ?? process.env.TR_PHONE_NUMBER;
-  const resolvedPin = options.pin ?? process.env.TR_PIN;
+async function loginQr(options = {}) {
   await ensureLoginContext(options);
 
-  if (resolvedPin) {
-    if (!resolvedPhoneNumber) {
-      throw new Error('Missing phone number for PIN login. Call loginQr("+491...", "1234") or set TR_PHONE_NUMBER.');
-    }
-    const session = await client.auth.loginWithPin({
-      phoneNumber: resolvedPhoneNumber,
-      pin: resolvedPin,
-      otpLess: options.otpLess ?? false,
-      signal: options.signal,
-      intervalMs: options.intervalMs ?? 1500,
-      timeoutMs: options.timeoutMs ?? 10 * 60_000,
-      debug: options.debug ?? false,
-    });
-    const profile = await loginProfile();
-    scheduleSessionRefresh(session, {
-      messagePrefix: `Logged in successfully with security account number ${profile.securitiesAccountNumber ?? 'unknown'}, name: "${profile.name ?? 'unknown'}".`,
-    });
-    return session;
-  }
-
   const challenge = await client.auth.createInstantLogin({
-    ...(resolvedPhoneNumber ? { phoneNumber: resolvedPhoneNumber } : {}),
     deviceName: options.deviceName ?? 'handelsrepublik demo repl',
   });
 
@@ -194,7 +181,7 @@ async function loginQr(phoneNumber, pinOrOptions = {}) {
     });
   }
 
-  const stopCountdown = startQrCountdown(displayedChallenge.expiresAt);
+  const stopCountdown = startQrCountdown(displayedChallenge.expiresAt, qrDetails.serverTime ?? challenge.serverTime);
   try {
     const session = await client.auth.pollInstantLogin(challenge, {
       intervalMs: options.intervalMs ?? 1500,
@@ -276,14 +263,16 @@ async function resolveQrChallengeDetails(challenge) {
   }
   if (!challenge.id) return {};
   try {
-    const detail = await client.raw.request({
-      path: `/api/v2/auth/web/login/qr-challenges/${encodeURIComponent(challenge.id)}`,
-    });
+    const response = await client.web.requestDetailed('GET', `/api/v2/auth/web/login/qr-challenges/${encodeURIComponent(challenge.id)}`);
+    const detail = response.body;
     if (!detail || typeof detail !== 'object') return {};
     return {
       payload: firstString(detail.qrCodePayload, detail.qrCode, detail.deepLink),
       deepLink: firstString(detail.deepLink, detail.qrCodePayload),
-      expiresAt: firstString(detail.qrCodeTokenExpiresAt, detail.expiresAt, detail.expiration, detail.challengeExpiresAt),
+      // Trade Republic uses challengeExpiresAt for the QR display lifetime;
+      // qrCodeTokenExpiresAt is a separate polling/token deadline.
+      expiresAt: firstString(detail.challengeExpiresAt, detail.expiresAt, detail.expiration, detail.qrCodeTokenExpiresAt),
+      serverTime: response.headers.get('date'),
     };
   } catch (error) {
     printFullError(error);
@@ -291,12 +280,12 @@ async function resolveQrChallengeDetails(challenge) {
   }
 }
 
-function startQrCountdown(expiresAt) {
+function startQrCountdown(expiresAt, serverTime) {
   if (!expiresAt) {
     console.log('QR countdown: unavailable');
     return () => {};
   }
-  const expiresAtMs = new Date(expiresAt).getTime();
+  const expiresAtMs = calibratedExpiryMs(expiresAt, serverTime);
   if (!Number.isFinite(expiresAtMs)) {
     console.log('QR countdown: unavailable');
     return () => {};
@@ -321,6 +310,13 @@ function startQrCountdown(expiresAt) {
     readline.cursorTo(process.stdout, 0);
     process.stdout.write('\n');
   };
+}
+
+function calibratedExpiryMs(expiresAt, serverTime) {
+  const expiryMs = new Date(expiresAt).getTime();
+  const serverMs = serverTime ? new Date(serverTime).getTime() : NaN;
+  if (!Number.isFinite(expiryMs) || !Number.isFinite(serverMs)) return expiryMs;
+  return expiryMs - (serverMs - Date.now());
 }
 
 function renderTerminalQr(payload) {
@@ -409,6 +405,148 @@ async function ordersOpen(options = {}) {
 async function ordersClosed(options = {}) {
   await ensureSession();
   return client.orders.closed(options);
+}
+
+async function buy(options) {
+  return stageOrder('buy', options);
+}
+
+async function sell(options) {
+  return stageOrder('sell', options);
+}
+
+async function stageOrder(side, options) {
+  if (!options || typeof options !== 'object') {
+    throw new Error(`${side}() requires an options object with instrumentId and exactly one of size or amount.`);
+  }
+  await ensureSession();
+  const instrumentId = cleanString(options.instrumentId ?? options.isin);
+  if (!instrumentId) throw new Error(`${side}() requires instrumentId.`);
+  const hasSize = options.size !== undefined;
+  const hasAmount = options.amount !== undefined;
+  if (hasSize === hasAmount) throw new Error(`${side}() requires exactly one of size or amount.`);
+  const size = hasSize ? Number(options.size) : undefined;
+  const amount = hasAmount ? Number(options.amount) : undefined;
+  if (hasSize && (!Number.isFinite(size) || size <= 0)) throw new Error(`${side}() requires size greater than zero.`);
+  if (hasAmount && (!Number.isFinite(amount) || amount <= 0)) throw new Error(`${side}() requires amount greater than zero.`);
+  const mode = options.mode ?? 'market';
+  let exchangeId = cleanString(options.exchangeId);
+  if (!exchangeId) {
+    const destinations = await client.trading.orderDestinations(instrumentId, { side: side.toUpperCase() });
+    exchangeId = destinations.find((destination) => destinationSupportsOrder(destination, mode, side))?.id;
+  }
+  if (!exchangeId) throw new Error(`No order destination is available for ${instrumentId}. Pass exchangeId explicitly if Trade Republic offers one.`);
+  let lastClientPrice = options.lastClientPrice;
+  let quote;
+  if (mode === 'market' && lastClientPrice === undefined) {
+    quote = await client.market.quote(instrumentId, exchangeId);
+    lastClientPrice = side === 'buy' ? quote.ask ?? quote.last : quote.bid ?? quote.last;
+    if (lastClientPrice === undefined) throw new Error('No current executable price is available. The order was not staged.');
+  }
+  const orderOptions = {
+    ...options,
+    instrumentId,
+    exchangeId,
+    side,
+    mode,
+    ...(size !== undefined ? { size } : {}),
+    ...(amount !== undefined ? { amount } : {}),
+    ...(lastClientPrice !== undefined ? { lastClientPrice } : {}),
+  };
+  const preview = await client.orders.preview(orderOptions);
+  const code = confirmationCode();
+  pendingOrderConfirmation = {
+    code,
+    expiresAt: Date.now() + confirmationLifetimeMs,
+    order: preview.order,
+    summary: { side, instrumentId, exchangeId, size, amount, mode, quote, preview },
+  };
+  pendingCancelConfirmation = null;
+  return {
+    warning: 'PREVIEW ONLY. No order has been sent.',
+    ...pendingOrderConfirmation.summary,
+    confirmationCode: code,
+    expiresAt: new Date(pendingOrderConfirmation.expiresAt).toISOString(),
+    next: `confirmOrder("${code}")`,
+  };
+}
+
+function pendingOrder() {
+  if (!pendingOrderConfirmation) return null;
+  if (Date.now() >= pendingOrderConfirmation.expiresAt) {
+    pendingOrderConfirmation = null;
+    return null;
+  }
+  return {
+    warning: 'No order has been sent.',
+    ...pendingOrderConfirmation.summary,
+    confirmationCode: pendingOrderConfirmation.code,
+    expiresAt: new Date(pendingOrderConfirmation.expiresAt).toISOString(),
+  };
+}
+
+function discardOrder() {
+  const discarded = Boolean(pendingOrderConfirmation);
+  pendingOrderConfirmation = null;
+  return discarded;
+}
+
+async function confirmOrder(code) {
+  const pending = consumeConfirmation('order', code);
+  const result = await client.orders.submit(pending.order);
+  return { warning: 'ORDER WAS SUBMITTED.', ...result };
+}
+
+function cancelOrder(orderId) {
+  const id = cleanString(orderId);
+  if (!id) throw new Error('cancelOrder(orderId) requires an order id from ordersOpen().');
+  const code = confirmationCode();
+  pendingCancelConfirmation = { code, orderId: id, expiresAt: Date.now() + confirmationLifetimeMs };
+  pendingOrderConfirmation = null;
+  return {
+    warning: 'CANCELLATION PREVIEW ONLY. The order is still active.',
+    orderId: id,
+    confirmationCode: code,
+    expiresAt: new Date(pendingCancelConfirmation.expiresAt).toISOString(),
+    next: `confirmCancel("${code}")`,
+  };
+}
+
+async function confirmCancel(code) {
+  const pending = consumeConfirmation('cancel', code);
+  const result = await client.orders.cancel(pending.orderId);
+  return { warning: 'CANCELLATION WAS SENT.', ...result };
+}
+
+function consumeConfirmation(kind, code) {
+  const pending = kind === 'order' ? pendingOrderConfirmation : pendingCancelConfirmation;
+  if (!pending) throw new Error(`There is no pending ${kind} confirmation.`);
+  if (Date.now() >= pending.expiresAt) {
+    if (kind === 'order') pendingOrderConfirmation = null;
+    else pendingCancelConfirmation = null;
+    throw new Error(`The ${kind} confirmation expired. Create a fresh preview.`);
+  }
+  if (code !== pending.code) throw new Error(`Confirmation code does not match. Nothing was sent.`);
+  if (kind === 'order') pendingOrderConfirmation = null;
+  else pendingCancelConfirmation = null;
+  return pending;
+}
+
+function confirmationCode() {
+  return randomBytes(3).toString('hex').toUpperCase();
+}
+
+function destinationSupportsOrder(destination, mode, side) {
+  const modes = destination?.raw?.orderModes;
+  if (Array.isArray(modes) && !modes.includes(mode)) return false;
+  if (mode === 'market' && destination?.raw?.open === false) return false;
+  const maintenance = destination?.raw?.maintenanceWindow;
+  const now = Date.now();
+  if (maintenance && now >= Number(maintenance.validFrom) && now <= Number(maintenance.validUntil)) {
+    if (side === 'buy' && maintenance.buyAllowed === false) return false;
+    if (side === 'sell' && maintenance.sellAllowed === false) return false;
+  }
+  return Boolean(destination?.id);
 }
 
 async function mutualFundOrders(options = {}) {
@@ -943,7 +1081,7 @@ function apiCatalog() {
     },
     account: ['account', 'accountSettings', 'personalDetails', 'relationships', 'cardsHome', 'appUsageConsents', 'iban'],
     portfolio: ['portfolio', 'cash', 'markToMarket', 'portfolioChart', 'privateMarketsPositions', 'savingsPlans'],
-    orders: ['orders', 'ordersOpen', 'ordersClosed', 'mutualFundOrders', 'privateMarketOrders', 'orderUpdates', 'orderDestinations', 'trades', 'dailyPnl'],
+    orders: ['orders', 'ordersOpen', 'ordersClosed', 'buy', 'sell', 'pendingOrder', 'confirmOrder', 'discardOrder', 'cancelOrder', 'confirmCancel', 'orderUpdates', 'orderDestinations'],
     market: ['assets', 'asset', 'venues', 'quoteVenues', 'depthVenues', 'candles', 'downloadCandles', 'quoteSearch', 'quoteWatch', 'priceSearch', 'quotes', 'l2', 'tape', 'tradeHistory'],
     instruments: ['news', 'etfDetails', 'etfComposition', 'fundDetails', 'fundComposition', 'cryptoDetails', 'yieldToMaturity', 'priceForOrder', 'availableSize'],
     discovery: ['exchangeDetails', 'exchangeSchedule', 'instrumentStatus', 'watchlists', 'screeners', 'screenerOptions', 'userPreferences'],
@@ -1433,7 +1571,7 @@ function help() {
   return {
     client: 'TradeRepublicClient instance',
     tr: 'Alias for client',
-    loginQr: 'loginQr() shows a QR code; loginQr("+491...", "1234") logs in with phone + PIN',
+    loginQr: 'loginQr() requests a QR code and waits for approval in the Trade Republic app',
     restore: 'restore()',
     refresh: 'refresh()',
     clear: 'await clear()',
@@ -1442,6 +1580,7 @@ function help() {
     cash: 'cash()',
     portfolio: 'portfolio(options?: { timeoutMs?: number })',
     orders: 'orders({ limit: 25 })',
+    orderEntry: `buy({ instrumentId: "${EXAMPLE_ASSET_ID}", size: 1 }) and sell(...) only create a fee preview. A separate confirmOrder(code) call is required to submit.`,
     assets: `assets() -> assets("${EXAMPLE_QUERY}", { limit: 20 }); asset() -> asset("${EXAMPLE_ASSET_ID}")`,
     derivatives: `derivatives() -> derivatives("${EXAMPLE_QUERY}"); derivativesFor() -> derivativesFor("${EXAMPLE_ASSET_ID}")`,
     candles: `candles() -> candles("${EXAMPLE_ASSET_ID}", "${EXAMPLE_QUOTE_EXCHANGE_ID}", "1h", { from: last 7 days })`,
@@ -1487,6 +1626,13 @@ Object.assign(replContext, {
   orders,
   ordersOpen,
   ordersClosed,
+  buy,
+  sell,
+  confirmOrder,
+  pendingOrder,
+  discardOrder,
+  cancelOrder,
+  confirmCancel,
   mutualFundOrders,
   privateMarketOrders,
   orderUpdates,

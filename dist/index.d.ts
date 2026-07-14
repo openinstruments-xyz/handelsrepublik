@@ -73,6 +73,7 @@ interface InstantLoginChallenge {
     qrCodeDataUrl?: string | undefined;
     deepLink?: string | undefined;
     expiresAt?: string | undefined;
+    serverTime?: string | undefined;
     raw: unknown;
 }
 interface Asset {
@@ -81,6 +82,15 @@ interface Asset {
     name?: string | undefined;
     type?: string | undefined;
     exchangeIds?: string[] | undefined;
+    raw: unknown;
+}
+interface WatchlistItem extends Asset {
+    rank?: number | undefined;
+}
+interface Watchlist {
+    id: string;
+    name?: string | undefined;
+    items: WatchlistItem[];
     raw: unknown;
 }
 interface AssetDetail extends Asset {
@@ -101,6 +111,7 @@ interface Order {
     status?: string | undefined;
     isin?: string | undefined;
     instrumentId?: string | undefined;
+    name?: string | undefined;
     side?: string | undefined;
     type?: string | undefined;
     createdAt?: string | undefined;
@@ -112,8 +123,84 @@ interface Order {
     expiredAt?: string | undefined;
     rejectedAt?: string | undefined;
     quantity?: number | undefined;
+    executedQuantity?: number | undefined;
+    executionPrice?: number | undefined;
     amount?: number | undefined;
     currency?: string | undefined;
+    raw: unknown;
+}
+type OrderSide = 'buy' | 'sell';
+type OrderMode = 'market' | 'limit' | 'stopMarket';
+type OrderExpiry = {
+    type: 'gfd';
+    value?: never;
+} | {
+    type: 'gtc';
+    value?: never;
+} | {
+    type: 'eom';
+    value?: never;
+} | {
+    type: 'gtd';
+    value: string;
+};
+interface CreateOrderOptions {
+    instrumentId: string;
+    exchangeId: string;
+    side: OrderSide;
+    mode: OrderMode;
+    size?: number | undefined;
+    amount?: number | undefined;
+    sizeStep?: number | undefined;
+    limit?: number | undefined;
+    stop?: number | undefined;
+    expiry?: OrderExpiry | undefined;
+    settlementCurrency?: string | undefined;
+    tradingCurrency?: string | undefined;
+    sellFractions?: boolean | undefined;
+    destinationId?: string | undefined;
+    isDMA?: boolean | undefined;
+    acceptedTerms?: unknown[] | undefined;
+    warningsShown?: string[] | undefined;
+    lastClientPrice?: number | undefined;
+    clientProcessId?: string | undefined;
+    secAccNo?: string | undefined;
+    timeoutMs?: number | undefined;
+}
+interface PreparedOrder {
+    parameters: Record<string, unknown>;
+    clientProcessId: string;
+    secAccNo: string;
+    warningsShown: string[];
+    lastClientPrice?: number | undefined;
+}
+interface OrderFeeItem {
+    name?: string | undefined;
+    amount?: number | undefined;
+    currency?: string | undefined;
+    raw: unknown;
+}
+interface OrderPreview {
+    order: PreparedOrder;
+    fees: OrderFeeItem[];
+    totalFees?: number | undefined;
+    currency?: string | undefined;
+    estimatedGross?: number | undefined;
+    estimatedTotal?: number | undefined;
+    raw: unknown;
+}
+type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | string;
+interface OrderSubmission {
+    status: OrderSubmissionStatus;
+    orderId?: string | undefined;
+    clientProcessId: string;
+    updates: unknown[];
+    error?: unknown;
+    raw: unknown;
+}
+interface OrderCancellation {
+    orderId: string;
+    status?: string | undefined;
     raw: unknown;
 }
 interface OrdersListOptions {
@@ -151,6 +238,7 @@ interface PortfolioPosition {
     quantity?: number | undefined;
     value?: number | undefined;
     currency?: string | undefined;
+    categoryType?: string | undefined;
     raw: unknown;
 }
 interface Portfolio {
@@ -285,6 +373,19 @@ interface LiveFeedEvent {
     exchangeId?: string | undefined;
     raw: unknown;
 }
+interface MarketQuote {
+    assetId: string;
+    exchangeId: string;
+    currency?: string | undefined;
+    last?: number | undefined;
+    lastSize?: number | undefined;
+    bid?: number | undefined;
+    bidSize?: number | undefined;
+    ask?: number | undefined;
+    askSize?: number | undefined;
+    time?: string | undefined;
+    raw: unknown;
+}
 interface L2OrderBookOptions {
     assetId: string;
     exchangeId: string;
@@ -327,6 +428,7 @@ interface HttpClientOptions {
     apiBaseUrl: string;
     locale: string;
     userAgent: string;
+    sdkHeaders?: Record<string, string> | undefined;
     defaultHeaders?: Record<string, string> | undefined;
     fetch: typeof fetch;
     getSession: () => Session | undefined;
@@ -558,6 +660,7 @@ declare class OrdersApi {
     constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
     open(options?: OrdersListOptions): Promise<Order[]>;
     closed(options?: OrdersListOptions): Promise<Order[]>;
+    executed(options?: OrdersListOptions): Promise<Order[]>;
     all(options?: OrdersListOptions): Promise<Order[]>;
     rawAll(options?: OrdersListOptions): Promise<unknown>;
     mutualFunds(options?: MutualFundOrdersOptions): Promise<Order[]>;
@@ -566,6 +669,13 @@ declare class OrdersApi {
     rawPrivateMarkets(options?: PrivateMarketsOrdersOptions): Promise<unknown>;
     orderUpdates(secAccNo: string): Subscription<unknown>;
     rawOrderUpdates(secAccNo?: string): Promise<unknown>;
+    prepare(options: CreateOrderOptions): Promise<PreparedOrder>;
+    preview(options: CreateOrderOptions): Promise<OrderPreview>;
+    submit(options: CreateOrderOptions | PreparedOrder): Promise<OrderSubmission>;
+    cancel(orderId: string, options?: {
+        timeoutMs?: number;
+    }): Promise<OrderCancellation>;
+    private resolveAmountSizeStep;
 }
 declare class PortfolioApi {
     private readonly http;
@@ -604,6 +714,7 @@ declare class MarketApi {
     subscriptions(options?: MarketSubscriptionsOptions): Promise<MarketSubscription[]>;
     candleQuery(options: CandleDownloadOptions): CandleQuery;
     candles(options: CandleDownloadOptions): Promise<Candle[]>;
+    quote(assetId: string, exchangeId: string): Promise<MarketQuote>;
     downloadCandles(options: CandleDownloadOptions, paging?: {
         maxCandlesPerRequest?: number;
     }): Promise<Candle[]>;
@@ -757,6 +868,12 @@ declare class DiscoveryApi {
     instrumentStatus(isin: string, exchange: string): Promise<InstrumentStatus>;
     rawInstrumentStatus(isin: string, exchange: string): Promise<unknown>;
     watchlists(): Promise<unknown>;
+    cloudWatchlist(options?: {
+        pageSize?: number;
+    }): Promise<Watchlist | undefined>;
+    rawWatchlistItems(watchlistId: string, options?: {
+        pageSize?: number;
+    }): Promise<unknown>;
     rawWatchlists(): Promise<unknown>;
     createWatchlist(name: string): Promise<unknown>;
     rawCreateWatchlist(name: string): Promise<unknown>;
@@ -817,6 +934,15 @@ declare class WebApi {
         body?: unknown;
         query?: Record<string, string | number | boolean | undefined>;
     }): Promise<T>;
+    requestDetailed<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, options?: {
+        body?: unknown;
+        query?: Record<string, string | number | boolean | undefined>;
+    }): Promise<{
+        body: T;
+        headers: Headers;
+        status: number;
+        url: string;
+    }>;
     query<T = unknown>(payload: Record<string, unknown>, options?: {
         timeoutMs?: number;
     }): Promise<T>;
@@ -954,7 +1080,7 @@ interface TradeRepublicCookieLike {
 }
 declare function collectTradeRepublicWebContext(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWebContextOptions): Promise<TradeRepublicWebContext>;
 
-type SchemaRisk = 'read' | 'lowRiskMutation' | 'blockedMutation';
+type SchemaRisk = 'read' | 'lowRiskMutation' | 'highRiskMutation' | 'blockedMutation';
 type SchemaTransport = 'rest' | 'websocket';
 interface TradeRepublicSchemaEntry {
     name: string;
@@ -970,8 +1096,8 @@ interface TradeRepublicSchemaEntry {
         sample?: 'once' | 'stream' | 'cleanup' | undefined;
     } | undefined;
 }
-declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
+declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutualFundOrdersOptions, type Order, type OrderDestination, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type Asset, type AssetDetail, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderSide, type OrderSubmission, type OrderSubmissionStatus, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

@@ -3,8 +3,9 @@ import {
   arrayPayload,
   normalizeCandle,
   normalizeL2OrderBook,
-  normalizeL2Venue,
+  normalizeL2Venues,
   normalizeLiveFeedEvent,
+  normalizeMarketQuote,
   normalizeSubscription,
 } from './normalizers.js';
 import type {
@@ -15,6 +16,7 @@ import type {
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,
+  MarketQuote,
   MarketSubscription,
   MarketSubscriptionsOptions,
 } from './types.js';
@@ -48,7 +50,13 @@ export const candlesSpec: QuerySpec<CandleDownloadOptions, Candle[]> = {
 export const availableL2BooksSpec: QuerySpec<{ assetId: string }, L2Venue[]> = {
   schemaName: 'market.availableL2Books',
   resource: (params) => ({ type: 'instrument', id: params.assetId }),
-  normalize: (raw) => arrayPayload(raw).map(normalizeL2Venue),
+  normalize: (raw) => normalizeL2Venues(raw),
+};
+
+export const quoteSpec: QuerySpec<{ assetId: string; exchangeId: string }, MarketQuote> = {
+  schemaName: 'market.quote',
+  resource: (params) => ({ type: 'ticker', id: `${params.assetId}.${params.exchangeId}` }),
+  normalize: (raw, params) => normalizeMarketQuote(raw, params.assetId, params.exchangeId),
 };
 
 export const liveFeedSpec: StreamSpec<LiveFeedOptions, LiveFeedEvent> = {

@@ -112,6 +112,7 @@ export interface InstantLoginChallenge {
   qrCodeDataUrl?: string | undefined;
   deepLink?: string | undefined;
   expiresAt?: string | undefined;
+  serverTime?: string | undefined;
   raw: unknown;
 }
 
@@ -121,6 +122,17 @@ export interface Asset {
   name?: string | undefined;
   type?: string | undefined;
   exchangeIds?: string[] | undefined;
+  raw: unknown;
+}
+
+export interface WatchlistItem extends Asset {
+  rank?: number | undefined;
+}
+
+export interface Watchlist {
+  id: string;
+  name?: string | undefined;
+  items: WatchlistItem[];
   raw: unknown;
 }
 
@@ -144,6 +156,7 @@ export interface Order {
   status?: string | undefined;
   isin?: string | undefined;
   instrumentId?: string | undefined;
+  name?: string | undefined;
   side?: string | undefined;
   type?: string | undefined;
   createdAt?: string | undefined;
@@ -155,8 +168,85 @@ export interface Order {
   expiredAt?: string | undefined;
   rejectedAt?: string | undefined;
   quantity?: number | undefined;
+  executedQuantity?: number | undefined;
+  executionPrice?: number | undefined;
   amount?: number | undefined;
   currency?: string | undefined;
+  raw: unknown;
+}
+
+export type OrderSide = 'buy' | 'sell';
+export type OrderMode = 'market' | 'limit' | 'stopMarket';
+
+export type OrderExpiry =
+  | { type: 'gfd'; value?: never }
+  | { type: 'gtc'; value?: never }
+  | { type: 'eom'; value?: never }
+  | { type: 'gtd'; value: string };
+
+export interface CreateOrderOptions {
+  instrumentId: string;
+  exchangeId: string;
+  side: OrderSide;
+  mode: OrderMode;
+  size?: number | undefined;
+  amount?: number | undefined;
+  sizeStep?: number | undefined;
+  limit?: number | undefined;
+  stop?: number | undefined;
+  expiry?: OrderExpiry | undefined;
+  settlementCurrency?: string | undefined;
+  tradingCurrency?: string | undefined;
+  sellFractions?: boolean | undefined;
+  destinationId?: string | undefined;
+  isDMA?: boolean | undefined;
+  acceptedTerms?: unknown[] | undefined;
+  warningsShown?: string[] | undefined;
+  lastClientPrice?: number | undefined;
+  clientProcessId?: string | undefined;
+  secAccNo?: string | undefined;
+  timeoutMs?: number | undefined;
+}
+
+export interface PreparedOrder {
+  parameters: Record<string, unknown>;
+  clientProcessId: string;
+  secAccNo: string;
+  warningsShown: string[];
+  lastClientPrice?: number | undefined;
+}
+
+export interface OrderFeeItem {
+  name?: string | undefined;
+  amount?: number | undefined;
+  currency?: string | undefined;
+  raw: unknown;
+}
+
+export interface OrderPreview {
+  order: PreparedOrder;
+  fees: OrderFeeItem[];
+  totalFees?: number | undefined;
+  currency?: string | undefined;
+  estimatedGross?: number | undefined;
+  estimatedTotal?: number | undefined;
+  raw: unknown;
+}
+
+export type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | string;
+
+export interface OrderSubmission {
+  status: OrderSubmissionStatus;
+  orderId?: string | undefined;
+  clientProcessId: string;
+  updates: unknown[];
+  error?: unknown;
+  raw: unknown;
+}
+
+export interface OrderCancellation {
+  orderId: string;
+  status?: string | undefined;
   raw: unknown;
 }
 
@@ -198,6 +288,7 @@ export interface PortfolioPosition {
   quantity?: number | undefined;
   value?: number | undefined;
   currency?: string | undefined;
+  categoryType?: string | undefined;
   raw: unknown;
 }
 
@@ -361,6 +452,20 @@ export interface LiveFeedEvent {
   type: string;
   assetId?: string | undefined;
   exchangeId?: string | undefined;
+  raw: unknown;
+}
+
+export interface MarketQuote {
+  assetId: string;
+  exchangeId: string;
+  currency?: string | undefined;
+  last?: number | undefined;
+  lastSize?: number | undefined;
+  bid?: number | undefined;
+  bidSize?: number | undefined;
+  ask?: number | undefined;
+  askSize?: number | undefined;
+  time?: string | undefined;
   raw: unknown;
 }
 

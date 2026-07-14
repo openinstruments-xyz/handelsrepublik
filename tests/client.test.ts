@@ -22,6 +22,41 @@ describe('TradeRepublicClient', () => {
     expect(calls[0]?.url).toBe('https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges');
     expect(calls[0]?.init.method).toBe('POST');
     expect(calls[0]?.init.body).toBe(JSON.stringify({ deviceName: 'sdk-test' }));
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers['x-tr-app-version']).toBe('15.101.0');
+    expect(headers['x-tr-platform']).toBe('web-pro');
+    const deviceInfo = JSON.parse(Buffer.from(headers['x-tr-device-info']!, 'base64').toString('utf8')) as Record<string, unknown>;
+    expect(deviceInfo).toMatchObject({
+      browser: 'Chrome',
+      os: 'Windows',
+    });
+    assert.equal(typeof deviceInfo.stableDeviceId, 'string');
+  });
+
+  it('allows callers to override the SDK Trade Republic headers', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = TradeRepublicClient.create({
+      defaultHeaders: {
+        'x-tr-app-version': 'custom-version',
+        'x-tr-platform': 'custom-platform',
+        'x-tr-device-info': 'custom-device',
+      },
+      webContext: {
+        headers: {
+          'x-tr-app-version': 'captured-version',
+          'x-tr-platform': 'captured-platform',
+          'x-tr-device-info': 'captured-device',
+        },
+      },
+      fetch: mockFetch(calls, { id: 'challenge-1' }),
+    });
+
+    await client.auth.createInstantLogin();
+
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    expect(headers['x-tr-app-version']).toBe('custom-version');
+    expect(headers['x-tr-platform']).toBe('custom-platform');
+    expect(headers['x-tr-device-info']).toBe('custom-device');
   });
 
   it('logs in with phone and PIN through the v2 web login endpoint', async () => {
@@ -153,6 +188,43 @@ describe('TradeRepublicClient', () => {
     expect(client.getSession()).toMatchObject({ securitiesAccountNumber: '0000000001' });
     expect(saved).toEqual([expect.objectContaining({ securitiesAccountNumber: '0000000001' })]);
     expect(parseSubPayload(sockets[0]?.sent[1])).toMatchObject({ type: 'accountPairs' });
+  });
+
+  it('completes QR login when the current web flow remains confirmed', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetchSequence(calls, [
+        jsonResponse({ status: 'CLAIMED', processId: 'process-1' }, 200, {
+          'set-cookie': 'JSESSIONID=claim-session; Path=/; Secure; HttpOnly',
+        }),
+        jsonResponse({ status: 'CONFIRMED' }, 200, {
+          'set-cookie': 'tr_external_id=external-1; Path=/; Secure; SameSite=Strict',
+        }),
+        jsonResponse({ status: 'CONFIRMED' }, 200, {
+          'set-cookie': 'JSESSIONID=confirmed-session; Path=/; Secure; HttpOnly',
+        }),
+        jsonResponse({ session: { connectionToken: 'session-token' } }),
+      ]),
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'accountPairs') {
+            socket.emit('message', `${id} A ${JSON.stringify(accountPairsPayload())}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.auth.pollInstantLogin({ id: 'challenge-1' }, { intervalMs: 0 })).resolves.toMatchObject({
+      sessionToken: 'session-token',
+      cookies: {
+        JSESSIONID: 'confirmed-session',
+        tr_external_id: 'external-1',
+      },
+    });
+    expect(calls[3]?.url).toBe('https://api.traderepublic.com/api/v1/auth/web/session');
   });
 
   it('refreshes the saved web session cookies', async () => {
@@ -322,6 +394,33 @@ describe('TradeRepublicClient', () => {
     expect(sockets[2]?.sent[1]).toBe('sub 1 {"type":"availableCash"}');
   });
 
+  it('flattens current category-based portfolio payloads', async () => {
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'accountPairs') socket.emit('message', `${id} A ${JSON.stringify(accountPairsPayload())}`);
+          if (payload.type === 'compactPortfolioByTypeV2') {
+            socket.emit('message', `${id} portfolio ${JSON.stringify({
+              categories: [
+                { categoryType: 'stocks', positions: [{ instrumentId: 'US1', shares: '2' }] },
+                { categoryType: 'crypto', positions: [{ instrumentId: 'BTC', quantity: '0.1' }] },
+              ],
+            })}`);
+          }
+        });
+        return socket;
+      },
+    });
+
+    await expect(client.portfolio.current()).resolves.toEqual({
+      positions: [
+        expect.objectContaining({ id: 'US1', quantity: 2, categoryType: 'stocks' }),
+        expect.objectContaining({ id: 'BTC', quantity: 0.1, categoryType: 'crypto' }),
+      ],
+      raw: expect.any(Object),
+    });
+  });
+
   it('refreshes a stale cached securities account number before portfolio queries', async () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
@@ -400,6 +499,89 @@ describe('TradeRepublicClient', () => {
       instrumentId: 'US3',
     });
     expect(client.securitiesAccountNumber).toBe('0000000001');
+  });
+
+  it('returns only filled and partially filled account executions', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetch(calls, [
+        { id: 'filled', status: 'EXECUTED', instrument: { name: 'Apple' }, executedAt: '2026-07-03T10:00:00.000Z', executedQuantity: '2', averageExecutionPrice: '123.45' },
+        { id: 'partial', status: 'PARTIALLY_FILLED', trades: [{ executionSize: '1', executionPrice: '100', executionTime: '2026-07-03T11:00:00.000Z' }] },
+        { id: 'cancelled', status: 'CANCELLED', cancelledAt: '2026-07-03T12:00:00.000Z' },
+        { id: 'rejected', status: 'REJECTED', rejectedAt: '2026-07-03T12:00:00.000Z' },
+        { id: 'open', status: 'OPEN', trades: [] },
+      ]),
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'accountPairs') socket.emit('message', `${id} A ${JSON.stringify(accountPairsPayload())}`);
+        });
+        return socket;
+      },
+      session: { securitiesAccountNumber: '0000000001' },
+    });
+
+    await expect(client.orders.executed()).resolves.toEqual([
+      expect.objectContaining({ id: 'filled', name: 'Apple', executedQuantity: 2, executionPrice: 123.45 }),
+      expect.objectContaining({ id: 'partial', executedQuantity: 1, executionPrice: 100, executedAt: '2026-07-03T11:00:00.000Z' }),
+    ]);
+  });
+
+  it('normalizes quote fields and nested L2 exchange candidates', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'ticker') {
+            socket.emit('message', `${id} ticker ${JSON.stringify({
+              last: { price: '275.8', size: '359', time: 1784055758749 },
+              bid: { price: '275.8', size: '359' },
+              ask: { price: '276.1', size: '42' },
+              currency: 'EUR',
+            })}`);
+          }
+          if (payload.type === 'instrument') {
+            socket.emit('message', `${id} instrument ${JSON.stringify({ exchanges: [{ id: 'LSX', name: 'Lang & Schwarz' }, { exchangeId: 'XETRA', name: 'Xetra' }] })}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.market.quote('US1', 'LSX')).resolves.toEqual(expect.objectContaining({
+      assetId: 'US1', exchangeId: 'LSX', last: 275.8, lastSize: 359, bid: 275.8, ask: 276.1, askSize: 42,
+      time: new Date(1784055758749).toISOString(),
+    }));
+    await expect(client.market.availableL2Books('US1')).resolves.toEqual([
+      expect.objectContaining({ exchangeId: 'LSX', name: 'Lang & Schwarz' }),
+      expect.objectContaining({ exchangeId: 'XETRA', name: 'Xetra' }),
+    ]);
+    expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({ type: 'ticker', id: 'US1.LSX' });
+    expect(parseSubPayload(sockets[1]?.sent[1])).toEqual({ type: 'instrument', id: 'US1' });
+  });
+
+  it('loads the first cloud watchlist and its ranked items', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetchSequence(calls, [
+        jsonResponse({ data: [{ id: 'wl-1', name: 'My Watchlist' }, { id: 'wl-2', name: 'Ignored' }] }),
+        jsonResponse({ items: [
+          { instrumentId: 'US2', itemRank: 2, instrument: { name: 'Second', exchanges: [{ id: 'XETRA' }] } },
+          { isin: 'US1', itemRank: 1, 'core.shortName': 'First', exchangeIds: ['LSX'] },
+        ] }),
+      ]),
+    });
+
+    await expect(client.discovery.cloudWatchlist()).resolves.toEqual(expect.objectContaining({
+      id: 'wl-1',
+      name: 'My Watchlist',
+      items: [
+        expect.objectContaining({ id: 'US1', name: 'First', rank: 1, exchangeIds: ['LSX'] }),
+        expect.objectContaining({ id: 'US2', name: 'Second', rank: 2, exchangeIds: ['XETRA'] }),
+      ],
+    }));
+    expect(new URL(calls[1]?.url ?? 'https://invalid.local/').pathname).toBe('/api-gateway/watchlists/api/v2/watchlists/wl-1/items');
+    expect(new URL(calls[1]?.url ?? 'https://invalid.local/').searchParams.get('pageSize')).toBe('200');
   });
 
   it('falls back to the auth account profile when accountPairs has no securities account number', async () => {
@@ -554,6 +736,149 @@ describe('TradeRepublicClient', () => {
       selector: { case: 'bySecAccNo', value: { accountNumber: '0000000000' } },
     });
     subscription.close();
+  });
+
+  it('previews order fees without submitting an order', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'orderFeesV2') {
+            socket.emit('message', `${id} A ${JSON.stringify({
+              fees: [{ name: 'External costs', absolute: { value: 1, currency: 'EUR' } }],
+              total: { absolute: { value: 1, currency: 'EUR' } },
+            })}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.orders.preview({
+      instrumentId: 'US0378331005',
+      exchangeId: 'LSX',
+      side: 'buy',
+      mode: 'limit',
+      size: 2,
+      limit: 100,
+      secAccNo: '0000000000',
+    })).resolves.toMatchObject({
+      totalFees: 1,
+      currency: 'EUR',
+      estimatedGross: 200,
+      estimatedTotal: 201,
+      fees: [{ name: 'External costs', amount: 1, currency: 'EUR' }],
+      order: {
+        parameters: {
+          instrumentId: 'US0378331005',
+          exchangeId: 'LSX',
+          type: 'buy',
+          mode: 'limit',
+          size: 2,
+          limit: 100,
+          expiry: { type: 'gfd' },
+        },
+      },
+    });
+    expect(parseSubPayload(sockets[0]?.sent[1])).toMatchObject({
+      type: 'orderFeesV2',
+      parameters: { instrumentId: 'US0378331005', exchangeId: 'LSX', type: 'buy', mode: 'limit', size: 2, limit: 100, currency: 'EUR' },
+      secAccNo: '0000000000',
+    });
+  });
+
+  it('waits through order confirmation states until submission succeeds', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type !== 'simpleCreateOrder') return;
+          socket.emit('message', `${id} A ${JSON.stringify({ status: 'received' })}`);
+          socket.emit('message', `${id} A ${JSON.stringify({ status: 'confirmationNeeded' })}`);
+          socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'order-1' })}`);
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const result = await client.orders.submit({
+      instrumentId: 'US0378331005',
+      exchangeId: 'LSX',
+      side: 'buy',
+      mode: 'market',
+      size: 1,
+      lastClientPrice: 201.5,
+      clientProcessId: 'process-1',
+      secAccNo: '0000000000',
+    });
+
+    expect(result).toMatchObject({ status: 'succeeded', orderId: 'order-1', clientProcessId: 'process-1' });
+    expect(result.updates).toHaveLength(3);
+    expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({
+      type: 'simpleCreateOrder',
+      parameters: {
+        instrumentId: 'US0378331005', exchangeId: 'LSX', mode: 'market', size: 1, type: 'buy',
+        expiry: { type: 'gfd' }, sellFractions: false, settlementCurrency: 'EUR',
+      },
+      warningsShown: [],
+      lastClientPrice: 201.5,
+      clientProcessId: 'process-1',
+      secAccNo: '0000000000',
+    });
+  });
+
+  it('supports current amount-based order payloads while previewing fees by derived size', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'instrument') {
+            socket.emit('message', `${id} A ${JSON.stringify({ id: 'XF000BTC0017', type: 'crypto' })}`);
+          }
+          if (payload.type === 'orderFeesV2') {
+            socket.emit('message', `${id} A ${JSON.stringify({ total: { absolute: { value: 1, currency: 'EUR' } } })}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const preview = await client.orders.preview({
+      instrumentId: 'XF000BTC0017', exchangeId: 'BHS', side: 'buy', mode: 'market', amount: 1,
+      lastClientPrice: 56_700, secAccNo: '0000000000', clientProcessId: 'amount-1',
+    });
+    expect(preview).toMatchObject({ estimatedGross: 1, estimatedTotal: 2, order: { parameters: { size: 0.000017, amount: 1 } } });
+    const feePayload = parseSubPayload(sockets[1]?.sent[1]) as { parameters: Record<string, unknown> };
+    expect(feePayload).toMatchObject({
+      type: 'orderFeesV2', parameters: { size: 0.000017, currency: 'EUR' },
+    });
+    assert.equal('amount' in feePayload.parameters, false);
+  });
+
+  it('cancels an order through the current cancelOrder resource', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'cancelOrder') socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'order-1' })}`);
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    await expect(client.orders.cancel('order-1')).resolves.toMatchObject({ orderId: 'order-1', status: 'succeeded' });
+    expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({ type: 'cancelOrder', orderId: 'order-1' });
+  });
+
+  it('rejects malformed order options before opening a websocket', async () => {
+    let sockets = 0;
+    const client = TradeRepublicClient.create({ websocketFactory: () => { sockets += 1; return new FakeSocket(); } });
+    await assert.rejects(client.orders.prepare({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'limit', size: 1, secAccNo: '1',
+    }), /limit is required/);
+    assert.equal(sockets, 0);
   });
 
   it('exposes timeline and price alarm mapper APIs through SDK namespaces', async () => {
@@ -778,6 +1103,7 @@ describe('TradeRepublicClient', () => {
       '/api/v1/interest/details',
     ]);
     expect(new URL(calls[7]?.url ?? 'https://invalid.local/').searchParams.get('side')).toBe('BUY');
+    expect(new URL(calls[7]?.url ?? 'https://invalid.local/').searchParams.get('jurisdiction')).toBe('DE');
     expect(new URL(calls[8]?.url ?? 'https://invalid.local/').searchParams.get('page')).toBe('1');
     expect(calls[9]?.init.method).toBe('POST');
     expect(calls[9]?.init.body).toBe(JSON.stringify({ items: [{ id: 'US1' }] }));
