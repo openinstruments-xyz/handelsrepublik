@@ -152,10 +152,19 @@ The connection-loss slice is implemented:
 - unexpected mapper outages invoke the callbacks once per disconnect/reconnect
   cycle, while expected closes remain silent.
 - replayable read subscriptions reconnect automatically.
-- order submission and cancellation subscriptions are non-replayable; connection
-  loss after sending returns `outcomeUnknown` with connection context.
-- order submission timeout also returns `outcomeUnknown` rather than a generic
-  retryable-looking timeout exception.
+- all known mapper mutations are centrally classified as non-replayable; raw
+  callers can classify newly discovered resources with `operation: 'mutation'`.
+- order submission and cancellation wait for terminal broker states and return
+  discriminated `succeeded`, `failed`, or `outcomeUnknown` results.
+- mapper subscriptions expose whether transmission occurred. Timeouts and
+  terminal transport events return `outcomeUnknown` only after a mutation was
+  sent; definitely-unsent failures throw a typed `MapperRequestError`.
+- sent mutations terminate immediately with explicit reasons when the session
+  changes or the client closes instead of drifting into a later timeout.
+- initial connection failure, handshake timeout, websocket error without close,
+  synchronous send failure, and failed reconnect attempts have explicit paths.
+- isolated sockets complete their disconnect/reconnect callback lifecycle even
+  after their non-replayable mutation has already settled as unknown.
 - caller-owned refetch behavior and the callback API are documented in the
   README and covered by focused unit tests.
 
@@ -167,8 +176,9 @@ The optional journal design remains unimplemented:
 - `OrdersApi.submit()` opens the remote subscription without a write-ahead
   journal operation.
 - the package exports no journal class or reconciliation API.
-- existing order tests cover successful submission and validation, but not
-  journal persistence, ambiguous submission, or restart recovery.
+- existing order tests cover successful, failed-network, timeout, definitely
+  unsent, session-refresh, explicit-close, shared, and isolated transport paths,
+  but not journal persistence or restart recovery.
 - `confirmationNeeded` currently appears in normalization code and a mocked unit
   test, but no checked-in live capture establishes its payload or required
   follow-up action. The demo REPL's `confirmOrder(code)` is an independent local

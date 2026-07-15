@@ -6,19 +6,53 @@ import type {
   WebSocketReconnectEvent,
 } from './types.js';
 
+export type MapperDeliveryState = 'notSent' | 'sent';
+
+export type MapperRequestFailureReason =
+  | 'clientClosed'
+  | 'connectFailure'
+  | 'disconnect'
+  | 'handshakeTimeout'
+  | 'sendFailure'
+  | 'sessionRefresh'
+  | 'timeout';
+
+export class MapperRequestError extends TradeRepublicProtocolError {
+  readonly outcomeUnknown: boolean;
+
+  constructor(
+    message: string,
+    public readonly reason: MapperRequestFailureReason,
+    public readonly deliveryState: MapperDeliveryState,
+    public readonly connectionLoss?: WebSocketDisconnectEvent | undefined,
+    cause?: unknown,
+  ) {
+    super(message, cause);
+    this.name = 'MapperRequestError';
+    this.outcomeUnknown = deliveryState === 'sent';
+  }
+}
+
+/** @deprecated Use MapperRequestError and inspect reason/deliveryState. */
+export class MapperConnectionLostError extends MapperRequestError {
+  constructor(public readonly event: WebSocketDisconnectEvent) {
+    super(
+      'WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.',
+      'disconnect',
+      'sent',
+      event,
+    );
+    this.name = 'MapperConnectionLostError';
+  }
+}
+
 export interface MapperSubscription extends AsyncIterable<unknown> {
+  readonly deliveryState: MapperDeliveryState;
   close(): void;
 }
 
 export interface MapperSubscriptionOptions {
   replayOnReconnect?: boolean | undefined;
-}
-
-export class MapperConnectionLostError extends TradeRepublicProtocolError {
-  constructor(public readonly event: WebSocketDisconnectEvent) {
-    super('WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.');
-    this.name = 'MapperConnectionLostError';
-  }
 }
 
 interface SubscriptionState {
@@ -46,8 +80,10 @@ export interface MapperConnectionOptions {
   websocketFactory: WebSocketFactory;
   headers: () => Record<string, string>;
   reconnectDelayMs?: number | undefined;
+  handshakeTimeoutMs?: number | undefined;
   onDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined;
   onReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined;
+  onIdle?: (() => void) | undefined;
 }
 
 /** Owns one mapper socket and multiplexes all active resource subscriptions. */
@@ -57,7 +93,7 @@ export class MapperConnection {
   private nextSubscriptionId = 1;
   private readonly subscriptions = new Map<number, SubscriptionState>();
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  private expectedClose = false;
+  private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   private outage: OutageState | undefined;
 
   constructor(private readonly options: MapperConnectionOptions) {}
@@ -77,6 +113,9 @@ export class MapperConnection {
     if (this.connected) this.sendSubscription(state);
 
     return {
+      get deliveryState() {
+        return state.sent ? 'sent' : 'notSent';
+      },
       close: () => this.closeSubscription(state),
       [Symbol.asyncIterator]: () => ({
         next: () => this.next(state),
@@ -88,83 +127,95 @@ export class MapperConnection {
     };
   }
 
-  /** Reconnects active subscriptions so a refreshed session supplies fresh headers. */
+  /** Reconnects reads with fresh headers and terminates already-sent mutations. */
   refreshHeaders(): void {
-    if (!this.socket || this.subscriptions.size === 0) return;
-    this.expectedClose = true;
-    this.connected = false;
-    this.socket.close(1000, 'session refreshed');
+    this.failSentNonReplayableSubscriptions('sessionRefresh');
+    const socket = this.socket;
+    if (!socket) return;
     this.socket = undefined;
-    this.expectedClose = false;
-    this.ensureSocket();
+    this.connected = false;
+    this.clearHandshakeTimer();
+    try {
+      socket.close(1000, 'session refreshed');
+    } catch {}
+    if (this.subscriptions.size > 0 || this.outage) this.ensureSocket();
+    else this.closeIdleSocket();
   }
 
   close(): void {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
-    for (const state of this.subscriptions.values()) this.finish(state);
-    this.subscriptions.clear();
-    if (this.socket) {
-      this.expectedClose = true;
-      this.socket.close(1000, 'client closed');
+    this.clearReconnectTimer();
+    this.clearHandshakeTimer();
+    for (const state of [...this.subscriptions.values()]) {
+      this.fail(state, requestError('clientClosed', state.sent ? 'sent' : 'notSent'));
     }
+    this.subscriptions.clear();
+    const socket = this.socket;
     this.socket = undefined;
     this.connected = false;
-    this.expectedClose = false;
     this.outage = undefined;
+    if (socket) {
+      try {
+        socket.close(1000, 'client closed');
+      } catch {}
+    }
+    this.options.onIdle?.();
   }
 
   private ensureSocket(): void {
     if (this.socket || this.reconnectTimer || (this.subscriptions.size === 0 && !this.outage)) return;
-    const socket = this.options.websocketFactory(this.options.url, this.options.headers());
-    this.socket = socket;
-    addListener(socket, 'open', () => {
-      if (this.socket !== socket) return;
-      const message = `connect 34 ${JSON.stringify(connectPayload())}`;
-      logWire('send', message);
-      socket.send(message);
-    });
-    addListener(socket, 'message', (event: unknown) => {
-      if (this.socket !== socket) return;
-      this.handleMessage(event);
-    });
-    addListener(socket, 'error', (error: unknown) => {
-      if (this.socket !== socket) return;
+
+    let socket: WebSocketLike;
+    try {
+      socket = this.options.websocketFactory(this.options.url, this.options.headers());
+    } catch (error) {
       logWire('error', error);
-    });
-    addListener(socket, 'close', (...args: unknown[]) => {
-      if (this.socket !== socket) return;
-      const wasConnected = this.connected;
-      this.socket = undefined;
-      this.connected = false;
-      if (this.expectedClose) return;
+      if (this.outage) this.scheduleReconnect();
+      else this.failInitialSubscriptions('connectFailure', error);
+      return;
+    }
 
-      if (wasConnected && !this.outage) {
-        const disconnectedAtMs = Date.now();
-        const details = closeEventDetails(args);
-        const disconnectEvent: WebSocketDisconnectEvent = {
-          disconnectedAt: new Date(disconnectedAtMs).toISOString(),
-          reconnectDelayMs: Math.max(0, this.options.reconnectDelayMs ?? 250),
-          ...(details.code !== undefined ? { code: details.code } : {}),
-          ...(details.reason ? { reason: details.reason } : {}),
-        };
-        this.outage = { disconnectedAtMs, disconnectEvent, reconnectAttempts: 0 };
-        invokeCallback(this.options.onDisconnect, disconnectEvent);
-      }
-
-      if (this.outage) this.failSentNonReplayableSubscriptions(this.outage.disconnectEvent);
-      if (this.subscriptions.size > 0 || this.outage) this.scheduleReconnect();
-    });
+    this.socket = socket;
+    this.startHandshakeTimer(socket);
+    try {
+      addListener(socket, 'open', () => {
+        if (this.socket !== socket) return;
+        const message = `connect 34 ${JSON.stringify(connectPayload())}`;
+        logWire('send', message);
+        try {
+          socket.send(message);
+        } catch (error) {
+          this.handleSocketEnd(socket, 'sendFailure', [], error, true);
+        }
+      });
+      addListener(socket, 'message', (event: unknown) => {
+        if (this.socket !== socket) return;
+        this.handleMessage(socket, event);
+      });
+      addListener(socket, 'error', (error: unknown) => {
+        if (this.socket !== socket) return;
+        logWire('error', error);
+        this.handleSocketEnd(socket, this.connected ? 'disconnect' : 'connectFailure', [], error, true);
+      });
+      addListener(socket, 'close', (...args: unknown[]) => {
+        if (this.socket !== socket) return;
+        this.handleSocketEnd(socket, this.connected ? 'disconnect' : 'connectFailure', args);
+      });
+    } catch (error) {
+      this.handleSocketEnd(socket, 'connectFailure', [], error, true);
+    }
   }
 
-  private handleMessage(event: unknown): void {
+  private handleMessage(socket: WebSocketLike, event: unknown): void {
     const message = socketText(event);
     logWire('message', message);
     if (message === 'connected') {
+      this.clearHandshakeTimer();
       this.connected = true;
-      for (const state of this.subscriptions.values()) {
+      for (const state of [...this.subscriptions.values()]) {
+        if (this.socket !== socket || !this.connected) break;
         if (!state.sent || state.replayOnReconnect) this.sendSubscription(state);
       }
+      if (this.socket !== socket || !this.connected) return;
       const outage = this.outage;
       if (outage) {
         this.outage = undefined;
@@ -187,16 +238,63 @@ export class MapperConnection {
   }
 
   private sendSubscription(state: SubscriptionState): void {
-    if (!this.socket || state.closed) return;
+    const socket = this.socket;
+    if (!socket || state.closed) return;
     const message = `sub ${state.id} ${state.message}`;
     logWire('send', message);
-    this.socket.send(message);
-    state.sent = true;
+    try {
+      socket.send(message);
+      state.sent = true;
+    } catch (error) {
+      this.handleSocketEnd(socket, 'sendFailure', [], error, true);
+    }
+  }
+
+  private handleSocketEnd(
+    socket: WebSocketLike,
+    reason: 'connectFailure' | 'disconnect' | 'handshakeTimeout' | 'sendFailure',
+    closeArgs: unknown[] = [],
+    cause?: unknown,
+    closeSocket = false,
+  ): void {
+    if (this.socket !== socket) return;
+    const wasConnected = this.connected;
+    this.socket = undefined;
+    this.connected = false;
+    this.clearHandshakeTimer();
+    if (closeSocket) {
+      try {
+        socket.close(1000, reason);
+      } catch {}
+    }
+
+    if (wasConnected && !this.outage) {
+      const disconnectedAtMs = Date.now();
+      const details = closeEventDetails(closeArgs, cause);
+      const disconnectEvent: WebSocketDisconnectEvent = {
+        disconnectedAt: new Date(disconnectedAtMs).toISOString(),
+        reconnectDelayMs: Math.max(0, this.options.reconnectDelayMs ?? 250),
+        ...(details.code !== undefined ? { code: details.code } : {}),
+        ...(details.reason ? { reason: details.reason } : {}),
+      };
+      this.outage = { disconnectedAtMs, disconnectEvent, reconnectAttempts: 0 };
+      invokeCallback(this.options.onDisconnect, disconnectEvent);
+    }
+
+    if (this.outage) {
+      if (reason === 'disconnect' || reason === 'sendFailure') {
+        this.failSentNonReplayableSubscriptions(reason, cause);
+      }
+      if (this.subscriptions.size > 0 || this.outage) this.scheduleReconnect();
+      return;
+    }
+
+    this.failInitialSubscriptions(reason === 'disconnect' ? 'connectFailure' : reason, cause);
   }
 
   private closeSubscription(state: SubscriptionState): void {
     if (state.closed) return;
-    if (this.connected && this.socket) {
+    if (this.connected && this.socket && state.sent) {
       try {
         const message = `unsub ${state.id}`;
         logWire('send', message);
@@ -209,17 +307,18 @@ export class MapperConnection {
   }
 
   private closeIdleSocket(): void {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = undefined;
-    if (this.socket) {
-      const socket = this.socket;
-      this.expectedClose = true;
-      this.socket = undefined;
-      this.connected = false;
-      socket.close(1000, 'idle');
-      this.expectedClose = false;
+    this.clearReconnectTimer();
+    this.clearHandshakeTimer();
+    const socket = this.socket;
+    this.socket = undefined;
+    this.connected = false;
+    if (socket) {
+      try {
+        socket.close(1000, 'idle');
+      } catch {}
     }
     this.nextSubscriptionId = 1;
+    this.options.onIdle?.();
   }
 
   private scheduleReconnect(): void {
@@ -231,6 +330,26 @@ export class MapperConnection {
       this.ensureSocket();
     }, delayMs);
     this.reconnectTimer.unref?.();
+  }
+
+  private startHandshakeTimer(socket: WebSocketLike): void {
+    this.clearHandshakeTimer();
+    const timeoutMs = Math.max(1, this.options.handshakeTimeoutMs ?? 10_000);
+    this.handshakeTimer = setTimeout(() => {
+      this.handshakeTimer = undefined;
+      this.handleSocketEnd(socket, 'handshakeTimeout', [], undefined, true);
+    }, timeoutMs);
+    this.handshakeTimer.unref?.();
+  }
+
+  private clearHandshakeTimer(): void {
+    if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = undefined;
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
   }
 
   private next(state: SubscriptionState): Promise<IteratorResult<unknown>> {
@@ -252,15 +371,51 @@ export class MapperConnection {
     while (state.waiters.length) state.waiters.shift()?.resolve({ done: true, value: undefined });
   }
 
-  private failSentNonReplayableSubscriptions(event: WebSocketDisconnectEvent): void {
+  private fail(state: SubscriptionState, error: MapperRequestError): void {
+    state.closed = true;
+    state.error = error;
+    this.subscriptions.delete(state.id);
+    while (state.waiters.length) state.waiters.shift()?.reject(error);
+  }
+
+  private failInitialSubscriptions(reason: 'connectFailure' | 'handshakeTimeout' | 'sendFailure', cause?: unknown): void {
+    for (const state of [...this.subscriptions.values()]) {
+      this.fail(state, requestError(reason, 'notSent', undefined, cause));
+    }
+    if (this.subscriptions.size === 0) this.closeIdleSocket();
+  }
+
+  private failSentNonReplayableSubscriptions(
+    reason: 'disconnect' | 'sendFailure' | 'sessionRefresh',
+    cause?: unknown,
+  ): void {
     for (const state of [...this.subscriptions.values()]) {
       if (!state.sent || state.replayOnReconnect) continue;
-      this.subscriptions.delete(state.id);
-      state.closed = true;
-      state.error = new MapperConnectionLostError(event);
-      while (state.waiters.length) state.waiters.shift()?.reject(state.error);
+      const event = this.outage?.disconnectEvent;
+      const error = reason === 'disconnect' && event
+        ? new MapperConnectionLostError(event)
+        : requestError(reason, 'sent', event, cause);
+      this.fail(state, error);
     }
   }
+}
+
+export function mapperTimeoutError(resource: string, deliveryState: MapperDeliveryState): MapperRequestError {
+  const suffix = deliveryState === 'sent'
+    ? 'The broker may have received the request.'
+    : 'The request was not sent to the broker.';
+  return requestError('timeout', deliveryState, undefined, undefined, `Timed out waiting for resource: ${resource}. ${suffix}`);
+}
+
+function requestError(
+  reason: MapperRequestFailureReason,
+  deliveryState: MapperDeliveryState,
+  connectionLoss?: WebSocketDisconnectEvent,
+  cause?: unknown,
+  explicitMessage?: string,
+): MapperRequestError {
+  const subject = deliveryState === 'sent' ? 'The broker outcome is unknown.' : 'The request was not sent to the broker.';
+  return new MapperRequestError(explicitMessage ?? `Mapper request ended because of ${reason}. ${subject}`, reason, deliveryState, connectionLoss, cause);
 }
 
 function invokeCallback<T>(callback: ((event: T) => void | Promise<void>) | undefined, event: T): void {
@@ -274,7 +429,7 @@ function invokeCallback<T>(callback: ((event: T) => void | Promise<void>) | unde
   });
 }
 
-function closeEventDetails(args: unknown[]): { code?: number; reason?: string } {
+function closeEventDetails(args: unknown[], cause?: unknown): { code?: number; reason?: string } {
   const first = args[0];
   const code = typeof first === 'number'
     ? first
@@ -286,7 +441,13 @@ function closeEventDetails(args: unknown[]): { code?: number; reason?: string } 
     : first && typeof first === 'object' && 'reason' in first
       ? first.reason
       : undefined;
-  const reason = Buffer.isBuffer(rawReason) ? rawReason.toString('utf8') : typeof rawReason === 'string' ? rawReason : undefined;
+  const reason = Buffer.isBuffer(rawReason)
+    ? rawReason.toString('utf8')
+    : typeof rawReason === 'string'
+      ? rawReason
+      : cause instanceof Error
+        ? cause.message
+        : undefined;
   return {
     ...(code !== undefined ? { code } : {}),
     ...(reason ? { reason } : {}),

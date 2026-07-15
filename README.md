@@ -202,6 +202,7 @@ Observe connection loss and recovery without taking control of the transport:
 ```ts
 const tr = TradeRepublicClient.create({
   websocketReconnectDelayMs: 250,
+  websocketHandshakeTimeoutMs: 10_000,
   onWebSocketDisconnect(event) {
     showConnectionBanner(`Disconnected at ${event.disconnectedAt}; reconnecting...`);
   },
@@ -217,6 +218,10 @@ The callbacks are observational: they do not delay or control reconnection, and
 callback failures are isolated from the transport. They fire only for an
 unexpected outage and the subsequent successful mapper handshake. Call
 `tr.close()` when disposing a long-lived client.
+
+Initial connection failures and stalled handshakes fail pending requests
+instead of waiting indefinitely. A reconnect attempt that fails is retried
+while the outage remains active.
 
 For protocol troubleshooting, the previous connection-per-subscription behavior
 remains available with `websocketMode: 'isolated'`.
@@ -453,10 +458,15 @@ enough metadata for automatic detection. `submit()` follows the mapper stream
 through `received`, `waiting`, and `confirmationNeeded` until Trade Republic
 returns `succeeded` or `failed`.
 
-Order submission and cancellation subscriptions are never replayed after a
-disconnect. If the socket drops after the mutation was sent, or submission
-times out without a terminal response, the method returns `outcomeUnknown`
-with its `clientProcessId`, `outcomeReason`, and any connection-loss context.
+Order submission and cancellation wait through intermediate mapper updates and
+are never replayed after they have been sent. Their return types are
+discriminated unions with the terminal statuses `succeeded`, `failed`, and
+`outcomeUnknown`. If a socket drop, timeout, session refresh, explicit client
+close, or send failure occurs after transmission, the method returns
+`outcomeUnknown` with its `clientProcessId`, `outcomeReason`, updates, and any
+connection-loss context. If the SDK can prove that transmission never happened,
+it throws `MapperRequestError` with `deliveryState: 'notSent'`; that failure is
+safe from duplicate broker mutation risk.
 The SDK reconnects the transport but does not automatically refetch or reconcile
 the order. After `onWebSocketReconnect`, the application may inspect
 `orders.all()`, `orders.open()`, `orders.closed()`, order updates, or trades and
@@ -585,6 +595,21 @@ Unmapped mapper one-shot:
 ```ts
 const availableCash = await tr.raw.query({ type: 'availableCash' });
 ```
+
+Known SDK mutations (`simpleCreateOrder`, `cancelOrder`, `createPriceAlarm`, and
+`cancelPriceAlarm`) are centrally classified as non-replayable. When calling a
+new or otherwise unknown mutation through `raw` or `web`, declare it explicitly:
+
+```ts
+const result = await tr.raw.query(
+  { type: 'newBrokerMutation', parameters: { /* ... */ } },
+  { operation: 'mutation' },
+);
+```
+
+This prevents replay after a disconnect. If such a raw mutation fails after it
+was sent, `MapperRequestError` exposes `deliveryState: 'sent'` and
+`outcomeUnknown: true`; reconcile it before considering another attempt.
 
 Unmapped mapper stream:
 

@@ -2234,9 +2234,28 @@ async function parseResponseBody(response) {
 }
 
 // src/mapper-connection.ts
-var MapperConnectionLostError = class extends TradeRepublicProtocolError {
+var MapperRequestError = class extends TradeRepublicProtocolError {
+  constructor(message, reason, deliveryState, connectionLoss, cause) {
+    super(message, cause);
+    this.reason = reason;
+    this.deliveryState = deliveryState;
+    this.connectionLoss = connectionLoss;
+    this.name = "MapperRequestError";
+    this.outcomeUnknown = deliveryState === "sent";
+  }
+  reason;
+  deliveryState;
+  connectionLoss;
+  outcomeUnknown;
+};
+var MapperConnectionLostError = class extends MapperRequestError {
   constructor(event) {
-    super("WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.");
+    super(
+      "WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.",
+      "disconnect",
+      "sent",
+      event
+    );
     this.event = event;
     this.name = "MapperConnectionLostError";
   }
@@ -2252,7 +2271,7 @@ var MapperConnection = class {
   nextSubscriptionId = 1;
   subscriptions = /* @__PURE__ */ new Map();
   reconnectTimer;
-  expectedClose = false;
+  handshakeTimer;
   outage;
   subscribe(message, options = {}) {
     const state = {
@@ -2268,6 +2287,9 @@ var MapperConnection = class {
     this.ensureSocket();
     if (this.connected) this.sendSubscription(state);
     return {
+      get deliveryState() {
+        return state.sent ? "sent" : "notSent";
+      },
       close: () => this.closeSubscription(state),
       [Symbol.asyncIterator]: () => ({
         next: () => this.next(state),
@@ -2278,78 +2300,92 @@ var MapperConnection = class {
       })
     };
   }
-  /** Reconnects active subscriptions so a refreshed session supplies fresh headers. */
+  /** Reconnects reads with fresh headers and terminates already-sent mutations. */
   refreshHeaders() {
-    if (!this.socket || this.subscriptions.size === 0) return;
-    this.expectedClose = true;
-    this.connected = false;
-    this.socket.close(1e3, "session refreshed");
+    this.failSentNonReplayableSubscriptions("sessionRefresh");
+    const socket = this.socket;
+    if (!socket) return;
     this.socket = void 0;
-    this.expectedClose = false;
-    this.ensureSocket();
+    this.connected = false;
+    this.clearHandshakeTimer();
+    try {
+      socket.close(1e3, "session refreshed");
+    } catch {
+    }
+    if (this.subscriptions.size > 0 || this.outage) this.ensureSocket();
+    else this.closeIdleSocket();
   }
   close() {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = void 0;
-    for (const state of this.subscriptions.values()) this.finish(state);
-    this.subscriptions.clear();
-    if (this.socket) {
-      this.expectedClose = true;
-      this.socket.close(1e3, "client closed");
+    this.clearReconnectTimer();
+    this.clearHandshakeTimer();
+    for (const state of [...this.subscriptions.values()]) {
+      this.fail(state, requestError("clientClosed", state.sent ? "sent" : "notSent"));
     }
+    this.subscriptions.clear();
+    const socket = this.socket;
     this.socket = void 0;
     this.connected = false;
-    this.expectedClose = false;
     this.outage = void 0;
+    if (socket) {
+      try {
+        socket.close(1e3, "client closed");
+      } catch {
+      }
+    }
+    this.options.onIdle?.();
   }
   ensureSocket() {
     if (this.socket || this.reconnectTimer || this.subscriptions.size === 0 && !this.outage) return;
-    const socket = this.options.websocketFactory(this.options.url, this.options.headers());
-    this.socket = socket;
-    addListener(socket, "open", () => {
-      if (this.socket !== socket) return;
-      const message = `connect 34 ${JSON.stringify(connectPayload())}`;
-      logWire("send", message);
-      socket.send(message);
-    });
-    addListener(socket, "message", (event) => {
-      if (this.socket !== socket) return;
-      this.handleMessage(event);
-    });
-    addListener(socket, "error", (error) => {
-      if (this.socket !== socket) return;
+    let socket;
+    try {
+      socket = this.options.websocketFactory(this.options.url, this.options.headers());
+    } catch (error) {
       logWire("error", error);
-    });
-    addListener(socket, "close", (...args) => {
-      if (this.socket !== socket) return;
-      const wasConnected = this.connected;
-      this.socket = void 0;
-      this.connected = false;
-      if (this.expectedClose) return;
-      if (wasConnected && !this.outage) {
-        const disconnectedAtMs = Date.now();
-        const details = closeEventDetails(args);
-        const disconnectEvent = {
-          disconnectedAt: new Date(disconnectedAtMs).toISOString(),
-          reconnectDelayMs: Math.max(0, this.options.reconnectDelayMs ?? 250),
-          ...details.code !== void 0 ? { code: details.code } : {},
-          ...details.reason ? { reason: details.reason } : {}
-        };
-        this.outage = { disconnectedAtMs, disconnectEvent, reconnectAttempts: 0 };
-        invokeCallback(this.options.onDisconnect, disconnectEvent);
-      }
-      if (this.outage) this.failSentNonReplayableSubscriptions(this.outage.disconnectEvent);
-      if (this.subscriptions.size > 0 || this.outage) this.scheduleReconnect();
-    });
+      if (this.outage) this.scheduleReconnect();
+      else this.failInitialSubscriptions("connectFailure", error);
+      return;
+    }
+    this.socket = socket;
+    this.startHandshakeTimer(socket);
+    try {
+      addListener(socket, "open", () => {
+        if (this.socket !== socket) return;
+        const message = `connect 34 ${JSON.stringify(connectPayload())}`;
+        logWire("send", message);
+        try {
+          socket.send(message);
+        } catch (error) {
+          this.handleSocketEnd(socket, "sendFailure", [], error, true);
+        }
+      });
+      addListener(socket, "message", (event) => {
+        if (this.socket !== socket) return;
+        this.handleMessage(socket, event);
+      });
+      addListener(socket, "error", (error) => {
+        if (this.socket !== socket) return;
+        logWire("error", error);
+        this.handleSocketEnd(socket, this.connected ? "disconnect" : "connectFailure", [], error, true);
+      });
+      addListener(socket, "close", (...args) => {
+        if (this.socket !== socket) return;
+        this.handleSocketEnd(socket, this.connected ? "disconnect" : "connectFailure", args);
+      });
+    } catch (error) {
+      this.handleSocketEnd(socket, "connectFailure", [], error, true);
+    }
   }
-  handleMessage(event) {
+  handleMessage(socket, event) {
     const message = socketText(event);
     logWire("message", message);
     if (message === "connected") {
+      this.clearHandshakeTimer();
       this.connected = true;
-      for (const state2 of this.subscriptions.values()) {
+      for (const state2 of [...this.subscriptions.values()]) {
+        if (this.socket !== socket || !this.connected) break;
         if (!state2.sent || state2.replayOnReconnect) this.sendSubscription(state2);
       }
+      if (this.socket !== socket || !this.connected) return;
       const outage = this.outage;
       if (outage) {
         this.outage = void 0;
@@ -2371,15 +2407,53 @@ var MapperConnection = class {
     if (state) this.push(state, frame.payload);
   }
   sendSubscription(state) {
-    if (!this.socket || state.closed) return;
+    const socket = this.socket;
+    if (!socket || state.closed) return;
     const message = `sub ${state.id} ${state.message}`;
     logWire("send", message);
-    this.socket.send(message);
-    state.sent = true;
+    try {
+      socket.send(message);
+      state.sent = true;
+    } catch (error) {
+      this.handleSocketEnd(socket, "sendFailure", [], error, true);
+    }
+  }
+  handleSocketEnd(socket, reason, closeArgs = [], cause, closeSocket = false) {
+    if (this.socket !== socket) return;
+    const wasConnected = this.connected;
+    this.socket = void 0;
+    this.connected = false;
+    this.clearHandshakeTimer();
+    if (closeSocket) {
+      try {
+        socket.close(1e3, reason);
+      } catch {
+      }
+    }
+    if (wasConnected && !this.outage) {
+      const disconnectedAtMs = Date.now();
+      const details = closeEventDetails(closeArgs, cause);
+      const disconnectEvent = {
+        disconnectedAt: new Date(disconnectedAtMs).toISOString(),
+        reconnectDelayMs: Math.max(0, this.options.reconnectDelayMs ?? 250),
+        ...details.code !== void 0 ? { code: details.code } : {},
+        ...details.reason ? { reason: details.reason } : {}
+      };
+      this.outage = { disconnectedAtMs, disconnectEvent, reconnectAttempts: 0 };
+      invokeCallback(this.options.onDisconnect, disconnectEvent);
+    }
+    if (this.outage) {
+      if (reason === "disconnect" || reason === "sendFailure") {
+        this.failSentNonReplayableSubscriptions(reason, cause);
+      }
+      if (this.subscriptions.size > 0 || this.outage) this.scheduleReconnect();
+      return;
+    }
+    this.failInitialSubscriptions(reason === "disconnect" ? "connectFailure" : reason, cause);
   }
   closeSubscription(state) {
     if (state.closed) return;
-    if (this.connected && this.socket) {
+    if (this.connected && this.socket && state.sent) {
       try {
         const message = `unsub ${state.id}`;
         logWire("send", message);
@@ -2392,17 +2466,19 @@ var MapperConnection = class {
     if (this.subscriptions.size === 0 && !this.outage) this.closeIdleSocket();
   }
   closeIdleSocket() {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = void 0;
-    if (this.socket) {
-      const socket = this.socket;
-      this.expectedClose = true;
-      this.socket = void 0;
-      this.connected = false;
-      socket.close(1e3, "idle");
-      this.expectedClose = false;
+    this.clearReconnectTimer();
+    this.clearHandshakeTimer();
+    const socket = this.socket;
+    this.socket = void 0;
+    this.connected = false;
+    if (socket) {
+      try {
+        socket.close(1e3, "idle");
+      } catch {
+      }
     }
     this.nextSubscriptionId = 1;
+    this.options.onIdle?.();
   }
   scheduleReconnect() {
     if (this.reconnectTimer) return;
@@ -2413,6 +2489,23 @@ var MapperConnection = class {
       this.ensureSocket();
     }, delayMs);
     this.reconnectTimer.unref?.();
+  }
+  startHandshakeTimer(socket) {
+    this.clearHandshakeTimer();
+    const timeoutMs = Math.max(1, this.options.handshakeTimeoutMs ?? 1e4);
+    this.handshakeTimer = setTimeout(() => {
+      this.handshakeTimer = void 0;
+      this.handleSocketEnd(socket, "handshakeTimeout", [], void 0, true);
+    }, timeoutMs);
+    this.handshakeTimer.unref?.();
+  }
+  clearHandshakeTimer() {
+    if (this.handshakeTimer) clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = void 0;
+  }
+  clearReconnectTimer() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = void 0;
   }
   next(state) {
     const value = state.messages.shift();
@@ -2430,16 +2523,35 @@ var MapperConnection = class {
     state.closed = true;
     while (state.waiters.length) state.waiters.shift()?.resolve({ done: true, value: void 0 });
   }
-  failSentNonReplayableSubscriptions(event) {
+  fail(state, error) {
+    state.closed = true;
+    state.error = error;
+    this.subscriptions.delete(state.id);
+    while (state.waiters.length) state.waiters.shift()?.reject(error);
+  }
+  failInitialSubscriptions(reason, cause) {
+    for (const state of [...this.subscriptions.values()]) {
+      this.fail(state, requestError(reason, "notSent", void 0, cause));
+    }
+    if (this.subscriptions.size === 0) this.closeIdleSocket();
+  }
+  failSentNonReplayableSubscriptions(reason, cause) {
     for (const state of [...this.subscriptions.values()]) {
       if (!state.sent || state.replayOnReconnect) continue;
-      this.subscriptions.delete(state.id);
-      state.closed = true;
-      state.error = new MapperConnectionLostError(event);
-      while (state.waiters.length) state.waiters.shift()?.reject(state.error);
+      const event = this.outage?.disconnectEvent;
+      const error = reason === "disconnect" && event ? new MapperConnectionLostError(event) : requestError(reason, "sent", event, cause);
+      this.fail(state, error);
     }
   }
 };
+function mapperTimeoutError(resource, deliveryState) {
+  const suffix = deliveryState === "sent" ? "The broker may have received the request." : "The request was not sent to the broker.";
+  return requestError("timeout", deliveryState, void 0, void 0, `Timed out waiting for resource: ${resource}. ${suffix}`);
+}
+function requestError(reason, deliveryState, connectionLoss, cause, explicitMessage) {
+  const subject = deliveryState === "sent" ? "The broker outcome is unknown." : "The request was not sent to the broker.";
+  return new MapperRequestError(explicitMessage ?? `Mapper request ended because of ${reason}. ${subject}`, reason, deliveryState, connectionLoss, cause);
+}
 function invokeCallback(callback, event) {
   if (!callback) return;
   queueMicrotask(() => {
@@ -2450,11 +2562,11 @@ function invokeCallback(callback, event) {
     }
   });
 }
-function closeEventDetails(args) {
+function closeEventDetails(args, cause) {
   const first = args[0];
   const code = typeof first === "number" ? first : first && typeof first === "object" && "code" in first && typeof first.code === "number" ? first.code : void 0;
   const rawReason = typeof first === "number" ? args[1] : first && typeof first === "object" && "reason" in first ? first.reason : void 0;
-  const reason = Buffer.isBuffer(rawReason) ? rawReason.toString("utf8") : typeof rawReason === "string" ? rawReason : void 0;
+  const reason = Buffer.isBuffer(rawReason) ? rawReason.toString("utf8") : typeof rawReason === "string" ? rawReason : cause instanceof Error ? cause.message : void 0;
   return {
     ...code !== void 0 ? { code } : {},
     ...reason ? { reason } : {}
@@ -2503,12 +2615,13 @@ function logWire(direction, value) {
 // src/raw.ts
 import WebSocket from "ws";
 var RawApi = class {
-  constructor(http, websocketUrl, websocketFactory, getSession, websocketMode = "shared", reconnectDelayMs = 250, onWebSocketDisconnect, onWebSocketReconnect) {
+  constructor(http, websocketUrl, websocketFactory, getSession, websocketMode = "shared", reconnectDelayMs = 250, handshakeTimeoutMs = 1e4, onWebSocketDisconnect, onWebSocketReconnect) {
     this.http = http;
     this.websocketUrl = websocketUrl;
     this.websocketFactory = websocketFactory;
     this.getSession = getSession;
     this.reconnectDelayMs = reconnectDelayMs;
+    this.handshakeTimeoutMs = handshakeTimeoutMs;
     this.onWebSocketDisconnect = onWebSocketDisconnect;
     this.onWebSocketReconnect = onWebSocketReconnect;
     this.sharedConnection = websocketMode === "shared" ? this.createConnection() : void 0;
@@ -2518,6 +2631,7 @@ var RawApi = class {
   websocketFactory;
   getSession;
   reconnectDelayMs;
+  handshakeTimeoutMs;
   onWebSocketDisconnect;
   onWebSocketReconnect;
   sharedConnection;
@@ -2525,14 +2639,22 @@ var RawApi = class {
   request(request) {
     return this.http.request(request.method ?? "GET", request.path, request.body, request.query);
   }
-  subscribe(topic, payload = {}) {
-    return this.subscribeResource({ ...asObject(payload), type: topic });
+  subscribe(topic, payload = {}, options = {}) {
+    return this.subscribeResource({ ...asObject(payload), type: topic }, options);
   }
-  subscribeLegacy(topic, payload = {}) {
-    return this.openSubscription(JSON.stringify({ type: "subscribe", topic, payload, token: this.getSession()?.sessionToken }));
+  subscribeLegacy(topic, payload = {}, options = {}) {
+    const operation = options.operation ?? classifyMapperOperation({ type: topic });
+    return this.openSubscription(
+      JSON.stringify({ type: "subscribe", topic, payload, token: this.getSession()?.sessionToken }),
+      { replayOnReconnect: operation === "mutation" ? false : options.replayOnReconnect }
+    );
   }
   subscribeResource(payload, options = {}) {
-    return this.openSubscription(JSON.stringify({ ...payload, token: this.getSession()?.sessionToken }), options);
+    const operation = options.operation ?? classifyMapperOperation(payload);
+    return this.openSubscription(
+      JSON.stringify({ ...payload, token: this.getSession()?.sessionToken }),
+      { replayOnReconnect: operation === "mutation" ? false : options.replayOnReconnect }
+    );
   }
   query(payload, options = {}) {
     return this.queryResource(payload, options);
@@ -2546,7 +2668,7 @@ var RawApi = class {
         delay2(options.timeoutMs ?? 15e3).then(() => ({ done: true, value: void 0, timedOut: true }))
       ]);
       if (result.done || "timedOut" in result && result.timedOut) {
-        throw new TradeRepublicProtocolError(`Timed out waiting for resource: ${String(payload.type ?? "unknown")}`);
+        throw mapperTimeoutError(String(payload.type ?? "unknown"), subscription.deliveryState);
       }
       assertNoResourceErrors(result.value, payload);
       return result.value;
@@ -2566,7 +2688,8 @@ var RawApi = class {
   }
   openSubscription(subscriptionMessage, options = {}) {
     if (this.sharedConnection) return this.sharedConnection.subscribe(subscriptionMessage, options);
-    const connection = this.createConnection();
+    let connection;
+    connection = this.createConnection(() => this.isolatedConnections.delete(connection));
     this.isolatedConnections.add(connection);
     const subscription = connection.subscribe(subscriptionMessage, options);
     let closed = false;
@@ -2574,10 +2697,11 @@ var RawApi = class {
       if (closed) return;
       closed = true;
       subscription.close();
-      connection.close();
-      this.isolatedConnections.delete(connection);
     };
     return {
+      get deliveryState() {
+        return subscription.deliveryState;
+      },
       close,
       [Symbol.asyncIterator]() {
         const iterator = subscription[Symbol.asyncIterator]();
@@ -2591,17 +2715,28 @@ var RawApi = class {
       }
     };
   }
-  createConnection() {
+  createConnection(onIdle) {
     return new MapperConnection({
       url: this.websocketUrl,
       websocketFactory: this.websocketFactory,
       headers: () => this.http.headers(),
       reconnectDelayMs: this.reconnectDelayMs,
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
       onDisconnect: this.onWebSocketDisconnect,
-      onReconnect: this.onWebSocketReconnect
+      onReconnect: this.onWebSocketReconnect,
+      ...onIdle ? { onIdle } : {}
     });
   }
 };
+var MAPPER_MUTATION_RESOURCES = /* @__PURE__ */ new Set([
+  "cancelOrder",
+  "cancelPriceAlarm",
+  "createPriceAlarm",
+  "simpleCreateOrder"
+]);
+function classifyMapperOperation(payload) {
+  return typeof payload.type === "string" && MAPPER_MUTATION_RESOURCES.has(payload.type) ? "mutation" : "read";
+}
 function assertNoResourceErrors(value, request) {
   if (!value || typeof value !== "object" || !("errors" in value)) return;
   const errors = value.errors;
@@ -2679,6 +2814,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
       () => this.session,
       options.websocketMode,
       options.websocketReconnectDelayMs,
+      options.websocketHandshakeTimeoutMs,
       options.onWebSocketDisconnect,
       options.onWebSocketReconnect
     );
@@ -2982,7 +3118,7 @@ var OrdersApi = class {
       clientProcessId: order.clientProcessId,
       secAccNo: order.secAccNo
     };
-    const subscription = this.raw.subscribeResource(payload, { replayOnReconnect: false });
+    const subscription = this.raw.subscribeResource(payload, { operation: "mutation" });
     const iterator = subscription[Symbol.asyncIterator]();
     const updates = [];
     const deadline = Date.now() + timeoutMs;
@@ -3010,24 +3146,15 @@ var OrdersApi = class {
           };
         }
       }
-      const lastStatus = updates.length > 0 ? orderMutationStatus(updates.at(-1)) : void 0;
-      const error = new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ""}. The broker outcome is unknown; do not retry without checking the order history.`);
-      return {
-        status: "outcomeUnknown",
-        clientProcessId: order.clientProcessId,
-        updates,
-        outcomeReason: "timeout",
-        error,
-        raw: updates.at(-1)
-      };
+      throw mapperTimeoutError("simpleCreateOrder", subscription.deliveryState);
     } catch (error) {
-      if (!(error instanceof MapperConnectionLostError)) throw error;
+      if (!(error instanceof MapperRequestError) || error.deliveryState !== "sent") throw error;
       return {
         status: "outcomeUnknown",
         clientProcessId: order.clientProcessId,
         updates,
-        outcomeReason: "disconnect",
-        connectionLoss: error.event,
+        outcomeReason: mutationOutcomeReason(error),
+        ...error.connectionLoss ? { connectionLoss: error.connectionLoss } : {},
         error,
         raw: updates.at(-1)
       };
@@ -3037,26 +3164,49 @@ var OrdersApi = class {
   }
   async cancel(orderId, options = {}) {
     const id = requiredString(orderId, "orderId");
+    const timeoutMs = options.timeoutMs ?? 15e3;
+    const subscription = this.raw.subscribeResource(
+      { type: "cancelOrder", orderId: id },
+      { operation: "mutation" }
+    );
+    const iterator = subscription[Symbol.asyncIterator]();
+    const updates = [];
+    const deadline = Date.now() + timeoutMs;
     try {
-      const raw = await validated(this.validateRaw, "orders.cancel", this.raw.query(
-        { type: "cancelOrder", orderId: id },
-        { ...pickTimeoutOptions(options), replayOnReconnect: false }
-      ));
-      return {
-        orderId: firstStringAtPaths(raw, ["orderId"], ["id"]) ?? id,
-        ...orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {},
-        raw
-      };
+      while (Date.now() < deadline) {
+        const remaining = Math.max(1, deadline - Date.now());
+        const result = await nextOrderUpdate(iterator, remaining);
+        if (result.done || "timedOut" in result && result.timedOut) break;
+        const raw = this.validateRaw("orders.cancel", result.value);
+        throwResourceErrors(raw, "cancelOrder");
+        updates.push(raw);
+        const status = orderMutationStatus(raw);
+        const resolvedOrderId = firstStringAtPaths(raw, ["orderId"], ["id"]) ?? id;
+        if (status === "succeeded") return { orderId: resolvedOrderId, status, updates, raw };
+        if (status === "failed") {
+          return {
+            orderId: resolvedOrderId,
+            status,
+            updates,
+            error: firstValueAtPaths(raw, ["error"], ["errors"], ["message"]),
+            raw
+          };
+        }
+      }
+      throw mapperTimeoutError("cancelOrder", subscription.deliveryState);
     } catch (error) {
-      if (!(error instanceof MapperConnectionLostError)) throw error;
+      if (!(error instanceof MapperRequestError) || error.deliveryState !== "sent") throw error;
       return {
         orderId: id,
         status: "outcomeUnknown",
-        outcomeReason: "disconnect",
-        connectionLoss: error.event,
+        updates,
+        outcomeReason: mutationOutcomeReason(error),
+        ...error.connectionLoss ? { connectionLoss: error.connectionLoss } : {},
         error,
-        raw: void 0
+        raw: updates.at(-1)
       };
+    } finally {
+      subscription.close();
     }
   }
   async resolveAmountSizeStep(instrumentId, exchangeId) {
@@ -3144,6 +3294,19 @@ function orderMutationStatus(value) {
   const normalized = status.replaceAll("_", "").replaceAll("-", "").toLowerCase();
   if (normalized === "confirmationneeded") return "confirmationNeeded";
   return normalized;
+}
+function mutationOutcomeReason(error) {
+  switch (error.reason) {
+    case "clientClosed":
+    case "disconnect":
+    case "sendFailure":
+    case "sessionRefresh":
+    case "timeout":
+      return error.reason;
+    case "connectFailure":
+    case "handshakeTimeout":
+      throw error;
+  }
 }
 function throwResourceErrors(value, resource) {
   const errors = firstValueAtPaths(value, ["errors"]);
@@ -3562,8 +3725,8 @@ var WebApi = class {
   query(payload, options = {}) {
     return this.raw.query(payload, options);
   }
-  subscribe(payload) {
-    return toSubscription(this.raw.subscribeResource(payload));
+  subscribe(payload, options = {}) {
+    return toSubscription(this.raw.subscribeResource(payload, options));
   }
   timeline(after) {
     return this.query({ type: "timelineActivityLog", ...after ? { after } : {} });
@@ -3756,12 +3919,15 @@ var FileSessionStore = class {
 export {
   CandleQuery,
   FileSessionStore,
+  MapperConnectionLostError,
+  MapperRequestError,
   MemorySessionStore,
   TradeRepublicClient,
   TradeRepublicError,
   TradeRepublicHttpError,
   TradeRepublicProtocolError,
   TradeRepublicSchemaError,
+  classifyMapperOperation,
   collectTradeRepublicWebContext,
   redactSession,
   schemaCatalogMarkdown,

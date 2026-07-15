@@ -1,5 +1,10 @@
 import WebSocket from 'ws';
-import { MapperConnection, type MapperSubscription, type MapperSubscriptionOptions } from './mapper-connection.js';
+import {
+  MapperConnection,
+  mapperTimeoutError,
+  type MapperSubscription,
+  type MapperSubscriptionOptions,
+} from './mapper-connection.js';
 import { TradeRepublicProtocolError } from './errors.js';
 import type { HttpClient } from './http.js';
 import type {
@@ -13,7 +18,12 @@ import type {
 
 export interface RawSubscription extends MapperSubscription {}
 
-export interface RawSubscriptionOptions extends MapperSubscriptionOptions {}
+export type RawOperationKind = 'read' | 'mutation';
+
+export interface RawSubscriptionOptions extends MapperSubscriptionOptions {
+  /** Marks an unknown/raw resource as a mutation so it is never replayed. */
+  operation?: RawOperationKind | undefined;
+}
 
 export interface RawQueryOptions extends RawSubscriptionOptions {
   timeoutMs?: number | undefined;
@@ -30,6 +40,7 @@ export class RawApi {
     private readonly getSession: () => Session | undefined,
     websocketMode: 'shared' | 'isolated' = 'shared',
     private readonly reconnectDelayMs = 250,
+    private readonly handshakeTimeoutMs = 10_000,
     private readonly onWebSocketDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined,
     private readonly onWebSocketReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined,
   ) {
@@ -40,16 +51,24 @@ export class RawApi {
     return this.http.request<T>(request.method ?? 'GET', request.path, request.body, request.query);
   }
 
-  subscribe(topic: string, payload: unknown = {}): RawSubscription {
-    return this.subscribeResource({ ...asObject(payload), type: topic });
+  subscribe(topic: string, payload: unknown = {}, options: RawSubscriptionOptions = {}): RawSubscription {
+    return this.subscribeResource({ ...asObject(payload), type: topic }, options);
   }
 
-  subscribeLegacy(topic: string, payload: unknown = {}): RawSubscription {
-    return this.openSubscription(JSON.stringify({ type: 'subscribe', topic, payload, token: this.getSession()?.sessionToken }));
+  subscribeLegacy(topic: string, payload: unknown = {}, options: RawSubscriptionOptions = {}): RawSubscription {
+    const operation = options.operation ?? classifyMapperOperation({ type: topic });
+    return this.openSubscription(
+      JSON.stringify({ type: 'subscribe', topic, payload, token: this.getSession()?.sessionToken }),
+      { replayOnReconnect: operation === 'mutation' ? false : options.replayOnReconnect },
+    );
   }
 
   subscribeResource(payload: Record<string, unknown>, options: RawSubscriptionOptions = {}): RawSubscription {
-    return this.openSubscription(JSON.stringify({ ...payload, token: this.getSession()?.sessionToken }), options);
+    const operation = options.operation ?? classifyMapperOperation(payload);
+    return this.openSubscription(
+      JSON.stringify({ ...payload, token: this.getSession()?.sessionToken }),
+      { replayOnReconnect: operation === 'mutation' ? false : options.replayOnReconnect },
+    );
   }
 
   query<T = unknown>(payload: Record<string, unknown>, options: RawQueryOptions = {}): Promise<T> {
@@ -65,7 +84,7 @@ export class RawApi {
         delay(options.timeoutMs ?? 15_000).then(() => ({ done: true as const, value: undefined, timedOut: true })),
       ]);
       if (result.done || ('timedOut' in result && result.timedOut)) {
-        throw new TradeRepublicProtocolError(`Timed out waiting for resource: ${String(payload.type ?? 'unknown')}`);
+        throw mapperTimeoutError(String(payload.type ?? 'unknown'), subscription.deliveryState);
       }
       assertNoResourceErrors(result.value, payload);
       return result.value as T;
@@ -88,7 +107,8 @@ export class RawApi {
 
   private openSubscription(subscriptionMessage: string, options: RawSubscriptionOptions = {}): RawSubscription {
     if (this.sharedConnection) return this.sharedConnection.subscribe(subscriptionMessage, options);
-    const connection = this.createConnection();
+    let connection: MapperConnection;
+    connection = this.createConnection(() => this.isolatedConnections.delete(connection));
     this.isolatedConnections.add(connection);
     const subscription = connection.subscribe(subscriptionMessage, options);
     let closed = false;
@@ -96,10 +116,11 @@ export class RawApi {
       if (closed) return;
       closed = true;
       subscription.close();
-      connection.close();
-      this.isolatedConnections.delete(connection);
     };
     return {
+      get deliveryState() {
+        return subscription.deliveryState;
+      },
       close,
       [Symbol.asyncIterator]() {
         const iterator = subscription[Symbol.asyncIterator]();
@@ -114,16 +135,29 @@ export class RawApi {
     };
   }
 
-  private createConnection(): MapperConnection {
+  private createConnection(onIdle?: () => void): MapperConnection {
     return new MapperConnection({
       url: this.websocketUrl,
       websocketFactory: this.websocketFactory,
       headers: () => this.http.headers(),
       reconnectDelayMs: this.reconnectDelayMs,
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
       onDisconnect: this.onWebSocketDisconnect,
       onReconnect: this.onWebSocketReconnect,
+      ...(onIdle ? { onIdle } : {}),
     });
   }
+}
+
+const MAPPER_MUTATION_RESOURCES = new Set([
+  'cancelOrder',
+  'cancelPriceAlarm',
+  'createPriceAlarm',
+  'simpleCreateOrder',
+]);
+
+export function classifyMapperOperation(payload: Record<string, unknown>): RawOperationKind {
+  return typeof payload.type === 'string' && MAPPER_MUTATION_RESOURCES.has(payload.type) ? 'mutation' : 'read';
 }
 
 function assertNoResourceErrors(value: unknown, request: Record<string, unknown>): void {

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { describe, expect, it } from './test-compat.js';
-import { TradeRepublicClient } from '../src/index.js';
+import { MapperRequestError, TradeRepublicClient } from '../src/index.js';
 import { FakeSocket } from './fake-socket.js';
+import type { WebSocketLike } from '../src/types.js';
 
 describe('TradeRepublicClient', () => {
   it('creates a QR challenge through the v2 login endpoint', async () => {
@@ -856,6 +858,27 @@ describe('TradeRepublicClient', () => {
     });
   });
 
+  it('returns a definitive failed result from the broker', async () => {
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'simpleCreateOrder') {
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'failed', error: 'broker rejected order' })}`);
+          }
+        });
+        return socket;
+      },
+    });
+
+    const result = await client.orders.submit({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
+      lastClientPrice: 201.5, clientProcessId: 'failed-process-1', secAccNo: '0000000000',
+    });
+
+    expect(result).toMatchObject({ status: 'failed', error: 'broker rejected order' });
+    client.close();
+  });
+
   it('returns outcomeUnknown and never replays an order after connection loss', async () => {
     const sockets: FakeSocket[] = [];
     const submittedPayloads: Record<string, unknown>[] = [];
@@ -919,6 +942,57 @@ describe('TradeRepublicClient', () => {
     client.close();
   });
 
+  it('rejects a submission timeout when the order was definitely not sent', async () => {
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => new EventEmitterOnlySocket(),
+    });
+
+    await assert.rejects(client.orders.submit({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
+      lastClientPrice: 201.5, clientProcessId: 'not-sent-process-1', secAccNo: '0000000000', timeoutMs: 1,
+    }), (error: unknown) => {
+      assert.ok(error instanceof MapperRequestError);
+      assert.equal(error.reason, 'timeout');
+      assert.equal(error.deliveryState, 'notSent');
+      assert.equal(error.outcomeUnknown, false);
+      return true;
+    });
+    client.close();
+  });
+
+  it('returns outcomeUnknown when the session changes after submission was sent', async () => {
+    let client: TradeRepublicClient;
+    client = TradeRepublicClient.create({
+      websocketFactory: () => new FakeSocket((payload) => {
+        if (payload.type === 'simpleCreateOrder') queueMicrotask(() => client.setSession({ sessionToken: 'fresh' }));
+      }),
+    });
+
+    const result = await client.orders.submit({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
+      lastClientPrice: 201.5, clientProcessId: 'refreshed-process-1', secAccNo: '0000000000',
+    });
+
+    expect(result).toMatchObject({ status: 'outcomeUnknown', outcomeReason: 'sessionRefresh' });
+    client.close();
+  });
+
+  it('returns outcomeUnknown when the client closes after submission was sent', async () => {
+    let client: TradeRepublicClient;
+    client = TradeRepublicClient.create({
+      websocketFactory: () => new FakeSocket((payload) => {
+        if (payload.type === 'simpleCreateOrder') queueMicrotask(() => client.close());
+      }),
+    });
+
+    const result = await client.orders.submit({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
+      lastClientPrice: 201.5, clientProcessId: 'closed-process-1', secAccNo: '0000000000',
+    });
+
+    expect(result).toMatchObject({ status: 'outcomeUnknown', outcomeReason: 'clientClosed' });
+  });
+
   it('supports current amount-based order payloads while previewing fees by derived size', async () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
@@ -952,13 +1026,16 @@ describe('TradeRepublicClient', () => {
     const client = TradeRepublicClient.create({
       websocketFactory: () => {
         const socket = new FakeSocket((payload, id) => {
-          if (payload.type === 'cancelOrder') socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'order-1' })}`);
+          if (payload.type === 'cancelOrder') {
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'received', orderId: 'order-1' })}`);
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'order-1' })}`);
+          }
         });
         sockets.push(socket);
         return socket;
       },
     });
-    await expect(client.orders.cancel('order-1')).resolves.toMatchObject({ orderId: 'order-1', status: 'succeeded' });
+    await expect(client.orders.cancel('order-1')).resolves.toMatchObject({ orderId: 'order-1', status: 'succeeded', updates: [{ status: 'received' }, { status: 'succeeded' }] });
     expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({ type: 'cancelOrder', orderId: 'order-1' });
   });
 
@@ -986,6 +1063,52 @@ describe('TradeRepublicClient', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(payloads).toHaveLength(1);
+    client.close();
+  });
+
+  it('returns outcomeUnknown when a sent cancellation times out', async () => {
+    const client = TradeRepublicClient.create({ websocketFactory: () => new FakeSocket() });
+
+    const result = await client.orders.cancel('order-1', { timeoutMs: 1 });
+
+    expect(result).toMatchObject({
+      orderId: 'order-1',
+      status: 'outcomeUnknown',
+      outcomeReason: 'timeout',
+    });
+    client.close();
+  });
+
+  it('finishes the isolated reconnect lifecycle after an ambiguous mutation', async () => {
+    const disconnects: unknown[] = [];
+    const reconnects: unknown[] = [];
+    let submissions = 0;
+    const client = TradeRepublicClient.create({
+      websocketMode: 'isolated',
+      websocketReconnectDelayMs: 0,
+      onWebSocketDisconnect: (event) => { disconnects.push(event); },
+      onWebSocketReconnect: (event) => { reconnects.push(event); },
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload) => {
+          if (payload.type !== 'simpleCreateOrder') return;
+          submissions += 1;
+          if (submissions === 1) queueMicrotask(() => socket.emit('close', 1006, Buffer.from('network lost')));
+        });
+        return socket;
+      },
+    });
+
+    const pending = client.orders.submit({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
+      lastClientPrice: 201.5, clientProcessId: 'isolated-process-1', secAccNo: '0000000000',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const result = await pending;
+
+    expect(result.status).toBe('outcomeUnknown');
+    expect(submissions).toBe(1);
+    expect(disconnects).toHaveLength(1);
+    expect(reconnects).toHaveLength(1);
     client.close();
   });
 
@@ -1258,6 +1381,32 @@ describe('TradeRepublicClient', () => {
     expect(parseSubPayload(sockets[1]?.sent[1])).toEqual({ type: 'cancelPriceAlarm', id: 'alarm-1' });
   });
 
+  it('classifies built-in price alarm mutations as non-replayable', async () => {
+    let sends = 0;
+    const client = TradeRepublicClient.create({
+      websocketReconnectDelayMs: 0,
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload) => {
+          if (payload.type !== 'createPriceAlarm') return;
+          sends += 1;
+          if (sends === 1) queueMicrotask(() => socket.emit('close', 1006));
+        });
+        return socket;
+      },
+    });
+
+    await assert.rejects(client.priceAlarms.create({ isin: 'US1', price: 123.45 }), (error: unknown) => {
+      assert.ok(error instanceof MapperRequestError);
+      assert.equal(error.deliveryState, 'sent');
+      assert.equal(error.outcomeUnknown, true);
+      return true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(sends).toBe(1);
+    client.close();
+  });
+
   it('exposes low-risk watchlist REST mutations', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
@@ -1390,4 +1539,11 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
     status,
     headers: { 'content-type': 'application/json', ...headers },
   });
+}
+
+class EventEmitterOnlySocket extends EventEmitter implements WebSocketLike {
+  send(): void {}
+  close(): void {
+    this.emit('close');
+  }
 }

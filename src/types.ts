@@ -64,6 +64,7 @@ export interface TradeRepublicClientOptions {
   websocketFactory?: WebSocketFactory | undefined;
   websocketMode?: 'shared' | 'isolated' | undefined;
   websocketReconnectDelayMs?: number | undefined;
+  websocketHandshakeTimeoutMs?: number | undefined;
   onWebSocketDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined;
   onWebSocketReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined;
   rawSchemaValidation?: RawSchemaValidationMode | undefined;
@@ -262,27 +263,57 @@ export interface OrderPreview {
   raw: unknown;
 }
 
-export type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | 'outcomeUnknown' | string;
+export type OrderSubmissionStatus = 'succeeded' | 'failed' | 'outcomeUnknown';
+export type MutationOutcomeUnknownReason = 'clientClosed' | 'disconnect' | 'sendFailure' | 'sessionRefresh' | 'timeout';
 
-export interface OrderSubmission {
-  status: OrderSubmissionStatus;
+interface OrderSubmissionBase {
   orderId?: string | undefined;
   clientProcessId: string;
   updates: unknown[];
-  outcomeReason?: 'disconnect' | 'timeout' | undefined;
-  connectionLoss?: WebSocketDisconnectEvent | undefined;
-  error?: unknown;
   raw: unknown;
 }
 
-export interface OrderCancellation {
-  orderId: string;
-  status?: string | undefined;
-  outcomeReason?: 'disconnect' | 'timeout' | undefined;
+export interface OrderSubmissionSucceeded extends OrderSubmissionBase {
+  status: 'succeeded';
+}
+
+export interface OrderSubmissionFailed extends OrderSubmissionBase {
+  status: 'failed';
+  error: unknown;
+}
+
+export interface OrderSubmissionOutcomeUnknown extends OrderSubmissionBase {
+  status: 'outcomeUnknown';
+  outcomeReason: MutationOutcomeUnknownReason;
   connectionLoss?: WebSocketDisconnectEvent | undefined;
-  error?: unknown;
+  error: unknown;
+}
+
+export type OrderSubmission = OrderSubmissionSucceeded | OrderSubmissionFailed | OrderSubmissionOutcomeUnknown;
+
+interface OrderCancellationBase {
+  orderId: string;
+  updates: unknown[];
   raw: unknown;
 }
+
+export interface OrderCancellationSucceeded extends OrderCancellationBase {
+  status: 'succeeded';
+}
+
+export interface OrderCancellationFailed extends OrderCancellationBase {
+  status: 'failed';
+  error: unknown;
+}
+
+export interface OrderCancellationOutcomeUnknown extends OrderCancellationBase {
+  status: 'outcomeUnknown';
+  outcomeReason: MutationOutcomeUnknownReason;
+  connectionLoss?: WebSocketDisconnectEvent | undefined;
+  error: unknown;
+}
+
+export type OrderCancellation = OrderCancellationSucceeded | OrderCancellationFailed | OrderCancellationOutcomeUnknown;
 
 export interface OrdersListOptions {
   secAccNo?: string | undefined;

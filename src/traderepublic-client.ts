@@ -7,7 +7,7 @@ import { AccountApi, BoardsApi } from './domains/account.js';
 import { DocumentsApi, PaymentsApi, TaxApi } from './domains/customer.js';
 import { DiscoveryApi } from './domains/discovery.js';
 import { HttpClient } from './http.js';
-import { MapperConnectionLostError } from './mapper-connection.js';
+import { MapperRequestError, mapperTimeoutError } from './mapper-connection.js';
 import { OperationClient } from './operations.js';
 import { TradeRepublicProtocolError } from './errors.js';
 import {
@@ -36,7 +36,7 @@ import {
   normalizeTimelineItem,
   normalizeTrade,
 } from './normalizers.js';
-import { defaultWebSocketFactory, RawApi } from './raw.js';
+import { defaultWebSocketFactory, RawApi, type RawQueryOptions, type RawSubscriptionOptions } from './raw.js';
 import { ResourceClient, toSubscription, type Subscription } from './resource.js';
 import { validateRawResponse } from './schemas/registry.js';
 import { mergeTradeRepublicWebContexts, normalizeTradeRepublicWebContext } from './waf.js';
@@ -59,6 +59,7 @@ import type {
   MarketSubscription,
   MarketSubscriptionsOptions,
   MutualFundOrdersOptions,
+  MutationOutcomeUnknownReason,
   Order,
   OrderCancellation,
   CreateOrderOptions,
@@ -151,6 +152,7 @@ export class TradeRepublicClient {
       () => this.session,
       options.websocketMode,
       options.websocketReconnectDelayMs,
+      options.websocketHandshakeTimeoutMs,
       options.onWebSocketDisconnect,
       options.onWebSocketReconnect,
     );
@@ -491,7 +493,7 @@ export class OrdersApi {
       clientProcessId: order.clientProcessId,
       secAccNo: order.secAccNo,
     };
-    const subscription = this.raw.subscribeResource(payload, { replayOnReconnect: false });
+    const subscription = this.raw.subscribeResource(payload, { operation: 'mutation' });
     const iterator = subscription[Symbol.asyncIterator]();
     const updates: unknown[] = [];
     const deadline = Date.now() + timeoutMs;
@@ -519,24 +521,15 @@ export class OrdersApi {
           };
         }
       }
-      const lastStatus = updates.length > 0 ? orderMutationStatus(updates.at(-1)) : undefined;
-      const error = new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ''}. The broker outcome is unknown; do not retry without checking the order history.`);
-      return {
-        status: 'outcomeUnknown',
-        clientProcessId: order.clientProcessId,
-        updates,
-        outcomeReason: 'timeout',
-        error,
-        raw: updates.at(-1),
-      };
+      throw mapperTimeoutError('simpleCreateOrder', subscription.deliveryState);
     } catch (error) {
-      if (!(error instanceof MapperConnectionLostError)) throw error;
+      if (!(error instanceof MapperRequestError) || error.deliveryState !== 'sent') throw error;
       return {
         status: 'outcomeUnknown',
         clientProcessId: order.clientProcessId,
         updates,
-        outcomeReason: 'disconnect',
-        connectionLoss: error.event,
+        outcomeReason: mutationOutcomeReason(error),
+        ...(error.connectionLoss ? { connectionLoss: error.connectionLoss } : {}),
         error,
         raw: updates.at(-1),
       };
@@ -547,26 +540,49 @@ export class OrdersApi {
 
   async cancel(orderId: string, options: { timeoutMs?: number } = {}): Promise<OrderCancellation> {
     const id = requiredString(orderId, 'orderId');
+    const timeoutMs = options.timeoutMs ?? 15_000;
+    const subscription = this.raw.subscribeResource(
+      { type: 'cancelOrder', orderId: id },
+      { operation: 'mutation' },
+    );
+    const iterator = subscription[Symbol.asyncIterator]();
+    const updates: unknown[] = [];
+    const deadline = Date.now() + timeoutMs;
     try {
-      const raw = await validated(this.validateRaw, 'orders.cancel', this.raw.query(
-        { type: 'cancelOrder', orderId: id },
-        { ...pickTimeoutOptions(options), replayOnReconnect: false },
-      ));
-      return {
-        orderId: firstStringAtPaths(raw, ['orderId'], ['id']) ?? id,
-        ...(orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {}),
-        raw,
-      };
+      while (Date.now() < deadline) {
+        const remaining = Math.max(1, deadline - Date.now());
+        const result = await nextOrderUpdate(iterator, remaining);
+        if (result.done || ('timedOut' in result && result.timedOut)) break;
+        const raw = this.validateRaw('orders.cancel', result.value);
+        throwResourceErrors(raw, 'cancelOrder');
+        updates.push(raw);
+        const status = orderMutationStatus(raw);
+        const resolvedOrderId = firstStringAtPaths(raw, ['orderId'], ['id']) ?? id;
+        if (status === 'succeeded') return { orderId: resolvedOrderId, status, updates, raw };
+        if (status === 'failed') {
+          return {
+            orderId: resolvedOrderId,
+            status,
+            updates,
+            error: firstValueAtPaths(raw, ['error'], ['errors'], ['message']),
+            raw,
+          };
+        }
+      }
+      throw mapperTimeoutError('cancelOrder', subscription.deliveryState);
     } catch (error) {
-      if (!(error instanceof MapperConnectionLostError)) throw error;
+      if (!(error instanceof MapperRequestError) || error.deliveryState !== 'sent') throw error;
       return {
         orderId: id,
         status: 'outcomeUnknown',
-        outcomeReason: 'disconnect',
-        connectionLoss: error.event,
+        updates,
+        outcomeReason: mutationOutcomeReason(error),
+        ...(error.connectionLoss ? { connectionLoss: error.connectionLoss } : {}),
         error,
-        raw: undefined,
+        raw: updates.at(-1),
       };
+    } finally {
+      subscription.close();
     }
   }
 
@@ -667,6 +683,20 @@ function orderMutationStatus(value: unknown): string | undefined {
   const normalized = status.replaceAll('_', '').replaceAll('-', '').toLowerCase();
   if (normalized === 'confirmationneeded') return 'confirmationNeeded';
   return normalized;
+}
+
+function mutationOutcomeReason(error: MapperRequestError): MutationOutcomeUnknownReason {
+  switch (error.reason) {
+    case 'clientClosed':
+    case 'disconnect':
+    case 'sendFailure':
+    case 'sessionRefresh':
+    case 'timeout':
+      return error.reason;
+    case 'connectFailure':
+    case 'handshakeTimeout':
+      throw error;
+  }
 }
 
 function throwResourceErrors(value: unknown, resource: string): void {
@@ -1174,12 +1204,12 @@ export class WebApi {
     return this.http.requestDetailed<T>(method, path, options.body, options.query);
   }
 
-  query<T = unknown>(payload: Record<string, unknown>, options: { timeoutMs?: number } = {}): Promise<T> {
+  query<T = unknown>(payload: Record<string, unknown>, options: RawQueryOptions = {}): Promise<T> {
     return this.raw.query<T>(payload, options);
   }
 
-  subscribe(payload: Record<string, unknown>): Subscription<unknown> {
-    return toSubscription(this.raw.subscribeResource(payload));
+  subscribe(payload: Record<string, unknown>, options: RawSubscriptionOptions = {}): Subscription<unknown> {
+    return toSubscription(this.raw.subscribeResource(payload, options));
   }
 
   timeline(after?: string): Promise<unknown> {

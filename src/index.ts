@@ -4,6 +4,10 @@ export { MemorySessionStore, FileSessionStore, redactSession } from './session.j
 export { CandleQuery } from './candles.js';
 export { collectTradeRepublicWebContext } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
+export { MapperConnectionLostError, MapperRequestError } from './mapper-connection.js';
+export { classifyMapperOperation } from './raw.js';
+export type { MapperDeliveryState, MapperRequestFailureReason } from './mapper-connection.js';
+export type { RawOperationKind, RawQueryOptions, RawSubscription, RawSubscriptionOptions } from './raw.js';
 export type { SchemaRisk, SchemaTransport, TradeRepublicSchemaEntry } from './schemas/registry.js';
 export type {
   CollectTradeRepublicWebContextOptions,
@@ -39,8 +43,12 @@ export type {
   MarketSubscription,
   MarketSubscriptionsOptions,
   MutualFundOrdersOptions,
+  MutationOutcomeUnknownReason,
   Order,
   OrderCancellation,
+  OrderCancellationFailed,
+  OrderCancellationOutcomeUnknown,
+  OrderCancellationSucceeded,
   CreateOrderOptions,
   OrderExpiry,
   OrderFeeItem,
@@ -48,7 +56,10 @@ export type {
   OrderPreview,
   OrderSide,
   OrderSubmission,
+  OrderSubmissionFailed,
+  OrderSubmissionOutcomeUnknown,
   OrderSubmissionStatus,
+  OrderSubmissionSucceeded,
   PreparedOrder,
   OrderDestination,
   OrdersListOptions,
