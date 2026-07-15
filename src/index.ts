@@ -17,6 +17,7 @@ export type { QuerySpec, StreamSpec, Subscription } from './resource.js';
 export type {
   Asset,
   AssetDetail,
+  AssetSearchType,
   Candle,
   CandleDownloadOptions,
   CandleTimeframe,
@@ -67,6 +68,8 @@ export type {
   Trade,
   TradeRepublicClientOptions,
   TradeRepublicWebContext,
+  WebSocketDisconnectEvent,
+  WebSocketReconnectEvent,
   Watchlist,
   WatchlistItem,
 } from './types.js';

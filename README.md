@@ -194,6 +194,51 @@ Trade Republic resource is not mapped yet.
 - `tr.raw`: escape hatch for unmapped REST and mapper/websocket resources.
 - `tr.web`: debugging escape hatch for arbitrary REST/mapper calls.
 
+Mapper subscriptions are multiplexed over one websocket per client while they
+are active. Replayable read subscriptions reconnect after an unexpected close,
+and the connection refreshes its headers when the client session changes.
+Observe connection loss and recovery without taking control of the transport:
+
+```ts
+const tr = TradeRepublicClient.create({
+  websocketReconnectDelayMs: 250,
+  onWebSocketDisconnect(event) {
+    showConnectionBanner(`Disconnected at ${event.disconnectedAt}; reconnecting...`);
+  },
+  onWebSocketReconnect(event) {
+    hideConnectionBanner();
+    console.log(`Reconnected after ${event.downtimeMs} ms`);
+    // Optional: start application-owned refetching here.
+  },
+});
+```
+
+The callbacks are observational: they do not delay or control reconnection, and
+callback failures are isolated from the transport. They fire only for an
+unexpected outage and the subsequent successful mapper handshake. Call
+`tr.close()` when disposing a long-lived client.
+
+For protocol troubleshooting, the previous connection-per-subscription behavior
+remains available with `websocketMode: 'isolated'`.
+
+### Asset Search Types
+
+Trade Republic's internal `neonSearch` terminology differs from the labels
+shown in its UI: ETFs use the mapper type `fund`, while mutual funds use
+`mutualFund`. The SDK accepts the clearer `etf` alias and translates it to
+`fund` before sending the request:
+
+```ts
+const etfs = await tr.assets.search('msci', { type: 'etf' });
+// Sent to Trade Republic as type: 'fund'.
+
+const mutualFunds = await tr.assets.search('income', { type: 'mutualFund' });
+// Sent to Trade Republic as type: 'mutualFund'.
+```
+
+When using `tr.raw` directly, use Trade Republic's internal `fund` value for
+ETFs instead of the SDK alias.
+
 ## Schema Validation
 
 Covered first-class SDK methods validate the raw Trade Republic payload with
@@ -281,7 +326,7 @@ Start:
 
 ```bash
 npm i
-npm run demo:tui
+npm run demo:repl
 ```
 
 The REPL builds the SDK, restores `demo/.demo-session.json` when present, prints
@@ -319,7 +364,14 @@ TR_DEVICE_INFO=...
 TR_ACCEPT_LANGUAGE=...
 TR_SESSION_FILE=...
 TR_CONFIG_FILE=...
+TR_WEBSOCKET_MODE=shared              # shared (default) or isolated
+TR_WEBSOCKET_RECONNECT_MS=250
+TR_RAW_SCHEMA_VALIDATION=passthrough  # passthrough (default), strict, or false
 ```
+
+Both interactive demos use the shared mapper connection by default, reconnect
+active streams after session refreshes, report schema drift without immediately
+terminating the UI, and close the SDK client on exit.
 
 The demo tooling still accepts copied context through `demo/.demo-config.json`
 or the `TR_AWS_WAF_TOKEN`, `TR_XSRF_TOKEN`, and `TR_COOKIE` environment
@@ -384,16 +436,31 @@ console.log(preview.totalFees, preview.estimatedTotal, preview.order);
 const submitted = await tr.orders.submit(preview.order);
 console.log(submitted.status, submitted.orderId);
 
+if (submitted.status === 'outcomeUnknown') {
+  // The mutation may have reached the broker. Never retry it blindly.
+  console.error(submitted.clientProcessId, submitted.connectionLoss);
+}
+
 // Cancellation is also a live mutation.
-await tr.orders.cancel(submitted.orderId!);
+if (submitted.orderId) await tr.orders.cancel(submitted.orderId);
 ```
 
 Use `size` instead of `amount` for an asset-quantity order. Limit orders require
 `mode: 'limit'` and `limit`; stop-market orders require `mode: 'stopMarket'` and
 `stop`. Amount orders derive and round the asset size to the selected venue's
 step size; pass `sizeStep` only when the instrument response does not expose
-enough metadata for automatic detection. `submit()` follows the mapper stream through `received`, `waiting`, and
-`confirmationNeeded` until Trade Republic returns `succeeded` or `failed`.
+enough metadata for automatic detection. `submit()` follows the mapper stream
+through `received`, `waiting`, and `confirmationNeeded` until Trade Republic
+returns `succeeded` or `failed`.
+
+Order submission and cancellation subscriptions are never replayed after a
+disconnect. If the socket drops after the mutation was sent, or submission
+times out without a terminal response, the method returns `outcomeUnknown`
+with its `clientProcessId`, `outcomeReason`, and any connection-loss context.
+The SDK reconnects the transport but does not automatically refetch or reconcile
+the order. After `onWebSocketReconnect`, the application may inspect
+`orders.all()`, `orders.open()`, `orders.closed()`, order updates, or trades and
+update its own UI or persistence.
 
 Order updates are a stream:
 
@@ -670,6 +737,14 @@ npm run test
 npm run build
 ```
 
+The internal SDK is a modular monolith. `ClientRuntime` owns shared transport,
+schema-validation, and securities-account resolution dependencies. Straightforward
+REST and mapper calls are declared in `src/operation-specs.ts` and executed by
+`OperationClient`; domain-facing adapters live under `src/domains/`. Stateful
+flows such as authentication, order preparation, and order confirmation remain
+explicit workflows instead of generated operation wrappers. `MapperConnection`
+multiplexes concurrently active resource subscriptions.
+
 Unit tests use mocked HTTP and websocket transports. Read-only live integration
 tests are opt-in and reuse a real saved login session from the demo REPL:
 
@@ -703,6 +778,45 @@ diagnostics; auth failures and schema failures still fail. The suite does not
 place/change/cancel orders, move money, accept documents, or mutate account
 identity, tax, PIN, login, or security settings. Those high-risk mutation paths
 stay mocked-only.
+
+### GitHub Actions
+
+`.github/workflows/test.yml` runs unit tests, typechecking, and the package build
+on every push and once per day at 02:15 UTC. Pushes to `main` and the daily run
+additionally execute the live integration suite against the protected
+`trade-republic-tests` GitHub Environment. Live tests are kept off other
+branches because the environment contains a real account session; this also
+limits which pushed workflow definitions can access it.
+
+Create the Environment once under **Settings -> Environments**, restrict its
+deployment branches to `main`, and add these Environment secrets:
+
+- `TR_SESSION_JSON`: the complete contents of `demo/.demo-session.json` after a
+  successful local demo login.
+- `TR_SECRET_ROTATION_TOKEN`: a fine-grained personal access token scoped only
+  to this repository with **Environments: Read and write** permission.
+
+The separate rotation token is required because the workflow's normal
+`GITHUB_TOKEN` cannot update Actions Environment secrets. The live job writes
+`TR_SESSION_JSON` to an ephemeral runner file, refreshes it through the SDK,
+updates the Environment secret with the refreshed JSON, runs the non-order
+integration tests, and deletes the runner file. Neither secret value is printed
+or uploaded as an artifact.
+
+With an authenticated GitHub CLI, the initial secrets can be seeded from
+PowerShell without copying the session into the repository:
+
+```powershell
+Get-Content -Raw demo/.demo-session.json |
+  gh secret set TR_SESSION_JSON --env trade-republic-tests --repo VIEWVIEWVIEW/handelsrepublik
+
+$env:TR_SECRET_ROTATION_TOKEN |
+  gh secret set TR_SECRET_ROTATION_TOKEN --env trade-republic-tests --repo VIEWVIEWVIEW/handelsrepublik
+```
+
+The rotation token cannot rotate itself and should be replaced manually before
+it expires. If the Trade Republic account session becomes fully invalid, log in
+locally again and reseed `TR_SESSION_JSON` with the first command.
 
 Start the demo REPL:
 

@@ -130,11 +130,13 @@ const sessionSchema = z.union([
 const priceAlarmMutationSchema = z.union([
   emptyObject,
   z.strictObject({ id: z.string() }),
+  z.strictObject({ status: z.string().optional(), alarmId: z.string() }),
   z.strictObject({ priceAlarmId: z.string() }),
   z.strictObject({ status: z.string().optional(), id: z.string().optional() }),
 ]);
 
 const watchlistMutationSchema = z.union([
+  z.undefined(),
   emptyObject,
   jsonRecord,
 ]);
@@ -147,7 +149,7 @@ export const schemaRegistry = [
   entry('account.cardsHome', 'Cards home', 'rest', 'read', 'GET /api/v1/card/cards/home', jsonRecord, { live: { optionalStatuses: [404, 500] } }),
   entry('boards.list', 'Boards list', 'rest', 'read', 'GET /api-gateway/pro-trading/api/v2/boards', normalizedArrayWrappers),
   entry('boards.detail', 'Board detail', 'rest', 'read', 'GET /api-gateway/pro-trading/api/v2/boards/{boardId}', jsonRecord),
-  entry('assets.search', 'Asset search', 'websocket', 'read', 'neonSearch', normalizedArrayWrappers, { variants: ['stock', 'crypto', 'fund', 'etf', 'bond'] }),
+  entry('assets.search', 'Asset search', 'websocket', 'read', 'neonSearch', normalizedArrayWrappers, { variants: ['stock', 'crypto', 'etf -> fund', 'mutualFund', 'privateFund', 'bond', 'synthetic'] }),
   entry('assets.get', 'Instrument detail', 'websocket', 'read', 'instrument', jsonRecord),
   entry('derivatives.search', 'Derivative search', 'websocket', 'read', 'neonSearch type=derivative', normalizedArrayWrappers),
   entry('derivatives.listForUnderlying', 'Derivatives for underlying', 'websocket', 'read', 'derivatives', normalizedArrayWrappers),
@@ -194,8 +196,8 @@ export const schemaRegistry = [
   entry('discovery.instrumentStatus', 'Instrument status', 'rest', 'read', 'GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}', jsonRecord),
   entry('discovery.watchlists', 'Watchlists', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists', jsonValue),
   entry('discovery.watchlists.items', 'Watchlist items', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', jsonValue),
-  entry('discovery.watchlists.create', 'Create watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
-  entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
+  entry('discovery.watchlists.clone', 'Clone watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone', watchlistMutationSchema, { live: { sample: 'cleanup', optionalStatuses: [404] } }),
+  entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup', optionalStatuses: [404] } }),
   entry('discovery.watchlists.delete', 'Delete watchlist', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.addItem', 'Add watchlist item', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.removeItem', 'Remove watchlist item', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),

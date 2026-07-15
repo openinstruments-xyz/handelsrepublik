@@ -20,10 +20,15 @@ const EXAMPLE_ASSET_ID = 'US0378331005';
 const EXAMPLE_QUERY = 'apple';
 const EXAMPLE_QUOTE_EXCHANGE_ID = 'LSX';
 const EXAMPLE_L2_EXCHANGE_ID = 'TIB';
+const demoClientOptions = readDemoClientOptions();
 
 const client = TradeRepublicClient.create({
   sessionStore,
   defaultHeaders: defaultHeadersFromConfig(runtimeConfig),
+  ...demoClientOptions,
+  onRawSchemaValidationFailure: ({ schemaName, error }) => {
+    logAbovePrompt(`[schema drift:${schemaName}] ${formatErrorMessage(error)}`);
+  },
 });
 useRuntimeWebContext(runtimeConfig);
 let sessionRefreshTimer = null;
@@ -1588,6 +1593,7 @@ function help() {
     quotes: `quoteSearch("bitcoin") / quoteWatch("bitcoin") searches and logs live price changes with timestamps. priceSearch("bitcoin") returns one current buy/sell snapshot.`,
     l2: `const book = l2() -> live order-book depth stream for Apple/${EXAMPLE_L2_EXCHANGE_ID}`,
     streamHelpers: 'Streams do not print by themselves. Use next(q) for one update, collect(q, 5) for five, watch(q) for continuous logging, close(q) to stop.',
+    transport: `websocketMode=${demoClientOptions.websocketMode}; reconnectDelay=${demoClientOptions.websocketReconnectDelayMs}ms; rawSchemaValidation=${String(demoClientOptions.rawSchemaValidation)}`,
     raw: 'rawQuery() -> availableCash; rawSubscribe() is a low-level mapper stream helper.',
     web: 'apiCatalog() lists broad web-app wrappers; webRequest(), mapper(), stream() are generic escape hatches.',
     sessionStore: sessionStoreConfig.label,
@@ -1744,7 +1750,10 @@ replInterface.on('SIGINT', () => {
 
 replInterface.on('close', () => {
   stopSessionRefresh();
-  void inputQueue.finally(() => sessionStoreConfig.close()).finally(() => process.exit(0));
+  void inputQueue.finally(async () => {
+    client.close();
+    await sessionStoreConfig.close();
+  }).finally(() => process.exit(0));
 });
 
 let inputBuffer = '';
@@ -1982,4 +1991,24 @@ function delay(ms) {
 
 function formatErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function readDemoClientOptions() {
+  return {
+    websocketMode: process.env.TR_WEBSOCKET_MODE === 'isolated' ? 'isolated' : 'shared',
+    websocketReconnectDelayMs: positiveInteger(process.env.TR_WEBSOCKET_RECONNECT_MS, 250),
+    rawSchemaValidation: schemaValidationMode(process.env.TR_RAW_SCHEMA_VALIDATION),
+  };
+}
+
+function schemaValidationMode(value) {
+  const normalized = cleanString(value)?.toLowerCase();
+  if (normalized === 'false' || normalized === 'off' || normalized === 'disabled') return false;
+  if (normalized === 'true' || normalized === 'throw' || normalized === 'strict') return true;
+  return 'passthrough';
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }

@@ -11,7 +11,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `account.cardsHome` | `read` | `rest` | `GET /api/v1/card/cards/home` |  |
 | `boards.list` | `read` | `rest` | `GET /api-gateway/pro-trading/api/v2/boards` |  |
 | `boards.detail` | `read` | `rest` | `GET /api-gateway/pro-trading/api/v2/boards/{boardId}` |  |
-| `assets.search` | `read` | `websocket` | `neonSearch` | stock, crypto, fund, etf, bond |
+| `assets.search` | `read` | `websocket` | `neonSearch` | stock, crypto, etf -> fund, mutualFund, privateFund, bond, synthetic |
 | `assets.get` | `read` | `websocket` | `instrument` |  |
 | `derivatives.search` | `read` | `websocket` | `neonSearch type=derivative` |  |
 | `derivatives.listForUnderlying` | `read` | `websocket` | `derivatives` |  |
@@ -58,7 +58,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `discovery.instrumentStatus` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}` |  |
 | `discovery.watchlists` | `read` | `rest` | `GET /api-gateway/watchlists/api/v2/watchlists` |  |
 | `discovery.watchlists.items` | `read` | `rest` | `GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items` |  |
-| `discovery.watchlists.create` | `lowRiskMutation` | `rest` | `POST /api-gateway/watchlists/api/v2/watchlists` |  |
+| `discovery.watchlists.clone` | `lowRiskMutation` | `rest` | `POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone` |  |
 | `discovery.watchlists.rename` | `lowRiskMutation` | `rest` | `PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}` |  |
 | `discovery.watchlists.delete` | `lowRiskMutation` | `rest` | `DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}` |  |
 | `discovery.watchlists.addItem` | `lowRiskMutation` | `rest` | `POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items` |  |

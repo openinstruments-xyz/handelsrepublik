@@ -1,8 +1,14 @@
 import { AuthApi } from './auth.js';
 import { randomUUID } from 'node:crypto';
 import { CandleQuery } from './candles.js';
+import { ClientRuntime, firstStringByKey } from './client-runtime.js';
 import { EndpointResolver } from './endpoints.js';
+import { AccountApi, BoardsApi } from './domains/account.js';
+import { DocumentsApi, PaymentsApi, TaxApi } from './domains/customer.js';
+import { DiscoveryApi } from './domains/discovery.js';
 import { HttpClient } from './http.js';
+import { MapperConnectionLostError } from './mapper-connection.js';
+import { OperationClient } from './operations.js';
 import { TradeRepublicProtocolError } from './errors.js';
 import {
   availableL2BooksSpec,
@@ -16,13 +22,9 @@ import {
   arrayPayload,
   normalizeAsset,
   normalizeAssetDetail,
-  normalizeBoard,
   normalizeCash,
   normalizeDerivative,
-  normalizeExchangeDetails,
-  normalizeExchangeSchedule,
   normalizeInstrumentNewsItem,
-  normalizeInstrumentStatus,
   normalizeOrder,
   normalizeOrderDestination,
   normalizePortfolio,
@@ -33,7 +35,6 @@ import {
   normalizeTimelineDetail,
   normalizeTimelineItem,
   normalizeTrade,
-  normalizeWatchlist,
 } from './normalizers.js';
 import { defaultWebSocketFactory, RawApi } from './raw.js';
 import { ResourceClient, toSubscription, type Subscription } from './resource.js';
@@ -42,16 +43,13 @@ import { mergeTradeRepublicWebContexts, normalizeTradeRepublicWebContext } from 
 import type {
   Asset,
   AssetDetail,
-  Board,
+  AssetSearchType,
   Candle,
   CandleDownloadOptions,
   CandleTimeframe,
   CashSummary,
   Derivative,
-  ExchangeDetails,
-  ExchangeSchedule,
   InstrumentNewsItem,
-  InstrumentStatus,
   L2OrderBook,
   L2OrderBookOptions,
   L2Venue,
@@ -83,7 +81,6 @@ import type {
   Trade,
   TradeRepublicClientOptions,
   TradeRepublicWebContext,
-  Watchlist,
   RawSchemaValidator,
   RawSchemaValidationFailure,
   RawSchemaValidationMode,
@@ -125,6 +122,8 @@ export class TradeRepublicClient {
   private readonly http: HttpClient;
   private readonly endpoints: EndpointResolver;
   private readonly resources: ResourceClient;
+  private readonly operations: OperationClient;
+  private readonly runtime: ClientRuntime;
   private readonly validateRaw: RawSchemaValidator;
 
   constructor(options: TradeRepublicClientOptions = {}) {
@@ -150,26 +149,34 @@ export class TradeRepublicClient {
       options.websocketUrl ?? DEFAULT_WEBSOCKET_URL,
       options.websocketFactory ?? defaultWebSocketFactory,
       () => this.session,
+      options.websocketMode,
+      options.websocketReconnectDelayMs,
+      options.onWebSocketDisconnect,
+      options.onWebSocketReconnect,
     );
-    this.account = new AccountApi(this.http, this.endpoints, this.validateRaw);
-    this.boards = new BoardsApi(this.http, this.endpoints, this.validateRaw);
-    this.resources = new ResourceClient(this.http, this.endpoints, this.raw, this.validateRaw);
+    this.runtime = new ClientRuntime(this.http, this.endpoints, this.raw, this.validateRaw, {
+      get: () => this.securitiesAccountNumber ?? this.session?.securitiesAccountNumber,
+      set: (value) => this.setSecuritiesAccountNumber(value),
+      fallback: () => this.resolveSecuritiesAccountNumberFromRest(),
+    });
+    this.operations = this.runtime.operations;
+    this.account = new AccountApi(this.operations);
+    this.boards = new BoardsApi(this.operations);
+    this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
-    const getAccountNumber = () => this.securitiesAccountNumber ?? this.session?.securitiesAccountNumber;
-    const resolveAccountNumberFromRest = () => this.resolveSecuritiesAccountNumberFromRest();
-    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
-    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
+    this.orders = new OrdersApi(this.runtime);
+    this.portfolio = new PortfolioApi(this.runtime);
     this.market = new MarketApi(this.resources);
     this.timeline = new TimelineApi(this.raw, this.validateRaw);
     this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
     this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
-    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
-    this.discovery = new DiscoveryApi(this.http, this.validateRaw);
-    this.documents = new DocumentsApi(this.http, this.validateRaw);
-    this.tax = new TaxApi(this.http, this.validateRaw);
-    this.payments = new PaymentsApi(this.http, this.validateRaw);
-    this.web = new WebApi(this.http, this.raw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
+    this.trading = new TradingApi(this.runtime);
+    this.discovery = new DiscoveryApi(this.operations);
+    this.documents = new DocumentsApi(this.operations);
+    this.tax = new TaxApi(this.operations);
+    this.payments = new PaymentsApi(this.operations);
+    this.web = new WebApi(this.runtime);
   }
 
   static create(options: TradeRepublicClientOptions = {}): TradeRepublicClient {
@@ -190,6 +197,7 @@ export class TradeRepublicClient {
       ? { ...session, webContext: this.session.webContext }
       : session;
     this.session = structuredClone(nextSession);
+    this.raw?.refreshSession();
     if (session.securitiesAccountNumber) this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
     else if (Object.keys(session).length === 0) this.securitiesAccountNumber = undefined;
   }
@@ -201,6 +209,10 @@ export class TradeRepublicClient {
     };
     this.setSession(session);
     return this.getSession() ?? session;
+  }
+
+  close(): void {
+    this.raw.close();
   }
 
   private setSecuritiesAccountNumber(value: string | undefined): void {
@@ -215,7 +227,7 @@ export class TradeRepublicClient {
       return session;
     }
     try {
-      const accountNumber = await resolveSecuritiesAccountNumber(this.raw, this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value), 5_000, () => this.resolveSecuritiesAccountNumberFromRest());
+      const accountNumber = await this.runtime.resolveSecuritiesAccountNumber(5_000);
       return { ...session, securitiesAccountNumber: accountNumber };
     } catch {
       return session;
@@ -244,7 +256,7 @@ export class AssetsApi {
     private readonly validateRaw: RawSchemaValidator,
   ) {}
 
-  async search(query: string, options: { limit?: number; page?: number; type?: string; filters?: Record<string, string | number | boolean | undefined> } = {}): Promise<Asset[]> {
+  async search(query: string, options: { limit?: number; page?: number; type?: AssetSearchType; filters?: Record<string, string | number | boolean | undefined> } = {}): Promise<Asset[]> {
     const raw = await validated(this.validateRaw, 'assets.search', this.raw.query({
       type: 'neonSearch',
       data: {
@@ -261,7 +273,7 @@ export class AssetsApi {
     return normalizeAssetDetail(await validated(this.validateRaw, 'assets.get', this.raw.query({ type: 'instrument', id: assetId })));
   }
 
-  async listAll(options: { cursor?: string; limit?: number; type?: string; filters?: Record<string, string | number | boolean | undefined> } = {}): Promise<Asset[]> {
+  async listAll(options: { cursor?: string; limit?: number; type?: AssetSearchType; filters?: Record<string, string | number | boolean | undefined> } = {}): Promise<Asset[]> {
     const page = numberString(options.cursor) ?? 1;
     const raw = await validated(this.validateRaw, 'assets.search', this.raw.query({
       type: 'neonSearch',
@@ -273,55 +285,6 @@ export class AssetsApi {
       },
     }));
     return arrayPayload(raw).map(normalizeAsset);
-  }
-}
-
-export class AccountApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly endpoints: EndpointResolver,
-    private readonly validateRaw: RawSchemaValidator,
-  ) {}
-
-  current(): Promise<unknown> {
-    return validated(this.validateRaw, 'auth.account', this.http.request('GET', this.endpoints.resolve('auth.account')));
-  }
-
-  session(): Promise<unknown> {
-    return validated(this.validateRaw, 'auth.session', this.http.request('GET', this.endpoints.resolve('auth.session')));
-  }
-
-  accountSettings(): Promise<unknown> {
-    return this.current();
-  }
-
-  personalDetails(): Promise<unknown> {
-    return validated(this.validateRaw, 'account.personalDetails', this.http.request('GET', '/api/v1/customer/personal-details'));
-  }
-
-  relationships(): Promise<unknown> {
-    return validated(this.validateRaw, 'account.relationships', this.http.request('GET', '/api/v1/customer/relationships/detailed'));
-  }
-
-  cardsHome(): Promise<unknown> {
-    return validated(this.validateRaw, 'account.cardsHome', this.http.request('GET', '/api/v1/card/cards/home'));
-  }
-}
-
-export class BoardsApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly endpoints: EndpointResolver,
-    private readonly validateRaw: RawSchemaValidator,
-  ) {}
-
-  async list(): Promise<Board[]> {
-    const raw = await validated(this.validateRaw, 'boards.list', this.http.request<unknown>('GET', this.endpoints.resolve('boards.list')));
-    return arrayPayload(raw).map(normalizeBoard);
-  }
-
-  async get(boardId: string): Promise<Board> {
-    return normalizeBoard(await validated(this.validateRaw, 'boards.detail', this.http.request('GET', this.endpoints.resolve('boards.detail', { boardId }))));
   }
 }
 
@@ -366,15 +329,17 @@ export class DerivativesApi {
 }
 
 export class OrdersApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly endpoints: EndpointResolver,
-    private readonly raw: RawApi,
-    private readonly validateRaw: RawSchemaValidator,
-    private readonly getSecuritiesAccountNumber?: () => string | undefined,
-    private readonly setSecuritiesAccountNumber?: (value: string) => void,
-    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
-  ) {}
+  private readonly http: HttpClient;
+  private readonly endpoints: EndpointResolver;
+  private readonly raw: RawApi;
+  private readonly validateRaw: RawSchemaValidator;
+
+  constructor(private readonly runtime: ClientRuntime) {
+    this.http = runtime.http;
+    this.endpoints = runtime.endpoints;
+    this.raw = runtime.raw;
+    this.validateRaw = runtime.validateRaw;
+  }
 
   async open(options: OrdersListOptions = {}): Promise<Order[]> {
     const orders = await this.all(options);
@@ -397,7 +362,7 @@ export class OrdersApi {
 
   async rawAll(options: OrdersListOptions = {}): Promise<unknown> {
     const { filters, secAccNo: providedSecAccNo, ...rest } = options;
-    const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
+    const secAccNo = providedSecAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return validated(this.validateRaw, 'orders.all', this.http.request<unknown>('GET', this.endpoints.resolve('orders.all'), undefined, {
       secAccNo,
       page: rest.page ?? numberString(rest.cursor) ?? 1,
@@ -450,7 +415,7 @@ export class OrdersApi {
   }
 
   async rawOrderUpdates(secAccNo?: string): Promise<unknown> {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return validated(this.validateRaw, 'orders.orderUpdates', this.raw.query({
       type: 'orderUpdates',
       selector: { case: 'bySecAccNo', value: { accountNumber } },
@@ -462,13 +427,7 @@ export class OrdersApi {
       ? { ...options, sizeStep: await this.resolveAmountSizeStep(options.instrumentId, options.exchangeId) }
       : options;
     const normalized = normalizeCreateOrderOptions(normalizedOptions);
-    const secAccNo = options.secAccNo ?? await resolveSecuritiesAccountNumber(
-      this.raw,
-      this.getSecuritiesAccountNumber?.(),
-      this.setSecuritiesAccountNumber,
-      undefined,
-      this.resolveSecuritiesAccountNumberFallback,
-    );
+    const secAccNo = options.secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return {
       parameters: normalized.parameters,
       clientProcessId: options.clientProcessId ?? createClientProcessId(),
@@ -532,7 +491,7 @@ export class OrdersApi {
       clientProcessId: order.clientProcessId,
       secAccNo: order.secAccNo,
     };
-    const subscription = this.raw.subscribeResource(payload);
+    const subscription = this.raw.subscribeResource(payload, { replayOnReconnect: false });
     const iterator = subscription[Symbol.asyncIterator]();
     const updates: unknown[] = [];
     const deadline = Date.now() + timeoutMs;
@@ -561,7 +520,26 @@ export class OrdersApi {
         }
       }
       const lastStatus = updates.length > 0 ? orderMutationStatus(updates.at(-1)) : undefined;
-      throw new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ''}. The order may still be pending; inspect orders.open() before retrying.`);
+      const error = new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ''}. The broker outcome is unknown; do not retry without checking the order history.`);
+      return {
+        status: 'outcomeUnknown',
+        clientProcessId: order.clientProcessId,
+        updates,
+        outcomeReason: 'timeout',
+        error,
+        raw: updates.at(-1),
+      };
+    } catch (error) {
+      if (!(error instanceof MapperConnectionLostError)) throw error;
+      return {
+        status: 'outcomeUnknown',
+        clientProcessId: order.clientProcessId,
+        updates,
+        outcomeReason: 'disconnect',
+        connectionLoss: error.event,
+        error,
+        raw: updates.at(-1),
+      };
     } finally {
       subscription.close();
     }
@@ -569,12 +547,27 @@ export class OrdersApi {
 
   async cancel(orderId: string, options: { timeoutMs?: number } = {}): Promise<OrderCancellation> {
     const id = requiredString(orderId, 'orderId');
-    const raw = await validated(this.validateRaw, 'orders.cancel', this.raw.query({ type: 'cancelOrder', orderId: id }, pickTimeoutOptions(options)));
-    return {
-      orderId: firstStringAtPaths(raw, ['orderId'], ['id']) ?? id,
-      ...(orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {}),
-      raw,
-    };
+    try {
+      const raw = await validated(this.validateRaw, 'orders.cancel', this.raw.query(
+        { type: 'cancelOrder', orderId: id },
+        { ...pickTimeoutOptions(options), replayOnReconnect: false },
+      ));
+      return {
+        orderId: firstStringAtPaths(raw, ['orderId'], ['id']) ?? id,
+        ...(orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {}),
+        raw,
+      };
+    } catch (error) {
+      if (!(error instanceof MapperConnectionLostError)) throw error;
+      return {
+        orderId: id,
+        status: 'outcomeUnknown',
+        outcomeReason: 'disconnect',
+        connectionLoss: error.event,
+        error,
+        raw: undefined,
+      };
+    }
   }
 
   private async resolveAmountSizeStep(instrumentId: string, exchangeId: string): Promise<number> {
@@ -814,15 +807,15 @@ function isExecutedOrder(order: Order): boolean {
 }
 
 export class PortfolioApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly endpoints: EndpointResolver,
-    private readonly raw: RawApi,
-    private readonly validateRaw: RawSchemaValidator,
-    private readonly getSecuritiesAccountNumber?: () => string | undefined,
-    private readonly setSecuritiesAccountNumber?: (value: string) => void,
-    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
-  ) {}
+  private readonly http: HttpClient;
+  private readonly raw: RawApi;
+  private readonly validateRaw: RawSchemaValidator;
+
+  constructor(private readonly runtime: ClientRuntime) {
+    this.http = runtime.http;
+    this.raw = runtime.raw;
+    this.validateRaw = runtime.validateRaw;
+  }
 
   async current(options: { timeoutMs?: number } = {}): Promise<Portfolio> {
     const secAccNo = await this.resolveSecuritiesAccountNumber();
@@ -875,62 +868,12 @@ export class PortfolioApi {
   }
 
   private async resolveSecuritiesAccountNumber(): Promise<string> {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
+    return this.runtime.resolveSecuritiesAccountNumber();
   }
 }
 
 function pickTimeoutOptions(options: { timeoutMs?: number }): { timeoutMs?: number } | undefined {
   return options.timeoutMs ? { timeoutMs: options.timeoutMs } : undefined;
-}
-
-async function resolveSecuritiesAccountNumber(
-  raw: RawApi,
-  cached?: string,
-  remember?: (value: string) => void,
-  timeoutMs?: number,
-  fallback?: () => Promise<string | undefined>,
-): Promise<string> {
-  try {
-    const accountPairs = await raw.query({ type: 'accountPairs' }, timeoutMs ? { timeoutMs } : undefined);
-    const accountNumber = firstStringByKey(accountPairs, 'securitiesAccountNumber');
-    if (accountNumber) {
-      remember?.(accountNumber);
-      return accountNumber;
-    }
-  } catch {
-    if (cached) return cached;
-    const accountNumber = await fallback?.();
-    if (accountNumber) {
-      remember?.(accountNumber);
-      return accountNumber;
-    }
-    throw new Error('Trade Republic securities account number was not available from accountPairs or account profile.');
-  }
-  if (cached) return cached;
-  const accountNumber = await fallback?.();
-  if (accountNumber) {
-    remember?.(accountNumber);
-    return accountNumber;
-  }
-  throw new Error('Trade Republic securities account number was not available from accountPairs or account profile.');
-}
-
-function firstStringByKey(value: unknown, key: string): string | undefined {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const match = firstStringByKey(item, key);
-      if (match) return match;
-    }
-    return undefined;
-  }
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  if (typeof record[key] === 'string' && record[key].length > 0) return record[key];
-  for (const item of Object.values(record)) {
-    const match = firstStringByKey(item, key);
-    if (match) return match;
-  }
-  return undefined;
 }
 
 function numberString(value: string | undefined): number | undefined {
@@ -939,9 +882,9 @@ function numberString(value: string | undefined): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function neonSearchFilters(type: string, filters: Record<string, string | number | boolean | undefined> = {}): Array<{ key: string; value: string | number | boolean }> {
+function neonSearchFilters(type: AssetSearchType, filters: Record<string, string | number | boolean | undefined> = {}): Array<{ key: string; value: string | number | boolean }> {
   return [
-    { key: 'type', value: type },
+    { key: 'type', value: type === 'etf' ? 'fund' : type },
     { key: 'jurisdiction', value: 'DE' },
     ...Object.entries(filters).flatMap(([key, value]) => value === undefined ? [] : [{ key, value }]),
   ];
@@ -1072,9 +1015,9 @@ export class PriceAlarmsApi {
     return validated(this.validateRaw, 'priceAlarms.notifications', this.raw.query({ type: 'priceAlarmNotifications' }, pickTimeoutOptions(options)));
   }
 
-  create(options: { isin: string; price: number; currency?: string; crossing?: string; note?: string; timeoutMs?: number } & Record<string, unknown>): Promise<unknown> {
-    const { timeoutMs, currency = 'EUR', price, ...rest } = options;
-    const payload = { ...rest, price: { value: String(price), currency } };
+  create(options: { isin: string; price: number; timeoutMs?: number }): Promise<unknown> {
+    const { timeoutMs, isin, price } = options;
+    const payload = { instrumentId: isin, targetPrice: price };
     return this.rawCreate(payload, timeoutMs === undefined ? {} : { timeoutMs });
   }
 
@@ -1155,14 +1098,15 @@ export class InstrumentsApi {
 }
 
 export class TradingApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly raw: RawApi,
-    private readonly validateRaw: RawSchemaValidator,
-    private readonly getSecuritiesAccountNumber?: () => string | undefined,
-    private readonly setSecuritiesAccountNumber?: (value: string) => void,
-    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
-  ) {}
+  private readonly http: HttpClient;
+  private readonly raw: RawApi;
+  private readonly validateRaw: RawSchemaValidator;
+
+  constructor(private readonly runtime: ClientRuntime) {
+    this.http = runtime.http;
+    this.raw = runtime.raw;
+    this.validateRaw = runtime.validateRaw;
+  }
 
   priceForOrder(options: { isin: string; exchangeId: string; side: string; unit?: string }, queryOptions: { timeoutMs?: number } = {}): Promise<unknown> {
     return validated(this.validateRaw, 'trading.priceForOrder', this.raw.query({ type: 'priceForOrderV2', unit: 'EUR', ...options }, pickTimeoutOptions(queryOptions)));
@@ -1201,224 +1145,18 @@ export class TradingApi {
   }
 
   private resolveSecuritiesAccountNumber(): Promise<string> {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
-  }
-}
-
-export class DiscoveryApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly validateRaw: RawSchemaValidator,
-  ) {}
-
-  async exchangeDetails(): Promise<ExchangeDetails[]> {
-    return arrayPayload(await this.rawExchangeDetails()).map(normalizeExchangeDetails);
-  }
-
-  rawExchangeDetails(): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.exchangeDetails', this.http.request('GET', '/api-gateway/instrument-universe/api/v1/exchanges-details', undefined, { includeMaintenanceWindow: false }));
-  }
-
-  async exchangeSchedule(exchange: string): Promise<ExchangeSchedule> {
-    return normalizeExchangeSchedule(await this.rawExchangeSchedule(exchange));
-  }
-
-  rawExchangeSchedule(exchange: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.exchangeSchedule', this.http.request('GET', `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`));
-  }
-
-  async instrumentStatus(isin: string, exchange: string): Promise<InstrumentStatus> {
-    return normalizeInstrumentStatus(await this.rawInstrumentStatus(isin, exchange));
-  }
-
-  rawInstrumentStatus(isin: string, exchange: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.instrumentStatus', this.http.request('GET', `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`));
-  }
-
-  watchlists(): Promise<unknown> {
-    return this.rawWatchlists();
-  }
-
-  async cloudWatchlist(options: { pageSize?: number } = {}): Promise<Watchlist | undefined> {
-    const watchlist = arrayPayload(await this.rawWatchlists())[0];
-    if (!watchlist) return undefined;
-    const normalized = normalizeWatchlist(watchlist);
-    if (!normalized.id) return normalized;
-    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
-    return normalizeWatchlist(watchlist, items);
-  }
-
-  rawWatchlistItems(watchlistId: string, options: { pageSize?: number } = {}): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.items', this.http.request(
-      'GET',
-      `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`,
-      undefined,
-      { pageSize: options.pageSize ?? 200 },
-    ));
-  }
-
-  rawWatchlists(): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists', this.http.request('GET', '/api-gateway/watchlists/api/v2/watchlists'));
-  }
-
-  createWatchlist(name: string): Promise<unknown> {
-    return this.rawCreateWatchlist(name);
-  }
-
-  rawCreateWatchlist(name: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.create', this.http.request('POST', '/api-gateway/watchlists/api/v2/watchlists', { name }));
-  }
-
-  renameWatchlist(watchlistId: string, name: string): Promise<unknown> {
-    return this.rawRenameWatchlist(watchlistId, name);
-  }
-
-  rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.rename', this.http.request('PUT', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, { name }));
-  }
-
-  deleteWatchlist(watchlistId: string): Promise<unknown> {
-    return this.rawDeleteWatchlist(watchlistId);
-  }
-
-  rawDeleteWatchlist(watchlistId: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.delete', this.http.request('DELETE', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`));
-  }
-
-  addWatchlistItem(watchlistId: string, instrumentId: string, options: Record<string, unknown> = {}): Promise<unknown> {
-    return this.rawAddWatchlistItem(watchlistId, instrumentId, options);
-  }
-
-  rawAddWatchlistItem(watchlistId: string, instrumentId: string, options: Record<string, unknown> = {}): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.addItem', this.http.request('POST', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, { instrument_id: instrumentId, item_rank: -1, ...options }));
-  }
-
-  removeWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown> {
-    return this.rawRemoveWatchlistItem(watchlistId, instrumentId);
-  }
-
-  rawRemoveWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.removeItem', this.http.request('DELETE', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`));
-  }
-
-  screeners(): Promise<unknown> {
-    return this.rawScreeners();
-  }
-
-  rawScreeners(): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.screeners', this.http.request('GET', '/api-gateway/screeners/api/v2/screeners'));
-  }
-
-  screenerOptions(): Promise<unknown> {
-    return this.rawScreenerOptions();
-  }
-
-  rawScreenerOptions(): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.screenerOptions', this.http.request('GET', '/api-gateway/screeners/api/v2/screeners/options'));
-  }
-
-  userPreferences(): Promise<unknown> {
-    return this.rawUserPreferences();
-  }
-
-  rawUserPreferences(): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.userPreferences', this.http.request('GET', '/api-gateway/pro-trading/api/v1/user-preferences'));
-  }
-}
-
-export class DocumentsApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly validateRaw: RawSchemaValidator,
-  ) {}
-
-  documents(): Promise<unknown> {
-    return this.rawDocuments();
-  }
-
-  rawDocuments(): Promise<unknown> {
-    return validated(this.validateRaw, 'documents.documents', this.http.request('GET', '/api/v1/documents/all'));
-  }
-}
-
-export class TaxApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly validateRaw: RawSchemaValidator,
-  ) {}
-
-  taxInformation(): Promise<unknown> {
-    return this.rawTaxInformation();
-  }
-
-  rawTaxInformation(): Promise<unknown> {
-    return validated(this.validateRaw, 'tax.taxInformation', this.http.request('GET', '/api/v1/taxes/information'));
-  }
-
-  exemptionOrder(): Promise<unknown> {
-    return this.rawExemptionOrder();
-  }
-
-  rawExemptionOrder(): Promise<unknown> {
-    return validated(this.validateRaw, 'tax.exemptionOrder', this.http.request('GET', '/api/v1/taxes/exemptionorders'));
-  }
-
-  taxResidencies(): Promise<unknown> {
-    return this.rawTaxResidencies();
-  }
-
-  rawTaxResidencies(): Promise<unknown> {
-    return validated(this.validateRaw, 'tax.taxResidencies', this.http.request('GET', '/api/v1/auth/account/change/taxresidencies'));
-  }
-
-  taxResidencyCountries(): Promise<unknown> {
-    return this.rawTaxResidencyCountries();
-  }
-
-  rawTaxResidencyCountries(): Promise<unknown> {
-    return validated(this.validateRaw, 'tax.taxResidencyCountries', this.http.request('GET', '/api/v1/country/taxresidency'));
-  }
-}
-
-export class PaymentsApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly validateRaw: RawSchemaValidator,
-  ) {}
-
-  paymentMethods(): Promise<unknown> {
-    return this.rawPaymentMethods();
-  }
-
-  rawPaymentMethods(): Promise<unknown> {
-    return validated(this.validateRaw, 'payments.paymentMethods', this.http.request('GET', '/api/v2/payment/methods'));
-  }
-
-  iban(): Promise<unknown> {
-    return this.rawIban();
-  }
-
-  rawIban(): Promise<unknown> {
-    return validated(this.validateRaw, 'payments.iban', this.http.request('GET', '/api/v1/auth/account/iban'));
-  }
-
-  interestDetails(): Promise<unknown> {
-    return this.rawInterestDetails();
-  }
-
-  rawInterestDetails(): Promise<unknown> {
-    return validated(this.validateRaw, 'payments.interestDetails', this.http.request('GET', '/api/v1/interest/details'));
+    return this.runtime.resolveSecuritiesAccountNumber();
   }
 }
 
 export class WebApi {
-  constructor(
-    private readonly http: HttpClient,
-    private readonly raw: RawApi,
-    private readonly getSecuritiesAccountNumber?: () => string | undefined,
-    private readonly setSecuritiesAccountNumber?: (value: string) => void,
-    private readonly resolveSecuritiesAccountNumberFallback?: () => Promise<string | undefined>,
-  ) {}
+  private readonly http: HttpClient;
+  private readonly raw: RawApi;
+
+  constructor(private readonly runtime: ClientRuntime) {
+    this.http = runtime.http;
+    this.raw = runtime.raw;
+  }
 
   request<T = unknown>(
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
@@ -1628,7 +1366,7 @@ export class WebApi {
   }
 
   private async withSecAccNo(secAccNo: string | undefined, fn: (secAccNo: string) => Promise<unknown>): Promise<unknown> {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, undefined, this.resolveSecuritiesAccountNumberFallback);
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return fn(accountNumber);
   }
 }

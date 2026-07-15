@@ -1381,6 +1381,405 @@ function dedupeCandles(candles) {
   return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
 }
 
+// src/schemas/registry.ts
+import { z } from "zod";
+var scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+var jsonValue = z.lazy(() => z.union([scalar, z.array(jsonValue), z.record(z.string(), jsonValue)]));
+var jsonRecord = z.record(z.string(), jsonValue);
+var emptyObject = z.strictObject({});
+var optionalNullableString = z.string().nullable().optional();
+var optionalNullableNumber = z.number().nullable().optional();
+var optionalNullableBoolean = z.boolean().nullable().optional();
+var errorItemSchema = z.strictObject({
+  errorCode: optionalNullableString,
+  errorField: optionalNullableString,
+  errorMessage: optionalNullableString,
+  meta: jsonValue.optional()
+});
+var emptyOrErrorResponse = z.union([
+  emptyObject,
+  z.strictObject({ errors: z.array(errorItemSchema) })
+]);
+var availableCashItemSchema = z.strictObject({
+  accountNumber: z.string(),
+  currencyId: z.string(),
+  amount: z.number()
+});
+var accountPairSchema = z.strictObject({
+  securitiesAccountNumber: z.string(),
+  cashAccountNumber: z.string().optional(),
+  accountProductType: z.string().optional()
+});
+var normalizedArrayWrappers = z.union([
+  z.array(jsonValue),
+  z.strictObject({ data: z.array(jsonValue) }),
+  z.strictObject({ items: z.array(jsonValue) }),
+  z.strictObject({ results: z.array(jsonValue) }),
+  z.strictObject({ results: z.array(jsonValue), resultCount: z.number().optional(), correlationId: z.string().optional() }),
+  z.strictObject({ orders: z.array(jsonValue) }),
+  z.strictObject({ positions: z.array(jsonValue) }),
+  z.strictObject({ assets: z.array(jsonValue) }),
+  z.strictObject({ derivatives: z.array(jsonValue) }),
+  z.strictObject({ subscriptions: z.array(jsonValue) }),
+  z.strictObject({ activities: z.array(jsonValue) }),
+  z.strictObject({ timeline: z.array(jsonValue) }),
+  z.strictObject({ actions: z.array(jsonValue) }),
+  z.strictObject({ priceAlarms: z.array(jsonValue) }),
+  z.strictObject({ notifications: z.array(jsonValue) }),
+  z.strictObject({ watchlists: z.array(jsonValue) }),
+  z.strictObject({ screeners: z.array(jsonValue) }),
+  z.strictObject({ documents: z.array(jsonValue) }),
+  z.strictObject({ trades: z.array(jsonValue) }),
+  z.strictObject({ destinations: z.array(jsonValue) }),
+  z.strictObject({ categories: z.array(jsonValue) }),
+  z.strictObject({ accounts: z.array(jsonValue) }),
+  z.strictObject({ obj: z.strictObject({ items: z.array(jsonValue) }) })
+]);
+var orderDestinationsResponseSchema = z.union([
+  normalizedArrayWrappers,
+  z.strictObject({
+    destinations: z.array(jsonValue),
+    preferredMarketDataProvider: optionalNullableString,
+    preferredOrderDestination: optionalNullableString
+  })
+]);
+var accountSchema = z.object({
+  account: jsonValue.optional(),
+  phoneNumber: z.string().optional(),
+  jurisdiction: z.string().optional(),
+  name: jsonRecord.optional(),
+  email: jsonRecord.optional(),
+  postalAddress: jsonRecord.optional(),
+  cashAccount: jsonRecord.optional(),
+  referenceAccount: jsonRecord.optional(),
+  referenceAccountV2: jsonRecord.optional(),
+  referenceAccountList: z.array(jsonRecord).optional(),
+  securitiesAccountNumber: z.string().optional(),
+  experience: jsonRecord.optional(),
+  taxExemptionOrder: jsonRecord.optional(),
+  personId: z.string().optional(),
+  duplicateTradingEmail: optionalNullableBoolean,
+  birthdate: optionalNullableString,
+  birthplace: jsonValue.optional(),
+  mainNationality: optionalNullableString,
+  additionalNationalities: z.array(jsonValue).optional(),
+  mainTaxResidency: jsonValue.optional(),
+  usTaxResidency: optionalNullableBoolean,
+  additionalTaxResidencies: z.array(jsonValue).optional(),
+  taxInformationSyncTimestamp: z.union([z.string(), z.number(), z.null()]).optional(),
+  registrationAccount: jsonValue.optional(),
+  referralDetails: jsonValue.optional(),
+  supportDocuments: jsonValue.optional(),
+  tinFormat: jsonValue.optional()
+}).strict();
+var sessionSchema = z.union([
+  z.undefined(),
+  emptyObject,
+  z.object({
+    session: jsonValue.optional(),
+    connectionToken: z.string().optional(),
+    expiresAt: optionalNullableString,
+    status: optionalNullableString
+  }).strict()
+]);
+var priceAlarmMutationSchema = z.union([
+  emptyObject,
+  z.strictObject({ id: z.string() }),
+  z.strictObject({ status: z.string().optional(), alarmId: z.string() }),
+  z.strictObject({ priceAlarmId: z.string() }),
+  z.strictObject({ status: z.string().optional(), id: z.string().optional() })
+]);
+var watchlistMutationSchema = z.union([
+  z.undefined(),
+  emptyObject,
+  jsonRecord
+]);
+var schemaRegistry = [
+  entry("auth.session", "Auth web session", "rest", "read", "GET /api/v1/auth/web/session", sessionSchema),
+  entry("auth.account", "Auth account", "rest", "read", "GET /api/v2/auth/account", accountSchema),
+  entry("account.personalDetails", "Personal details", "rest", "read", "GET /api/v1/customer/personal-details", jsonRecord),
+  entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", jsonRecord),
+  entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord, { live: { optionalStatuses: [404, 500] } }),
+  entry("boards.list", "Boards list", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards", normalizedArrayWrappers),
+  entry("boards.detail", "Board detail", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards/{boardId}", jsonRecord),
+  entry("assets.search", "Asset search", "websocket", "read", "neonSearch", normalizedArrayWrappers, { variants: ["stock", "crypto", "etf -> fund", "mutualFund", "privateFund", "bond", "synthetic"] }),
+  entry("assets.get", "Instrument detail", "websocket", "read", "instrument", jsonRecord),
+  entry("derivatives.search", "Derivative search", "websocket", "read", "neonSearch type=derivative", normalizedArrayWrappers),
+  entry("derivatives.listForUnderlying", "Derivatives for underlying", "websocket", "read", "derivatives", normalizedArrayWrappers),
+  entry("orders.all", "Orders list", "rest", "read", "GET /web-trading-gateway/api/customer/v1/orders", normalizedArrayWrappers),
+  entry("orders.mutualFunds", "Mutual fund orders", "rest", "read", "GET /api-gateway/mutual-funds/api/v1/orders", normalizedArrayWrappers),
+  entry("orders.privateMarkets", "Private market orders", "rest", "read", "GET /api/v1/private-markets/orders/all", normalizedArrayWrappers),
+  entry("orders.orderUpdates", "Order update stream", "websocket", "read", "orderUpdates", jsonValue, { live: { sample: "stream" } }),
+  entry("orders.fees", "Order fee preview", "websocket", "read", "orderFeesV2", jsonValue),
+  entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", jsonValue),
+  entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", jsonValue),
+  entry("portfolio.current", "Portfolio positions", "websocket", "read", "compactPortfolioByTypeV2", z.union([jsonRecord, normalizedArrayWrappers])),
+  entry("portfolio.cash", "Available cash", "websocket", "read", "availableCash", z.array(availableCashItemSchema)),
+  entry("portfolio.markToMarketValue", "Portfolio status", "websocket", "read", "portfolioStatus", jsonValue),
+  entry("portfolio.savingsPlans", "Savings plans", "websocket", "read", "savingsPlans", normalizedArrayWrappers),
+  entry("portfolio.privateMarketsPositions", "Private markets positions", "websocket", "read", "privateMarketsPositions", jsonValue),
+  entry("portfolio.portfolioChart", "Portfolio chart", "rest", "read", "GET /api-gateway/portfolio-chart/v2/chart", jsonValue),
+  entry("market.subscriptions", "Market subscriptions", "websocket", "read", "accountPairs", z.union([z.array(accountPairSchema), normalizedArrayWrappers])),
+  entry("market.candles", "Price history candles", "websocket", "read", "aggregateHistoryLightV2", jsonValue, { variants: ["stock", "crypto"] }),
+  entry("market.quote", "Market quote", "websocket", "read", "ticker", jsonValue, { variants: ["stock", "crypto"] }),
+  entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
+  entry("market.availableL2Books", "Available L2 books", "websocket", "read", "instrument", jsonValue),
+  entry("market.l2OrderBook", "L2 order book stream", "websocket", "read", "L2", jsonValue, { live: { sample: "stream" } }),
+  entry("timeline.list", "Timeline activity", "websocket", "read", "timelineActivityLog", normalizedArrayWrappers),
+  entry("timeline.actions", "Timeline actions", "websocket", "read", "timelineActionsV2", normalizedArrayWrappers),
+  entry("timeline.detail", "Timeline detail", "websocket", "read", "timelineDetailV2", jsonRecord),
+  entry("priceAlarms.list", "Price alarms", "websocket", "read", "priceAlarms", normalizedArrayWrappers),
+  entry("priceAlarms.notifications", "Price alarm notifications", "websocket", "read", "priceAlarmNotifications", normalizedArrayWrappers),
+  entry("priceAlarms.create", "Create price alarm", "websocket", "lowRiskMutation", "createPriceAlarm", priceAlarmMutationSchema, { live: { sample: "cleanup" } }),
+  entry("priceAlarms.cancel", "Cancel price alarm", "websocket", "lowRiskMutation", "cancelPriceAlarm", priceAlarmMutationSchema, { live: { sample: "cleanup" } }),
+  entry("instruments.news", "Instrument news", "websocket", "read", "neonNews", normalizedArrayWrappers),
+  entry("instruments.etfDetails", "ETF details", "websocket", "read", "etfDetails", jsonValue),
+  entry("instruments.etfComposition", "ETF composition", "websocket", "read", "etfComposition", jsonValue),
+  entry("instruments.fundDetails", "Fund details", "websocket", "read", "mutualFundDetails", jsonValue),
+  entry("instruments.fundComposition", "Fund composition", "websocket", "read", "mutualFundComposition", jsonValue),
+  entry("instruments.cryptoDetails", "Crypto details", "websocket", "read", "cryptoDetails", jsonValue),
+  entry("instruments.yieldToMaturity", "Yield to maturity", "websocket", "read", "yieldToMaturity", jsonValue),
+  entry("trading.priceForOrder", "Price for order quote", "websocket", "read", "priceForOrderV2", jsonValue),
+  entry("trading.availableSize", "Available size", "websocket", "read", "availableSize", jsonValue),
+  entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", orderDestinationsResponseSchema),
+  entry("trading.trades", "Trades", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades", normalizedArrayWrappers),
+  entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", jsonValue),
+  entry("discovery.exchangeDetails", "Exchange details", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges-details", normalizedArrayWrappers),
+  entry("discovery.exchangeSchedule", "Exchange schedule", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule", jsonRecord),
+  entry("discovery.instrumentStatus", "Instrument status", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}", jsonRecord),
+  entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", jsonValue),
+  entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", jsonValue),
+  entry("discovery.watchlists.clone", "Clone watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone", watchlistMutationSchema, { live: { sample: "cleanup", optionalStatuses: [404] } }),
+  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup", optionalStatuses: [404] } }),
+  entry("discovery.watchlists.delete", "Delete watchlist", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
+  entry("discovery.watchlists.addItem", "Add watchlist item", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", watchlistMutationSchema, { live: { sample: "cleanup" } }),
+  entry("discovery.watchlists.removeItem", "Remove watchlist item", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
+  entry("discovery.screeners", "Screeners", "rest", "read", "GET /api-gateway/screeners/api/v2/screeners", jsonValue),
+  entry("discovery.screenerOptions", "Screener options", "rest", "read", "GET /api-gateway/screeners/api/v2/screeners/options", jsonValue),
+  entry("discovery.userPreferences", "User preferences", "rest", "read", "GET /api-gateway/pro-trading/api/v1/user-preferences", jsonValue),
+  entry("documents.documents", "Documents", "rest", "read", "GET /api/v1/documents/all", jsonValue),
+  entry("tax.taxInformation", "Tax information", "rest", "read", "GET /api/v1/taxes/information", jsonValue),
+  entry("tax.exemptionOrder", "Tax exemption order", "rest", "read", "GET /api/v1/taxes/exemptionorders", jsonValue),
+  entry("tax.taxResidencies", "Tax residencies", "rest", "read", "GET /api/v1/auth/account/change/taxresidencies", jsonValue, { live: { optionalStatuses: [404, 500] } }),
+  entry("tax.taxResidencyCountries", "Tax residency countries", "rest", "read", "GET /api/v1/country/taxresidency", jsonValue),
+  entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
+  entry("payments.iban", "IBAN", "rest", "read", "GET /api/v1/auth/account/iban", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
+  entry("payments.interestDetails", "Interest details", "rest", "read", "GET /api/v1/interest/details", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
+  entry("blocked.orderMutations", "Unsupported legacy order change/confirm resources", "websocket", "blockedMutation", "confirmOrder|changeOrder", jsonValue),
+  entry("blocked.bankTransfers", "Payouts and bank transfers", "rest", "blockedMutation", "POST /api/v1/payout and payment authorization paths", jsonValue),
+  entry("blocked.documentAcceptance", "Document acceptance", "rest", "blockedMutation", "api/v1/documents/group/accept and terms accept paths", jsonValue),
+  entry("blocked.accountSecurity", "Account identity, tax, PIN, login security mutations", "rest", "blockedMutation", "change account/tax/security paths", jsonValue)
+];
+var schemasByName = new Map(schemaRegistry.map((item) => [item.name, item]));
+function validateRawResponse(schemaName, value) {
+  const entry2 = schemasByName.get(schemaName);
+  if (!entry2) throw new Error(`Unknown Trade Republic schema: ${schemaName}`);
+  const result = entry2.responseSchema.safeParse(value);
+  if (result.success) return result.data;
+  throw new TradeRepublicSchemaError(
+    `Trade Republic schema validation failed for ${schemaName}`,
+    schemaName,
+    result.error.issues,
+    summarizeRaw(value),
+    result.error
+  );
+}
+function schemaCatalogMarkdown() {
+  const lines = [
+    "# Trade Republic API Schemas",
+    "",
+    "Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Republic responses before SDK normalization.",
+    "",
+    "| Name | Risk | Transport | Request | Variants |",
+    "| --- | --- | --- | --- | --- |"
+  ];
+  for (const entry2 of schemaRegistry) {
+    lines.push(`| \`${entry2.name}\` | \`${entry2.risk}\` | \`${entry2.transport}\` | \`${entry2.request.replaceAll("|", "\\|")}\` | ${entry2.variants?.join(", ") ?? ""} |`);
+  }
+  lines.push("");
+  lines.push("`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.");
+  return `${lines.join("\n")}
+`;
+}
+function entry(name, title, transport, risk, request, responseSchema, options = {}) {
+  return { name, title, transport, risk, request, requestSchema: jsonValue, responseSchema, ...options };
+}
+function summarizeRaw(value) {
+  if (Array.isArray(value)) return { kind: "array", length: value.length, first: summarizeRaw(value[0]) };
+  if (!value || typeof value !== "object") return value;
+  const record = value;
+  return {
+    kind: "object",
+    keys: Object.keys(record).slice(0, 40)
+  };
+}
+
+// src/resource.ts
+var ResourceClient = class {
+  constructor(http, endpoints, raw, validateRaw = validateRawResponse) {
+    this.http = http;
+    this.endpoints = endpoints;
+    this.raw = raw;
+    this.validateRaw = validateRaw;
+  }
+  http;
+  endpoints;
+  raw;
+  validateRaw;
+  async query(spec, params) {
+    const raw = spec.resource ? await this.raw.query(spec.resource(params)) : await this.http.request(
+      spec.method ?? "GET",
+      this.endpoints.resolve(requiredEndpoint(spec), spec.pathParams?.(params)),
+      spec.body?.(params),
+      spec.query?.(params)
+    );
+    const validatedRaw = spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw;
+    return spec.normalize(validatedRaw, params);
+  }
+  stream(spec, params) {
+    return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params))).map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
+  }
+};
+function requiredEndpoint(spec) {
+  if (!spec.endpoint) throw new Error("Query spec needs either endpoint or resource.");
+  return spec.endpoint;
+}
+function toSubscription(source, close) {
+  return {
+    close() {
+      if ("close" in source && typeof source.close === "function") source.close();
+      close?.();
+    },
+    map(mapper) {
+      const parent = this;
+      return toSubscription(mapAsync(parent, mapper), () => parent.close());
+    },
+    [Symbol.asyncIterator]() {
+      return source[Symbol.asyncIterator]();
+    }
+  };
+}
+async function* mapAsync(source, mapper) {
+  for await (const item of source) yield mapper(item);
+}
+
+// src/operations.ts
+var OperationClient = class {
+  constructor(http, raw, validateRaw, endpoints) {
+    this.http = http;
+    this.raw = raw;
+    this.validateRaw = validateRaw;
+    this.endpoints = endpoints;
+  }
+  http;
+  raw;
+  validateRaw;
+  endpoints;
+  async execute(operation, params) {
+    return operation.normalize(await this.executeRaw(operation, params), params);
+  }
+  async executeRaw(operation, params) {
+    const timeoutMs = operation.transport === "mapper-query" ? operation.timeoutMs?.(params) : void 0;
+    const raw = operation.transport === "rest" ? await this.http.request(
+      operation.method ?? "GET",
+      this.resolvePath(operation, params),
+      operation.body?.(params),
+      operation.query?.(params)
+    ) : await this.raw.query(
+      operation.payload(params),
+      timeoutMs === void 0 ? {} : { timeoutMs }
+    );
+    return operation.schemaName ? this.validateRaw(operation.schemaName, raw) : raw;
+  }
+  stream(operation, params) {
+    return toSubscription(this.raw.subscribeResource(operation.payload(params))).map((raw) => operation.normalize(operation.schemaName ? this.validateRaw(operation.schemaName, raw) : raw, params));
+  }
+  resolvePath(operation, params) {
+    if (operation.endpoint) {
+      if (!this.endpoints) throw new Error(`Operation ${operation.name} needs an endpoint resolver.`);
+      return this.endpoints.resolve(operation.endpoint, operation.pathParams?.(params));
+    }
+    if (!operation.path) throw new Error(`REST operation ${operation.name} needs a path or endpoint.`);
+    return typeof operation.path === "function" ? operation.path(params) : operation.path;
+  }
+};
+var identity = (value) => value;
+
+// src/client-runtime.ts
+var ClientRuntime = class {
+  constructor(http, endpoints, raw, validateRaw, accountIdentity) {
+    this.http = http;
+    this.endpoints = endpoints;
+    this.raw = raw;
+    this.validateRaw = validateRaw;
+    this.accountIdentity = accountIdentity;
+    this.resources = new ResourceClient(http, endpoints, raw, validateRaw);
+    this.operations = new OperationClient(http, raw, validateRaw, endpoints);
+  }
+  http;
+  endpoints;
+  raw;
+  validateRaw;
+  accountIdentity;
+  resources;
+  operations;
+  get securitiesAccountNumber() {
+    return this.accountIdentity.get();
+  }
+  rememberSecuritiesAccountNumber(value) {
+    this.accountIdentity.set(value);
+  }
+  async resolveSecuritiesAccountNumber(timeoutMs) {
+    const cached = this.accountIdentity.get();
+    try {
+      const accountPairs = await this.raw.query(
+        { type: "accountPairs" },
+        timeoutMs === void 0 ? {} : { timeoutMs }
+      );
+      const accountNumber2 = firstStringByKey(accountPairs, "securitiesAccountNumber");
+      if (accountNumber2) {
+        this.accountIdentity.set(accountNumber2);
+        return accountNumber2;
+      }
+    } catch {
+      if (cached) return cached;
+      const accountNumber2 = await this.accountIdentity.fallback?.();
+      if (accountNumber2) {
+        this.accountIdentity.set(accountNumber2);
+        return accountNumber2;
+      }
+      throw unavailableAccountNumber();
+    }
+    if (cached) return cached;
+    const accountNumber = await this.accountIdentity.fallback?.();
+    if (accountNumber) {
+      this.accountIdentity.set(accountNumber);
+      return accountNumber;
+    }
+    throw unavailableAccountNumber();
+  }
+};
+function firstStringByKey(value, key) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const match = firstStringByKey(item, key);
+      if (match) return match;
+    }
+    return void 0;
+  }
+  if (!value || typeof value !== "object") return void 0;
+  const record = value;
+  if (typeof record[key] === "string" && record[key].length > 0) return record[key];
+  for (const item of Object.values(record)) {
+    const match = firstStringByKey(item, key);
+    if (match) return match;
+  }
+  return void 0;
+}
+function unavailableAccountNumber() {
+  return new Error("Trade Republic securities account number was not available from accountPairs or account profile.");
+}
+
 // src/endpoints.ts
 var DEFAULT_ENDPOINTS = {
   "auth.qrChallenge": "/api/v2/auth/web/login/qr-challenges",
@@ -1420,6 +1819,301 @@ var EndpointResolver = class {
       path = path.replaceAll(`{${name}}`, encodeURIComponent(String(value)));
     }
     return path;
+  }
+};
+
+// src/operation-specs.ts
+var accountOperations = {
+  current: endpoint("auth.account", "auth.account"),
+  session: endpoint("auth.session", "auth.session"),
+  accountSettings: endpoint("auth.account", "auth.account"),
+  personalDetails: rest("account.personalDetails", "/api/v1/customer/personal-details"),
+  relationships: rest("account.relationships", "/api/v1/customer/relationships/detailed"),
+  cardsHome: rest("account.cardsHome", "/api/v1/card/cards/home")
+};
+var boardOperations = {
+  list: {
+    ...endpoint("boards.list", "boards.list"),
+    normalize: (raw) => arrayPayload(raw).map(normalizeBoard)
+  },
+  detail: {
+    transport: "rest",
+    name: "boards.detail",
+    schemaName: "boards.detail",
+    endpoint: "boards.detail",
+    pathParams: ({ boardId }) => ({ boardId }),
+    normalize: (raw) => normalizeBoard(raw)
+  }
+};
+var discoveryOperations = {
+  exchangeDetails: {
+    ...rest("discovery.exchangeDetails", "/api-gateway/instrument-universe/api/v1/exchanges-details"),
+    query: () => ({ includeMaintenanceWindow: false }),
+    normalize: (raw) => arrayPayload(raw).map(normalizeExchangeDetails)
+  },
+  exchangeSchedule: {
+    transport: "rest",
+    name: "discovery.exchangeSchedule",
+    schemaName: "discovery.exchangeSchedule",
+    path: ({ exchange }) => `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`,
+    normalize: (raw) => normalizeExchangeSchedule(raw)
+  },
+  instrumentStatus: {
+    transport: "rest",
+    name: "discovery.instrumentStatus",
+    schemaName: "discovery.instrumentStatus",
+    path: ({ isin, exchange }) => `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`,
+    normalize: (raw) => normalizeInstrumentStatus(raw)
+  },
+  watchlists: rest("discovery.watchlists", "/api-gateway/watchlists/api/v2/watchlists"),
+  watchlistItems: {
+    transport: "rest",
+    name: "discovery.watchlists.items",
+    schemaName: "discovery.watchlists.items",
+    path: ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`,
+    query: ({ pageSize }) => ({ pageSize: pageSize ?? 200 }),
+    normalize: identity
+  },
+  cloneWatchlist: mutation("discovery.watchlists.clone", "POST", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/clone`),
+  renameWatchlist: mutation("discovery.watchlists.rename", "PUT", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, ({ name }) => ({ name })),
+  deleteWatchlist: mutation("discovery.watchlists.delete", "DELETE", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`),
+  addWatchlistItem: mutation("discovery.watchlists.addItem", "POST", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, ({ instrumentId, options }) => ({ instrument_id: instrumentId, item_rank: -1, ...options })),
+  removeWatchlistItem: mutation("discovery.watchlists.removeItem", "DELETE", ({ watchlistId, instrumentId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`),
+  screeners: rest("discovery.screeners", "/api-gateway/screeners/api/v2/screeners"),
+  screenerOptions: rest("discovery.screenerOptions", "/api-gateway/screeners/api/v2/screeners/options"),
+  userPreferences: rest("discovery.userPreferences", "/api-gateway/pro-trading/api/v1/user-preferences")
+};
+var customerOperations = {
+  documents: rest("documents.documents", "/api/v1/documents/all"),
+  taxInformation: rest("tax.taxInformation", "/api/v1/taxes/information"),
+  exemptionOrder: rest("tax.exemptionOrder", "/api/v1/taxes/exemptionorders"),
+  taxResidencies: rest("tax.taxResidencies", "/api/v1/auth/account/change/taxresidencies"),
+  taxResidencyCountries: rest("tax.taxResidencyCountries", "/api/v1/country/taxresidency"),
+  paymentMethods: rest("payments.paymentMethods", "/api/v2/payment/methods"),
+  iban: rest("payments.iban", "/api/v1/auth/account/iban"),
+  interestDetails: rest("payments.interestDetails", "/api/v1/interest/details")
+};
+var operationCatalog = [
+  ...Object.values(accountOperations),
+  ...Object.values(boardOperations),
+  ...Object.values(discoveryOperations),
+  ...Object.values(customerOperations)
+];
+function rest(name, path) {
+  return { transport: "rest", name, schemaName: name, path, normalize: identity };
+}
+function endpoint(name, endpointKey) {
+  return { transport: "rest", name, schemaName: name, endpoint: endpointKey, normalize: identity };
+}
+function mutation(name, method, path, body) {
+  return {
+    transport: "rest",
+    name,
+    schemaName: name,
+    method,
+    path,
+    ...body ? { body } : {},
+    normalize: identity
+  };
+}
+
+// src/domains/account.ts
+var AccountApi = class {
+  constructor(operations) {
+    this.operations = operations;
+  }
+  operations;
+  current() {
+    return this.operations.executeRaw(accountOperations.current, {});
+  }
+  session() {
+    return this.operations.executeRaw(accountOperations.session, {});
+  }
+  accountSettings() {
+    return this.operations.executeRaw(accountOperations.accountSettings, {});
+  }
+  personalDetails() {
+    return this.operations.executeRaw(accountOperations.personalDetails, {});
+  }
+  relationships() {
+    return this.operations.executeRaw(accountOperations.relationships, {});
+  }
+  cardsHome() {
+    return this.operations.executeRaw(accountOperations.cardsHome, {});
+  }
+};
+var BoardsApi = class {
+  constructor(operations) {
+    this.operations = operations;
+  }
+  operations;
+  list() {
+    return this.operations.execute(boardOperations.list, {});
+  }
+  get(boardId) {
+    return this.operations.execute(boardOperations.detail, { boardId });
+  }
+};
+
+// src/domains/customer.ts
+var DocumentsApi = class {
+  constructor(operations) {
+    this.operations = operations;
+  }
+  operations;
+  documents() {
+    return this.rawDocuments();
+  }
+  rawDocuments() {
+    return this.operations.executeRaw(customerOperations.documents, {});
+  }
+};
+var TaxApi = class {
+  constructor(operations) {
+    this.operations = operations;
+  }
+  operations;
+  taxInformation() {
+    return this.rawTaxInformation();
+  }
+  rawTaxInformation() {
+    return this.operations.executeRaw(customerOperations.taxInformation, {});
+  }
+  exemptionOrder() {
+    return this.rawExemptionOrder();
+  }
+  rawExemptionOrder() {
+    return this.operations.executeRaw(customerOperations.exemptionOrder, {});
+  }
+  taxResidencies() {
+    return this.rawTaxResidencies();
+  }
+  rawTaxResidencies() {
+    return this.operations.executeRaw(customerOperations.taxResidencies, {});
+  }
+  taxResidencyCountries() {
+    return this.rawTaxResidencyCountries();
+  }
+  rawTaxResidencyCountries() {
+    return this.operations.executeRaw(customerOperations.taxResidencyCountries, {});
+  }
+};
+var PaymentsApi = class {
+  constructor(operations) {
+    this.operations = operations;
+  }
+  operations;
+  paymentMethods() {
+    return this.rawPaymentMethods();
+  }
+  rawPaymentMethods() {
+    return this.operations.executeRaw(customerOperations.paymentMethods, {});
+  }
+  iban() {
+    return this.rawIban();
+  }
+  rawIban() {
+    return this.operations.executeRaw(customerOperations.iban, {});
+  }
+  interestDetails() {
+    return this.rawInterestDetails();
+  }
+  rawInterestDetails() {
+    return this.operations.executeRaw(customerOperations.interestDetails, {});
+  }
+};
+
+// src/domains/discovery.ts
+var DiscoveryApi = class {
+  constructor(operations) {
+    this.operations = operations;
+  }
+  operations;
+  exchangeDetails() {
+    return this.operations.execute(discoveryOperations.exchangeDetails, {});
+  }
+  rawExchangeDetails() {
+    return this.operations.executeRaw(discoveryOperations.exchangeDetails, {});
+  }
+  exchangeSchedule(exchange) {
+    return this.operations.execute(discoveryOperations.exchangeSchedule, { exchange });
+  }
+  rawExchangeSchedule(exchange) {
+    return this.operations.executeRaw(discoveryOperations.exchangeSchedule, { exchange });
+  }
+  instrumentStatus(isin, exchange) {
+    return this.operations.execute(discoveryOperations.instrumentStatus, { isin, exchange });
+  }
+  rawInstrumentStatus(isin, exchange) {
+    return this.operations.executeRaw(discoveryOperations.instrumentStatus, { isin, exchange });
+  }
+  watchlists() {
+    return this.rawWatchlists();
+  }
+  async cloudWatchlist(options = {}) {
+    const watchlist = arrayPayload(await this.rawWatchlists())[0];
+    if (!watchlist) return void 0;
+    const normalized = normalizeWatchlist(watchlist);
+    if (!normalized.id) return normalized;
+    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
+    return normalizeWatchlist(watchlist, items);
+  }
+  rawWatchlistItems(watchlistId, options = {}) {
+    return this.operations.executeRaw(discoveryOperations.watchlistItems, {
+      watchlistId,
+      ...options.pageSize === void 0 ? {} : { pageSize: options.pageSize }
+    });
+  }
+  rawWatchlists() {
+    return this.operations.executeRaw(discoveryOperations.watchlists, {});
+  }
+  cloneWatchlist(watchlistId) {
+    return this.rawCloneWatchlist(watchlistId);
+  }
+  rawCloneWatchlist(watchlistId) {
+    return this.operations.executeRaw(discoveryOperations.cloneWatchlist, { watchlistId });
+  }
+  renameWatchlist(watchlistId, name) {
+    return this.rawRenameWatchlist(watchlistId, name);
+  }
+  rawRenameWatchlist(watchlistId, name) {
+    return this.operations.executeRaw(discoveryOperations.renameWatchlist, { watchlistId, name });
+  }
+  deleteWatchlist(watchlistId) {
+    return this.rawDeleteWatchlist(watchlistId);
+  }
+  rawDeleteWatchlist(watchlistId) {
+    return this.operations.executeRaw(discoveryOperations.deleteWatchlist, { watchlistId });
+  }
+  addWatchlistItem(watchlistId, instrumentId, options = {}) {
+    return this.rawAddWatchlistItem(watchlistId, instrumentId, options);
+  }
+  rawAddWatchlistItem(watchlistId, instrumentId, options = {}) {
+    return this.operations.executeRaw(discoveryOperations.addWatchlistItem, { watchlistId, instrumentId, options });
+  }
+  removeWatchlistItem(watchlistId, instrumentId) {
+    return this.rawRemoveWatchlistItem(watchlistId, instrumentId);
+  }
+  rawRemoveWatchlistItem(watchlistId, instrumentId) {
+    return this.operations.executeRaw(discoveryOperations.removeWatchlistItem, { watchlistId, instrumentId });
+  }
+  screeners() {
+    return this.rawScreeners();
+  }
+  rawScreeners() {
+    return this.operations.executeRaw(discoveryOperations.screeners, {});
+  }
+  screenerOptions() {
+    return this.rawScreenerOptions();
+  }
+  rawScreenerOptions() {
+    return this.operations.executeRaw(discoveryOperations.screenerOptions, {});
+  }
+  userPreferences() {
+    return this.rawUserPreferences();
+  }
+  rawUserPreferences() {
+    return this.operations.executeRaw(discoveryOperations.userPreferences, {});
   }
 };
 
@@ -1539,20 +2233,295 @@ async function parseResponseBody(response) {
   }
 }
 
+// src/mapper-connection.ts
+var MapperConnectionLostError = class extends TradeRepublicProtocolError {
+  constructor(event) {
+    super("WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.");
+    this.event = event;
+    this.name = "MapperConnectionLostError";
+  }
+  event;
+};
+var MapperConnection = class {
+  constructor(options) {
+    this.options = options;
+  }
+  options;
+  socket;
+  connected = false;
+  nextSubscriptionId = 1;
+  subscriptions = /* @__PURE__ */ new Map();
+  reconnectTimer;
+  expectedClose = false;
+  outage;
+  subscribe(message, options = {}) {
+    const state = {
+      id: this.nextSubscriptionId++,
+      message,
+      messages: [],
+      waiters: [],
+      closed: false,
+      replayOnReconnect: options.replayOnReconnect ?? true,
+      sent: false
+    };
+    this.subscriptions.set(state.id, state);
+    this.ensureSocket();
+    if (this.connected) this.sendSubscription(state);
+    return {
+      close: () => this.closeSubscription(state),
+      [Symbol.asyncIterator]: () => ({
+        next: () => this.next(state),
+        return: async () => {
+          this.closeSubscription(state);
+          return { done: true, value: void 0 };
+        }
+      })
+    };
+  }
+  /** Reconnects active subscriptions so a refreshed session supplies fresh headers. */
+  refreshHeaders() {
+    if (!this.socket || this.subscriptions.size === 0) return;
+    this.expectedClose = true;
+    this.connected = false;
+    this.socket.close(1e3, "session refreshed");
+    this.socket = void 0;
+    this.expectedClose = false;
+    this.ensureSocket();
+  }
+  close() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = void 0;
+    for (const state of this.subscriptions.values()) this.finish(state);
+    this.subscriptions.clear();
+    if (this.socket) {
+      this.expectedClose = true;
+      this.socket.close(1e3, "client closed");
+    }
+    this.socket = void 0;
+    this.connected = false;
+    this.expectedClose = false;
+    this.outage = void 0;
+  }
+  ensureSocket() {
+    if (this.socket || this.reconnectTimer || this.subscriptions.size === 0 && !this.outage) return;
+    const socket = this.options.websocketFactory(this.options.url, this.options.headers());
+    this.socket = socket;
+    addListener(socket, "open", () => {
+      if (this.socket !== socket) return;
+      const message = `connect 34 ${JSON.stringify(connectPayload())}`;
+      logWire("send", message);
+      socket.send(message);
+    });
+    addListener(socket, "message", (event) => {
+      if (this.socket !== socket) return;
+      this.handleMessage(event);
+    });
+    addListener(socket, "error", (error) => {
+      if (this.socket !== socket) return;
+      logWire("error", error);
+    });
+    addListener(socket, "close", (...args) => {
+      if (this.socket !== socket) return;
+      const wasConnected = this.connected;
+      this.socket = void 0;
+      this.connected = false;
+      if (this.expectedClose) return;
+      if (wasConnected && !this.outage) {
+        const disconnectedAtMs = Date.now();
+        const details = closeEventDetails(args);
+        const disconnectEvent = {
+          disconnectedAt: new Date(disconnectedAtMs).toISOString(),
+          reconnectDelayMs: Math.max(0, this.options.reconnectDelayMs ?? 250),
+          ...details.code !== void 0 ? { code: details.code } : {},
+          ...details.reason ? { reason: details.reason } : {}
+        };
+        this.outage = { disconnectedAtMs, disconnectEvent, reconnectAttempts: 0 };
+        invokeCallback(this.options.onDisconnect, disconnectEvent);
+      }
+      if (this.outage) this.failSentNonReplayableSubscriptions(this.outage.disconnectEvent);
+      if (this.subscriptions.size > 0 || this.outage) this.scheduleReconnect();
+    });
+  }
+  handleMessage(event) {
+    const message = socketText(event);
+    logWire("message", message);
+    if (message === "connected") {
+      this.connected = true;
+      for (const state2 of this.subscriptions.values()) {
+        if (!state2.sent || state2.replayOnReconnect) this.sendSubscription(state2);
+      }
+      const outage = this.outage;
+      if (outage) {
+        this.outage = void 0;
+        const reconnectedAtMs = Date.now();
+        invokeCallback(this.options.onReconnect, {
+          disconnectedAt: outage.disconnectEvent.disconnectedAt,
+          reconnectedAt: new Date(reconnectedAtMs).toISOString(),
+          downtimeMs: Math.max(0, reconnectedAtMs - outage.disconnectedAtMs),
+          reconnectAttempts: outage.reconnectAttempts
+        });
+        if (this.subscriptions.size === 0) this.closeIdleSocket();
+      }
+      return;
+    }
+    if (message.startsWith("echo") || message.startsWith("connected")) return;
+    const frame = parseSubscriptionFrame(message);
+    if (!frame) return;
+    const state = this.subscriptions.get(frame.id);
+    if (state) this.push(state, frame.payload);
+  }
+  sendSubscription(state) {
+    if (!this.socket || state.closed) return;
+    const message = `sub ${state.id} ${state.message}`;
+    logWire("send", message);
+    this.socket.send(message);
+    state.sent = true;
+  }
+  closeSubscription(state) {
+    if (state.closed) return;
+    if (this.connected && this.socket) {
+      try {
+        const message = `unsub ${state.id}`;
+        logWire("send", message);
+        this.socket.send(message);
+      } catch {
+      }
+    }
+    this.subscriptions.delete(state.id);
+    this.finish(state);
+    if (this.subscriptions.size === 0 && !this.outage) this.closeIdleSocket();
+  }
+  closeIdleSocket() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = void 0;
+    if (this.socket) {
+      const socket = this.socket;
+      this.expectedClose = true;
+      this.socket = void 0;
+      this.connected = false;
+      socket.close(1e3, "idle");
+      this.expectedClose = false;
+    }
+    this.nextSubscriptionId = 1;
+  }
+  scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    const delayMs = Math.max(0, this.options.reconnectDelayMs ?? 250);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = void 0;
+      if (this.outage) this.outage.reconnectAttempts += 1;
+      this.ensureSocket();
+    }, delayMs);
+    this.reconnectTimer.unref?.();
+  }
+  next(state) {
+    const value = state.messages.shift();
+    if (value !== void 0) return Promise.resolve({ done: false, value });
+    if (state.error !== void 0) return Promise.reject(state.error);
+    if (state.closed) return Promise.resolve({ done: true, value: void 0 });
+    return new Promise((resolve, reject) => state.waiters.push({ resolve, reject }));
+  }
+  push(state, value) {
+    const waiter = state.waiters.shift();
+    if (waiter) waiter.resolve({ done: false, value });
+    else state.messages.push(value);
+  }
+  finish(state) {
+    state.closed = true;
+    while (state.waiters.length) state.waiters.shift()?.resolve({ done: true, value: void 0 });
+  }
+  failSentNonReplayableSubscriptions(event) {
+    for (const state of [...this.subscriptions.values()]) {
+      if (!state.sent || state.replayOnReconnect) continue;
+      this.subscriptions.delete(state.id);
+      state.closed = true;
+      state.error = new MapperConnectionLostError(event);
+      while (state.waiters.length) state.waiters.shift()?.reject(state.error);
+    }
+  }
+};
+function invokeCallback(callback, event) {
+  if (!callback) return;
+  queueMicrotask(() => {
+    try {
+      Promise.resolve(callback(event)).catch((error) => logWire("error", error));
+    } catch (error) {
+      logWire("error", error);
+    }
+  });
+}
+function closeEventDetails(args) {
+  const first = args[0];
+  const code = typeof first === "number" ? first : first && typeof first === "object" && "code" in first && typeof first.code === "number" ? first.code : void 0;
+  const rawReason = typeof first === "number" ? args[1] : first && typeof first === "object" && "reason" in first ? first.reason : void 0;
+  const reason = Buffer.isBuffer(rawReason) ? rawReason.toString("utf8") : typeof rawReason === "string" ? rawReason : void 0;
+  return {
+    ...code !== void 0 ? { code } : {},
+    ...reason ? { reason } : {}
+  };
+}
+function addListener(socket, event, listener) {
+  if (socket.addEventListener) socket.addEventListener(event, listener);
+  else if (socket.on) socket.on(event, listener);
+  else throw new TradeRepublicProtocolError("Unsupported WebSocket implementation.");
+}
+function socketText(event) {
+  const data = typeof event === "object" && event !== null && "data" in event ? event.data : event;
+  return Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+}
+function parseSubscriptionFrame(text) {
+  const firstSpace = text.indexOf(" ");
+  if (firstSpace <= 0) return void 0;
+  const secondSpace = text.indexOf(" ", firstSpace + 1);
+  if (secondSpace <= firstSpace) return void 0;
+  const id = Number(text.slice(0, firstSpace));
+  if (!Number.isFinite(id)) return void 0;
+  const rawPayload = text.slice(secondSpace + 1);
+  try {
+    return { id, payload: JSON.parse(rawPayload) };
+  } catch {
+    return { id, payload: rawPayload };
+  }
+}
+function connectPayload() {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
+  return {
+    locale: "en",
+    platformId: "webtrading",
+    platformVersion: "web",
+    clientId: "app.traderepublic.com",
+    clientVersion: "web",
+    timezone,
+    secondsFromGMT: -(/* @__PURE__ */ new Date()).getTimezoneOffset() * 60
+  };
+}
+function logWire(direction, value) {
+  if (process.env.TR_SDK_LOG_WIRE !== "1") return;
+  console.log(`[handelsrepublik] websocket:${direction}`, value);
+}
+
 // src/raw.ts
-import EventEmitter from "eventemitter3";
 import WebSocket from "ws";
 var RawApi = class {
-  constructor(http, websocketUrl, websocketFactory, getSession) {
+  constructor(http, websocketUrl, websocketFactory, getSession, websocketMode = "shared", reconnectDelayMs = 250, onWebSocketDisconnect, onWebSocketReconnect) {
     this.http = http;
     this.websocketUrl = websocketUrl;
     this.websocketFactory = websocketFactory;
     this.getSession = getSession;
+    this.reconnectDelayMs = reconnectDelayMs;
+    this.onWebSocketDisconnect = onWebSocketDisconnect;
+    this.onWebSocketReconnect = onWebSocketReconnect;
+    this.sharedConnection = websocketMode === "shared" ? this.createConnection() : void 0;
   }
   http;
   websocketUrl;
   websocketFactory;
   getSession;
+  reconnectDelayMs;
+  onWebSocketDisconnect;
+  onWebSocketReconnect;
+  sharedConnection;
+  isolatedConnections = /* @__PURE__ */ new Set();
   request(request) {
     return this.http.request(request.method ?? "GET", request.path, request.body, request.query);
   }
@@ -1562,14 +2531,14 @@ var RawApi = class {
   subscribeLegacy(topic, payload = {}) {
     return this.openSubscription(JSON.stringify({ type: "subscribe", topic, payload, token: this.getSession()?.sessionToken }));
   }
-  subscribeResource(payload) {
-    return this.openSubscription(JSON.stringify({ ...payload, token: this.getSession()?.sessionToken }));
+  subscribeResource(payload, options = {}) {
+    return this.openSubscription(JSON.stringify({ ...payload, token: this.getSession()?.sessionToken }), options);
   }
   query(payload, options = {}) {
     return this.queryResource(payload, options);
   }
   async queryResource(payload, options = {}) {
-    const subscription = this.subscribeResource(payload);
+    const subscription = this.subscribeResource(payload, options);
     const iterator = subscription[Symbol.asyncIterator]();
     try {
       const result = await Promise.race([
@@ -1585,71 +2554,52 @@ var RawApi = class {
       subscription.close();
     }
   }
-  openSubscription(subscriptionMessage) {
-    const headers = this.http.headers();
-    const socket = this.websocketFactory(this.websocketUrl, headers);
-    const emitter = new EventEmitter();
-    const messages = [];
-    const waiters = [];
+  /** Reconnect active subscriptions after session or browser-context changes. */
+  refreshSession() {
+    this.sharedConnection?.refreshHeaders();
+    for (const connection of this.isolatedConnections) connection.refreshHeaders();
+  }
+  close() {
+    this.sharedConnection?.close();
+    for (const connection of this.isolatedConnections) connection.close();
+    this.isolatedConnections.clear();
+  }
+  openSubscription(subscriptionMessage, options = {}) {
+    if (this.sharedConnection) return this.sharedConnection.subscribe(subscriptionMessage, options);
+    const connection = this.createConnection();
+    this.isolatedConnections.add(connection);
+    const subscription = connection.subscribe(subscriptionMessage, options);
     let closed = false;
-    let connected = false;
-    let subscriptionId = 0;
-    const push = (message) => {
-      const waiter = waiters.shift();
-      if (waiter) waiter({ done: false, value: message });
-      else messages.push(message);
-      emitter.emit("message", message);
-    };
-    const finish = () => {
+    const close = () => {
+      if (closed) return;
       closed = true;
-      while (waiters.length) waiters.shift()?.({ done: true, value: void 0 });
+      subscription.close();
+      connection.close();
+      this.isolatedConnections.delete(connection);
     };
-    addListener(socket, "open", () => {
-      const message = `connect 34 ${JSON.stringify(connectPayload())}`;
-      logWire("send", message);
-      socket.send(message);
-    });
-    addListener(socket, "message", (event) => {
-      const message = parseSocketMessage(event);
-      logWire("message", message);
-      if (message === "connected") {
-        connected = true;
-        subscriptionId += 1;
-        const subscribeMessage = `sub ${subscriptionId} ${subscriptionMessage}`;
-        logWire("send", subscribeMessage);
-        socket.send(subscribeMessage);
-        return;
-      }
-      if (typeof message === "string" && (message.startsWith("echo") || message.startsWith("connected"))) return;
-      if (!connected) return;
-      push(message);
-    });
-    addListener(socket, "error", (event) => emitter.emit("error", event));
-    addListener(socket, "close", finish);
     return {
-      close() {
-        if (subscriptionId > 0) {
-          try {
-            const unsubscribeMessage = `unsub ${subscriptionId}`;
-            logWire("send", unsubscribeMessage);
-            socket.send(unsubscribeMessage);
-          } catch {
-          }
-        }
-        finish();
-        socket.close();
-      },
+      close,
       [Symbol.asyncIterator]() {
+        const iterator = subscription[Symbol.asyncIterator]();
         return {
-          next() {
-            const value = messages.shift();
-            if (value !== void 0) return Promise.resolve({ done: false, value });
-            if (closed) return Promise.resolve({ done: true, value: void 0 });
-            return new Promise((resolve) => waiters.push(resolve));
+          next: () => iterator.next(),
+          return: async () => {
+            close();
+            return { done: true, value: void 0 };
           }
         };
       }
     };
+  }
+  createConnection() {
+    return new MapperConnection({
+      url: this.websocketUrl,
+      websocketFactory: this.websocketFactory,
+      headers: () => this.http.headers(),
+      reconnectDelayMs: this.reconnectDelayMs,
+      onDisconnect: this.onWebSocketDisconnect,
+      onReconnect: this.onWebSocketReconnect
+    });
   }
 };
 function assertNoResourceErrors(value, request) {
@@ -1661,339 +2611,11 @@ function assertNoResourceErrors(value, request) {
 function defaultWebSocketFactory(url, headers) {
   return new WebSocket(url, { headers });
 }
-function addListener(socket, event, listener) {
-  if (socket.addEventListener) socket.addEventListener(event, listener);
-  else if (socket.on) socket.on(event, listener);
-  else throw new TradeRepublicProtocolError("Unsupported WebSocket implementation.");
-}
-function parseSocketMessage(event) {
-  const data = typeof event === "object" && event !== null && "data" in event ? event.data : event;
-  const text = Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
-  const framed = parseSubscriptionFrame(text);
-  if (framed) return framed.payload;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-function parseSubscriptionFrame(text) {
-  const firstSpace = text.indexOf(" ");
-  if (firstSpace <= 0) return void 0;
-  const secondSpace = text.indexOf(" ", firstSpace + 1);
-  if (secondSpace <= firstSpace) return void 0;
-  const id = Number(text.slice(0, firstSpace));
-  if (!Number.isFinite(id)) return void 0;
-  const type = text.slice(firstSpace + 1, secondSpace);
-  const rawPayload = text.slice(secondSpace + 1);
-  let payload = rawPayload;
-  try {
-    payload = JSON.parse(rawPayload);
-  } catch {
-  }
-  return { id, type, payload };
-}
-function connectPayload() {
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Etc/UTC";
-  return {
-    locale: "en",
-    platformId: "webtrading",
-    platformVersion: "web",
-    clientId: "app.traderepublic.com",
-    clientVersion: "web",
-    timezone,
-    secondsFromGMT: -(/* @__PURE__ */ new Date()).getTimezoneOffset() * 60
-  };
-}
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 function delay2(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-function logWire(direction, value) {
-  if (process.env.TR_SDK_LOG_WIRE !== "1") return;
-  console.log(`[handelsrepublik] websocket:${direction}`, value);
-}
-
-// src/schemas/registry.ts
-import { z } from "zod";
-var scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
-var jsonValue = z.lazy(() => z.union([scalar, z.array(jsonValue), z.record(z.string(), jsonValue)]));
-var jsonRecord = z.record(z.string(), jsonValue);
-var emptyObject = z.strictObject({});
-var optionalNullableString = z.string().nullable().optional();
-var optionalNullableNumber = z.number().nullable().optional();
-var optionalNullableBoolean = z.boolean().nullable().optional();
-var errorItemSchema = z.strictObject({
-  errorCode: optionalNullableString,
-  errorField: optionalNullableString,
-  errorMessage: optionalNullableString,
-  meta: jsonValue.optional()
-});
-var emptyOrErrorResponse = z.union([
-  emptyObject,
-  z.strictObject({ errors: z.array(errorItemSchema) })
-]);
-var availableCashItemSchema = z.strictObject({
-  accountNumber: z.string(),
-  currencyId: z.string(),
-  amount: z.number()
-});
-var accountPairSchema = z.strictObject({
-  securitiesAccountNumber: z.string(),
-  cashAccountNumber: z.string().optional(),
-  accountProductType: z.string().optional()
-});
-var normalizedArrayWrappers = z.union([
-  z.array(jsonValue),
-  z.strictObject({ data: z.array(jsonValue) }),
-  z.strictObject({ items: z.array(jsonValue) }),
-  z.strictObject({ results: z.array(jsonValue) }),
-  z.strictObject({ results: z.array(jsonValue), resultCount: z.number().optional(), correlationId: z.string().optional() }),
-  z.strictObject({ orders: z.array(jsonValue) }),
-  z.strictObject({ positions: z.array(jsonValue) }),
-  z.strictObject({ assets: z.array(jsonValue) }),
-  z.strictObject({ derivatives: z.array(jsonValue) }),
-  z.strictObject({ subscriptions: z.array(jsonValue) }),
-  z.strictObject({ activities: z.array(jsonValue) }),
-  z.strictObject({ timeline: z.array(jsonValue) }),
-  z.strictObject({ actions: z.array(jsonValue) }),
-  z.strictObject({ priceAlarms: z.array(jsonValue) }),
-  z.strictObject({ notifications: z.array(jsonValue) }),
-  z.strictObject({ watchlists: z.array(jsonValue) }),
-  z.strictObject({ screeners: z.array(jsonValue) }),
-  z.strictObject({ documents: z.array(jsonValue) }),
-  z.strictObject({ trades: z.array(jsonValue) }),
-  z.strictObject({ destinations: z.array(jsonValue) }),
-  z.strictObject({ categories: z.array(jsonValue) }),
-  z.strictObject({ accounts: z.array(jsonValue) }),
-  z.strictObject({ obj: z.strictObject({ items: z.array(jsonValue) }) })
-]);
-var orderDestinationsResponseSchema = z.union([
-  normalizedArrayWrappers,
-  z.strictObject({
-    destinations: z.array(jsonValue),
-    preferredMarketDataProvider: optionalNullableString,
-    preferredOrderDestination: optionalNullableString
-  })
-]);
-var accountSchema = z.object({
-  account: jsonValue.optional(),
-  phoneNumber: z.string().optional(),
-  jurisdiction: z.string().optional(),
-  name: jsonRecord.optional(),
-  email: jsonRecord.optional(),
-  postalAddress: jsonRecord.optional(),
-  cashAccount: jsonRecord.optional(),
-  referenceAccount: jsonRecord.optional(),
-  referenceAccountV2: jsonRecord.optional(),
-  referenceAccountList: z.array(jsonRecord).optional(),
-  securitiesAccountNumber: z.string().optional(),
-  experience: jsonRecord.optional(),
-  taxExemptionOrder: jsonRecord.optional(),
-  personId: z.string().optional(),
-  duplicateTradingEmail: optionalNullableBoolean,
-  birthdate: optionalNullableString,
-  birthplace: jsonValue.optional(),
-  mainNationality: optionalNullableString,
-  additionalNationalities: z.array(jsonValue).optional(),
-  mainTaxResidency: jsonValue.optional(),
-  usTaxResidency: optionalNullableBoolean,
-  additionalTaxResidencies: z.array(jsonValue).optional(),
-  taxInformationSyncTimestamp: z.union([z.string(), z.number(), z.null()]).optional(),
-  registrationAccount: jsonValue.optional(),
-  referralDetails: jsonValue.optional(),
-  supportDocuments: jsonValue.optional(),
-  tinFormat: jsonValue.optional()
-}).strict();
-var sessionSchema = z.union([
-  z.undefined(),
-  emptyObject,
-  z.object({
-    session: jsonValue.optional(),
-    connectionToken: z.string().optional(),
-    expiresAt: optionalNullableString,
-    status: optionalNullableString
-  }).strict()
-]);
-var priceAlarmMutationSchema = z.union([
-  emptyObject,
-  z.strictObject({ id: z.string() }),
-  z.strictObject({ priceAlarmId: z.string() }),
-  z.strictObject({ status: z.string().optional(), id: z.string().optional() })
-]);
-var watchlistMutationSchema = z.union([
-  emptyObject,
-  jsonRecord
-]);
-var schemaRegistry = [
-  entry("auth.session", "Auth web session", "rest", "read", "GET /api/v1/auth/web/session", sessionSchema),
-  entry("auth.account", "Auth account", "rest", "read", "GET /api/v2/auth/account", accountSchema),
-  entry("account.personalDetails", "Personal details", "rest", "read", "GET /api/v1/customer/personal-details", jsonRecord),
-  entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", jsonRecord),
-  entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord, { live: { optionalStatuses: [404, 500] } }),
-  entry("boards.list", "Boards list", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards", normalizedArrayWrappers),
-  entry("boards.detail", "Board detail", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards/{boardId}", jsonRecord),
-  entry("assets.search", "Asset search", "websocket", "read", "neonSearch", normalizedArrayWrappers, { variants: ["stock", "crypto", "fund", "etf", "bond"] }),
-  entry("assets.get", "Instrument detail", "websocket", "read", "instrument", jsonRecord),
-  entry("derivatives.search", "Derivative search", "websocket", "read", "neonSearch type=derivative", normalizedArrayWrappers),
-  entry("derivatives.listForUnderlying", "Derivatives for underlying", "websocket", "read", "derivatives", normalizedArrayWrappers),
-  entry("orders.all", "Orders list", "rest", "read", "GET /web-trading-gateway/api/customer/v1/orders", normalizedArrayWrappers),
-  entry("orders.mutualFunds", "Mutual fund orders", "rest", "read", "GET /api-gateway/mutual-funds/api/v1/orders", normalizedArrayWrappers),
-  entry("orders.privateMarkets", "Private market orders", "rest", "read", "GET /api/v1/private-markets/orders/all", normalizedArrayWrappers),
-  entry("orders.orderUpdates", "Order update stream", "websocket", "read", "orderUpdates", jsonValue, { live: { sample: "stream" } }),
-  entry("orders.fees", "Order fee preview", "websocket", "read", "orderFeesV2", jsonValue),
-  entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", jsonValue),
-  entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", jsonValue),
-  entry("portfolio.current", "Portfolio positions", "websocket", "read", "compactPortfolioByTypeV2", z.union([jsonRecord, normalizedArrayWrappers])),
-  entry("portfolio.cash", "Available cash", "websocket", "read", "availableCash", z.array(availableCashItemSchema)),
-  entry("portfolio.markToMarketValue", "Portfolio status", "websocket", "read", "portfolioStatus", jsonValue),
-  entry("portfolio.savingsPlans", "Savings plans", "websocket", "read", "savingsPlans", normalizedArrayWrappers),
-  entry("portfolio.privateMarketsPositions", "Private markets positions", "websocket", "read", "privateMarketsPositions", jsonValue),
-  entry("portfolio.portfolioChart", "Portfolio chart", "rest", "read", "GET /api-gateway/portfolio-chart/v2/chart", jsonValue),
-  entry("market.subscriptions", "Market subscriptions", "websocket", "read", "accountPairs", z.union([z.array(accountPairSchema), normalizedArrayWrappers])),
-  entry("market.candles", "Price history candles", "websocket", "read", "aggregateHistoryLightV2", jsonValue, { variants: ["stock", "crypto"] }),
-  entry("market.quote", "Market quote", "websocket", "read", "ticker", jsonValue, { variants: ["stock", "crypto"] }),
-  entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
-  entry("market.availableL2Books", "Available L2 books", "websocket", "read", "instrument", jsonValue),
-  entry("market.l2OrderBook", "L2 order book stream", "websocket", "read", "L2", jsonValue, { live: { sample: "stream" } }),
-  entry("timeline.list", "Timeline activity", "websocket", "read", "timelineActivityLog", normalizedArrayWrappers),
-  entry("timeline.actions", "Timeline actions", "websocket", "read", "timelineActionsV2", normalizedArrayWrappers),
-  entry("timeline.detail", "Timeline detail", "websocket", "read", "timelineDetailV2", jsonRecord),
-  entry("priceAlarms.list", "Price alarms", "websocket", "read", "priceAlarms", normalizedArrayWrappers),
-  entry("priceAlarms.notifications", "Price alarm notifications", "websocket", "read", "priceAlarmNotifications", normalizedArrayWrappers),
-  entry("priceAlarms.create", "Create price alarm", "websocket", "lowRiskMutation", "createPriceAlarm", priceAlarmMutationSchema, { live: { sample: "cleanup" } }),
-  entry("priceAlarms.cancel", "Cancel price alarm", "websocket", "lowRiskMutation", "cancelPriceAlarm", priceAlarmMutationSchema, { live: { sample: "cleanup" } }),
-  entry("instruments.news", "Instrument news", "websocket", "read", "neonNews", normalizedArrayWrappers),
-  entry("instruments.etfDetails", "ETF details", "websocket", "read", "etfDetails", jsonValue),
-  entry("instruments.etfComposition", "ETF composition", "websocket", "read", "etfComposition", jsonValue),
-  entry("instruments.fundDetails", "Fund details", "websocket", "read", "mutualFundDetails", jsonValue),
-  entry("instruments.fundComposition", "Fund composition", "websocket", "read", "mutualFundComposition", jsonValue),
-  entry("instruments.cryptoDetails", "Crypto details", "websocket", "read", "cryptoDetails", jsonValue),
-  entry("instruments.yieldToMaturity", "Yield to maturity", "websocket", "read", "yieldToMaturity", jsonValue),
-  entry("trading.priceForOrder", "Price for order quote", "websocket", "read", "priceForOrderV2", jsonValue),
-  entry("trading.availableSize", "Available size", "websocket", "read", "availableSize", jsonValue),
-  entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", orderDestinationsResponseSchema),
-  entry("trading.trades", "Trades", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades", normalizedArrayWrappers),
-  entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", jsonValue),
-  entry("discovery.exchangeDetails", "Exchange details", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges-details", normalizedArrayWrappers),
-  entry("discovery.exchangeSchedule", "Exchange schedule", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule", jsonRecord),
-  entry("discovery.instrumentStatus", "Instrument status", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}", jsonRecord),
-  entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", jsonValue),
-  entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", jsonValue),
-  entry("discovery.watchlists.create", "Create watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.delete", "Delete watchlist", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.addItem", "Add watchlist item", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.removeItem", "Remove watchlist item", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.screeners", "Screeners", "rest", "read", "GET /api-gateway/screeners/api/v2/screeners", jsonValue),
-  entry("discovery.screenerOptions", "Screener options", "rest", "read", "GET /api-gateway/screeners/api/v2/screeners/options", jsonValue),
-  entry("discovery.userPreferences", "User preferences", "rest", "read", "GET /api-gateway/pro-trading/api/v1/user-preferences", jsonValue),
-  entry("documents.documents", "Documents", "rest", "read", "GET /api/v1/documents/all", jsonValue),
-  entry("tax.taxInformation", "Tax information", "rest", "read", "GET /api/v1/taxes/information", jsonValue),
-  entry("tax.exemptionOrder", "Tax exemption order", "rest", "read", "GET /api/v1/taxes/exemptionorders", jsonValue),
-  entry("tax.taxResidencies", "Tax residencies", "rest", "read", "GET /api/v1/auth/account/change/taxresidencies", jsonValue, { live: { optionalStatuses: [404, 500] } }),
-  entry("tax.taxResidencyCountries", "Tax residency countries", "rest", "read", "GET /api/v1/country/taxresidency", jsonValue),
-  entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
-  entry("payments.iban", "IBAN", "rest", "read", "GET /api/v1/auth/account/iban", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
-  entry("payments.interestDetails", "Interest details", "rest", "read", "GET /api/v1/interest/details", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
-  entry("blocked.orderMutations", "Unsupported legacy order change/confirm resources", "websocket", "blockedMutation", "confirmOrder|changeOrder", jsonValue),
-  entry("blocked.bankTransfers", "Payouts and bank transfers", "rest", "blockedMutation", "POST /api/v1/payout and payment authorization paths", jsonValue),
-  entry("blocked.documentAcceptance", "Document acceptance", "rest", "blockedMutation", "api/v1/documents/group/accept and terms accept paths", jsonValue),
-  entry("blocked.accountSecurity", "Account identity, tax, PIN, login security mutations", "rest", "blockedMutation", "change account/tax/security paths", jsonValue)
-];
-var schemasByName = new Map(schemaRegistry.map((item) => [item.name, item]));
-function validateRawResponse(schemaName, value) {
-  const entry2 = schemasByName.get(schemaName);
-  if (!entry2) throw new Error(`Unknown Trade Republic schema: ${schemaName}`);
-  const result = entry2.responseSchema.safeParse(value);
-  if (result.success) return result.data;
-  throw new TradeRepublicSchemaError(
-    `Trade Republic schema validation failed for ${schemaName}`,
-    schemaName,
-    result.error.issues,
-    summarizeRaw(value),
-    result.error
-  );
-}
-function schemaCatalogMarkdown() {
-  const lines = [
-    "# Trade Republic API Schemas",
-    "",
-    "Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Republic responses before SDK normalization.",
-    "",
-    "| Name | Risk | Transport | Request | Variants |",
-    "| --- | --- | --- | --- | --- |"
-  ];
-  for (const entry2 of schemaRegistry) {
-    lines.push(`| \`${entry2.name}\` | \`${entry2.risk}\` | \`${entry2.transport}\` | \`${entry2.request.replaceAll("|", "\\|")}\` | ${entry2.variants?.join(", ") ?? ""} |`);
-  }
-  lines.push("");
-  lines.push("`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.");
-  return `${lines.join("\n")}
-`;
-}
-function entry(name, title, transport, risk, request, responseSchema, options = {}) {
-  return { name, title, transport, risk, request, requestSchema: jsonValue, responseSchema, ...options };
-}
-function summarizeRaw(value) {
-  if (Array.isArray(value)) return { kind: "array", length: value.length, first: summarizeRaw(value[0]) };
-  if (!value || typeof value !== "object") return value;
-  const record = value;
-  return {
-    kind: "object",
-    keys: Object.keys(record).slice(0, 40)
-  };
-}
-
-// src/resource.ts
-var ResourceClient = class {
-  constructor(http, endpoints, raw, validateRaw = validateRawResponse) {
-    this.http = http;
-    this.endpoints = endpoints;
-    this.raw = raw;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  endpoints;
-  raw;
-  validateRaw;
-  async query(spec, params) {
-    const raw = spec.resource ? await this.raw.query(spec.resource(params)) : await this.http.request(
-      spec.method ?? "GET",
-      this.endpoints.resolve(requiredEndpoint(spec), spec.pathParams?.(params)),
-      spec.body?.(params),
-      spec.query?.(params)
-    );
-    const validatedRaw = spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw;
-    return spec.normalize(validatedRaw, params);
-  }
-  stream(spec, params) {
-    return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params))).map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
-  }
-};
-function requiredEndpoint(spec) {
-  if (!spec.endpoint) throw new Error("Query spec needs either endpoint or resource.");
-  return spec.endpoint;
-}
-function toSubscription(source, close) {
-  return {
-    close() {
-      if ("close" in source && typeof source.close === "function") source.close();
-      close?.();
-    },
-    map(mapper) {
-      const parent = this;
-      return toSubscription(mapAsync(parent, mapper), () => parent.close());
-    },
-    [Symbol.asyncIterator]() {
-      return source[Symbol.asyncIterator]();
-    }
-  };
-}
-async function* mapAsync(source, mapper) {
-  for await (const item of source) yield mapper(item);
 }
 
 // src/traderepublic-client.ts
@@ -2030,6 +2652,8 @@ var TradeRepublicClient = class _TradeRepublicClient {
   http;
   endpoints;
   resources;
+  operations;
+  runtime;
   validateRaw;
   constructor(options = {}) {
     this.session = withWebContext(options.session, options.webContext);
@@ -2052,27 +2676,35 @@ var TradeRepublicClient = class _TradeRepublicClient {
       this.http,
       options.websocketUrl ?? DEFAULT_WEBSOCKET_URL,
       options.websocketFactory ?? defaultWebSocketFactory,
-      () => this.session
+      () => this.session,
+      options.websocketMode,
+      options.websocketReconnectDelayMs,
+      options.onWebSocketDisconnect,
+      options.onWebSocketReconnect
     );
-    this.account = new AccountApi(this.http, this.endpoints, this.validateRaw);
-    this.boards = new BoardsApi(this.http, this.endpoints, this.validateRaw);
-    this.resources = new ResourceClient(this.http, this.endpoints, this.raw, this.validateRaw);
+    this.runtime = new ClientRuntime(this.http, this.endpoints, this.raw, this.validateRaw, {
+      get: () => this.securitiesAccountNumber ?? this.session?.securitiesAccountNumber,
+      set: (value) => this.setSecuritiesAccountNumber(value),
+      fallback: () => this.resolveSecuritiesAccountNumberFromRest()
+    });
+    this.operations = this.runtime.operations;
+    this.account = new AccountApi(this.operations);
+    this.boards = new BoardsApi(this.operations);
+    this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
-    const getAccountNumber = () => this.securitiesAccountNumber ?? this.session?.securitiesAccountNumber;
-    const resolveAccountNumberFromRest = () => this.resolveSecuritiesAccountNumberFromRest();
-    this.orders = new OrdersApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
-    this.portfolio = new PortfolioApi(this.http, this.endpoints, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
+    this.orders = new OrdersApi(this.runtime);
+    this.portfolio = new PortfolioApi(this.runtime);
     this.market = new MarketApi(this.resources);
     this.timeline = new TimelineApi(this.raw, this.validateRaw);
     this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
     this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
-    this.trading = new TradingApi(this.http, this.raw, this.validateRaw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
-    this.discovery = new DiscoveryApi(this.http, this.validateRaw);
-    this.documents = new DocumentsApi(this.http, this.validateRaw);
-    this.tax = new TaxApi(this.http, this.validateRaw);
-    this.payments = new PaymentsApi(this.http, this.validateRaw);
-    this.web = new WebApi(this.http, this.raw, getAccountNumber, (value) => this.setSecuritiesAccountNumber(value), resolveAccountNumberFromRest);
+    this.trading = new TradingApi(this.runtime);
+    this.discovery = new DiscoveryApi(this.operations);
+    this.documents = new DocumentsApi(this.operations);
+    this.tax = new TaxApi(this.operations);
+    this.payments = new PaymentsApi(this.operations);
+    this.web = new WebApi(this.runtime);
   }
   static create(options = {}) {
     return new _TradeRepublicClient(options);
@@ -2088,6 +2720,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
     const shouldPreserveWebContext = Object.keys(session).length > 0 && !session.webContext;
     const nextSession = shouldPreserveWebContext && this.session?.webContext ? { ...session, webContext: this.session.webContext } : session;
     this.session = structuredClone(nextSession);
+    this.raw?.refreshSession();
     if (session.securitiesAccountNumber) this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
     else if (Object.keys(session).length === 0) this.securitiesAccountNumber = void 0;
   }
@@ -2098,6 +2731,9 @@ var TradeRepublicClient = class _TradeRepublicClient {
     };
     this.setSession(session);
     return this.getSession() ?? session;
+  }
+  close() {
+    this.raw.close();
   }
   setSecuritiesAccountNumber(value) {
     if (!value) return;
@@ -2110,7 +2746,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
       return session;
     }
     try {
-      const accountNumber = await resolveSecuritiesAccountNumber(this.raw, this.securitiesAccountNumber, (value) => this.setSecuritiesAccountNumber(value), 5e3, () => this.resolveSecuritiesAccountNumberFromRest());
+      const accountNumber = await this.runtime.resolveSecuritiesAccountNumber(5e3);
       return { ...session, securitiesAccountNumber: accountNumber };
     } catch {
       return session;
@@ -2166,51 +2802,6 @@ var AssetsApi = class {
     return arrayPayload(raw).map(normalizeAsset);
   }
 };
-var AccountApi = class {
-  constructor(http, endpoints, validateRaw) {
-    this.http = http;
-    this.endpoints = endpoints;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  endpoints;
-  validateRaw;
-  current() {
-    return validated(this.validateRaw, "auth.account", this.http.request("GET", this.endpoints.resolve("auth.account")));
-  }
-  session() {
-    return validated(this.validateRaw, "auth.session", this.http.request("GET", this.endpoints.resolve("auth.session")));
-  }
-  accountSettings() {
-    return this.current();
-  }
-  personalDetails() {
-    return validated(this.validateRaw, "account.personalDetails", this.http.request("GET", "/api/v1/customer/personal-details"));
-  }
-  relationships() {
-    return validated(this.validateRaw, "account.relationships", this.http.request("GET", "/api/v1/customer/relationships/detailed"));
-  }
-  cardsHome() {
-    return validated(this.validateRaw, "account.cardsHome", this.http.request("GET", "/api/v1/card/cards/home"));
-  }
-};
-var BoardsApi = class {
-  constructor(http, endpoints, validateRaw) {
-    this.http = http;
-    this.endpoints = endpoints;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  endpoints;
-  validateRaw;
-  async list() {
-    const raw = await validated(this.validateRaw, "boards.list", this.http.request("GET", this.endpoints.resolve("boards.list")));
-    return arrayPayload(raw).map(normalizeBoard);
-  }
-  async get(boardId) {
-    return normalizeBoard(await validated(this.validateRaw, "boards.detail", this.http.request("GET", this.endpoints.resolve("boards.detail", { boardId }))));
-  }
-};
 var DerivativesApi = class {
   constructor(raw, validateRaw) {
     this.raw = raw;
@@ -2250,22 +2841,18 @@ var DerivativesApi = class {
   }
 };
 var OrdersApi = class {
-  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
-    this.http = http;
-    this.endpoints = endpoints;
-    this.raw = raw;
-    this.validateRaw = validateRaw;
-    this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
-    this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
-    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
+  constructor(runtime) {
+    this.runtime = runtime;
+    this.http = runtime.http;
+    this.endpoints = runtime.endpoints;
+    this.raw = runtime.raw;
+    this.validateRaw = runtime.validateRaw;
   }
+  runtime;
   http;
   endpoints;
   raw;
   validateRaw;
-  getSecuritiesAccountNumber;
-  setSecuritiesAccountNumber;
-  resolveSecuritiesAccountNumberFallback;
   async open(options = {}) {
     const orders = await this.all(options);
     return orders.filter(isOpenOrder);
@@ -2282,16 +2869,16 @@ var OrdersApi = class {
     return arrayPayload(await this.rawAll(options)).map(normalizeOrder);
   }
   async rawAll(options = {}) {
-    const { filters, secAccNo: providedSecAccNo, ...rest } = options;
-    const secAccNo = providedSecAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
+    const { filters, secAccNo: providedSecAccNo, ...rest2 } = options;
+    const secAccNo = providedSecAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return validated(this.validateRaw, "orders.all", this.http.request("GET", this.endpoints.resolve("orders.all"), void 0, {
       secAccNo,
-      page: rest.page ?? numberString(rest.cursor) ?? 1,
-      pageSize: rest.pageSize ?? rest.limit ?? 100,
-      sort: rest.sort ?? "orderUpdatedAt,desc",
-      instrumentId: rest.instrumentId,
-      instrumentCategory: rest.instrumentCategory,
-      accountType: rest.accountType,
+      page: rest2.page ?? numberString(rest2.cursor) ?? 1,
+      pageSize: rest2.pageSize ?? rest2.limit ?? 100,
+      sort: rest2.sort ?? "orderUpdatedAt,desc",
+      instrumentId: rest2.instrumentId,
+      instrumentCategory: rest2.instrumentCategory,
+      accountType: rest2.accountType,
       ...filters
     }));
   }
@@ -2299,13 +2886,13 @@ var OrdersApi = class {
     return arrayPayload(await this.rawMutualFunds(options)).map(normalizeOrder);
   }
   async rawMutualFunds(options = {}) {
-    const { filters, ...rest } = options;
+    const { filters, ...rest2 } = options;
     return validated(this.validateRaw, "orders.mutualFunds", this.http.request("GET", this.endpoints.resolve("orders.mutualFunds"), void 0, {
       openOnly: false,
       excludeQuantityNull: false,
       page: 1,
       pageSize: 100,
-      ...rest,
+      ...rest2,
       ...filters
     }));
   }
@@ -2313,13 +2900,13 @@ var OrdersApi = class {
     return arrayPayload(await this.rawPrivateMarkets(options)).map(normalizeOrder);
   }
   async rawPrivateMarkets(options = {}) {
-    const { filters, ...rest } = options;
+    const { filters, ...rest2 } = options;
     return validated(this.validateRaw, "orders.privateMarkets", this.http.request("GET", this.endpoints.resolve("orders.privateMarkets"), void 0, {
       sortBy: "CREATED_AT",
       sortAscending: false,
       pageNumber: 1,
       pageSize: 100,
-      ...rest,
+      ...rest2,
       ...filters
     }));
   }
@@ -2330,7 +2917,7 @@ var OrdersApi = class {
     })).map((raw) => this.validateRaw("orders.orderUpdates", raw));
   }
   async rawOrderUpdates(secAccNo) {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return validated(this.validateRaw, "orders.orderUpdates", this.raw.query({
       type: "orderUpdates",
       selector: { case: "bySecAccNo", value: { accountNumber } }
@@ -2339,13 +2926,7 @@ var OrdersApi = class {
   async prepare(options) {
     const normalizedOptions = options.amount !== void 0 && options.sizeStep === void 0 ? { ...options, sizeStep: await this.resolveAmountSizeStep(options.instrumentId, options.exchangeId) } : options;
     const normalized = normalizeCreateOrderOptions(normalizedOptions);
-    const secAccNo = options.secAccNo ?? await resolveSecuritiesAccountNumber(
-      this.raw,
-      this.getSecuritiesAccountNumber?.(),
-      this.setSecuritiesAccountNumber,
-      void 0,
-      this.resolveSecuritiesAccountNumberFallback
-    );
+    const secAccNo = options.secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return {
       parameters: normalized.parameters,
       clientProcessId: options.clientProcessId ?? createClientProcessId(),
@@ -2401,7 +2982,7 @@ var OrdersApi = class {
       clientProcessId: order.clientProcessId,
       secAccNo: order.secAccNo
     };
-    const subscription = this.raw.subscribeResource(payload);
+    const subscription = this.raw.subscribeResource(payload, { replayOnReconnect: false });
     const iterator = subscription[Symbol.asyncIterator]();
     const updates = [];
     const deadline = Date.now() + timeoutMs;
@@ -2430,19 +3011,53 @@ var OrdersApi = class {
         }
       }
       const lastStatus = updates.length > 0 ? orderMutationStatus(updates.at(-1)) : void 0;
-      throw new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ""}. The order may still be pending; inspect orders.open() before retrying.`);
+      const error = new TradeRepublicProtocolError(`Timed out waiting for order submission${lastStatus ? ` after status ${lastStatus}` : ""}. The broker outcome is unknown; do not retry without checking the order history.`);
+      return {
+        status: "outcomeUnknown",
+        clientProcessId: order.clientProcessId,
+        updates,
+        outcomeReason: "timeout",
+        error,
+        raw: updates.at(-1)
+      };
+    } catch (error) {
+      if (!(error instanceof MapperConnectionLostError)) throw error;
+      return {
+        status: "outcomeUnknown",
+        clientProcessId: order.clientProcessId,
+        updates,
+        outcomeReason: "disconnect",
+        connectionLoss: error.event,
+        error,
+        raw: updates.at(-1)
+      };
     } finally {
       subscription.close();
     }
   }
   async cancel(orderId, options = {}) {
     const id = requiredString(orderId, "orderId");
-    const raw = await validated(this.validateRaw, "orders.cancel", this.raw.query({ type: "cancelOrder", orderId: id }, pickTimeoutOptions(options)));
-    return {
-      orderId: firstStringAtPaths(raw, ["orderId"], ["id"]) ?? id,
-      ...orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {},
-      raw
-    };
+    try {
+      const raw = await validated(this.validateRaw, "orders.cancel", this.raw.query(
+        { type: "cancelOrder", orderId: id },
+        { ...pickTimeoutOptions(options), replayOnReconnect: false }
+      ));
+      return {
+        orderId: firstStringAtPaths(raw, ["orderId"], ["id"]) ?? id,
+        ...orderMutationStatus(raw) ? { status: orderMutationStatus(raw) } : {},
+        raw
+      };
+    } catch (error) {
+      if (!(error instanceof MapperConnectionLostError)) throw error;
+      return {
+        orderId: id,
+        status: "outcomeUnknown",
+        outcomeReason: "disconnect",
+        connectionLoss: error.event,
+        error,
+        raw: void 0
+      };
+    }
   }
   async resolveAmountSizeStep(instrumentId, exchangeId) {
     const id = requiredString(instrumentId, "instrumentId");
@@ -2649,22 +3264,16 @@ function isExecutedOrder(order) {
   );
 }
 var PortfolioApi = class {
-  constructor(http, endpoints, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
-    this.http = http;
-    this.endpoints = endpoints;
-    this.raw = raw;
-    this.validateRaw = validateRaw;
-    this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
-    this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
-    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
+  constructor(runtime) {
+    this.runtime = runtime;
+    this.http = runtime.http;
+    this.raw = runtime.raw;
+    this.validateRaw = runtime.validateRaw;
   }
+  runtime;
   http;
-  endpoints;
   raw;
   validateRaw;
-  getSecuritiesAccountNumber;
-  setSecuritiesAccountNumber;
-  resolveSecuritiesAccountNumberFallback;
   async current(options = {}) {
     const secAccNo = await this.resolveSecuritiesAccountNumber();
     const raw = await validated(this.validateRaw, "portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
@@ -2706,53 +3315,11 @@ var PortfolioApi = class {
     return normalizePortfolio(raw);
   }
   async resolveSecuritiesAccountNumber() {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
+    return this.runtime.resolveSecuritiesAccountNumber();
   }
 };
 function pickTimeoutOptions(options) {
   return options.timeoutMs ? { timeoutMs: options.timeoutMs } : void 0;
-}
-async function resolveSecuritiesAccountNumber(raw, cached, remember, timeoutMs, fallback) {
-  try {
-    const accountPairs = await raw.query({ type: "accountPairs" }, timeoutMs ? { timeoutMs } : void 0);
-    const accountNumber2 = firstStringByKey(accountPairs, "securitiesAccountNumber");
-    if (accountNumber2) {
-      remember?.(accountNumber2);
-      return accountNumber2;
-    }
-  } catch {
-    if (cached) return cached;
-    const accountNumber2 = await fallback?.();
-    if (accountNumber2) {
-      remember?.(accountNumber2);
-      return accountNumber2;
-    }
-    throw new Error("Trade Republic securities account number was not available from accountPairs or account profile.");
-  }
-  if (cached) return cached;
-  const accountNumber = await fallback?.();
-  if (accountNumber) {
-    remember?.(accountNumber);
-    return accountNumber;
-  }
-  throw new Error("Trade Republic securities account number was not available from accountPairs or account profile.");
-}
-function firstStringByKey(value, key) {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const match = firstStringByKey(item, key);
-      if (match) return match;
-    }
-    return void 0;
-  }
-  if (!value || typeof value !== "object") return void 0;
-  const record = value;
-  if (typeof record[key] === "string" && record[key].length > 0) return record[key];
-  for (const item of Object.values(record)) {
-    const match = firstStringByKey(item, key);
-    if (match) return match;
-  }
-  return void 0;
 }
 function numberString(value) {
   if (!value) return void 0;
@@ -2761,7 +3328,7 @@ function numberString(value) {
 }
 function neonSearchFilters(type, filters = {}) {
   return [
-    { key: "type", value: type },
+    { key: "type", value: type === "etf" ? "fund" : type },
     { key: "jurisdiction", value: "DE" },
     ...Object.entries(filters).flatMap(([key, value]) => value === void 0 ? [] : [{ key, value }])
   ];
@@ -2870,8 +3437,8 @@ var PriceAlarmsApi = class {
     return validated(this.validateRaw, "priceAlarms.notifications", this.raw.query({ type: "priceAlarmNotifications" }, pickTimeoutOptions(options)));
   }
   create(options) {
-    const { timeoutMs, currency = "EUR", price, ...rest } = options;
-    const payload = { ...rest, price: { value: String(price), currency } };
+    const { timeoutMs, isin, price } = options;
+    const payload = { instrumentId: isin, targetPrice: price };
     return this.rawCreate(payload, timeoutMs === void 0 ? {} : { timeoutMs });
   }
   rawCreate(payload, options = {}) {
@@ -2935,20 +3502,16 @@ var InstrumentsApi = class {
   }
 };
 var TradingApi = class {
-  constructor(http, raw, validateRaw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
-    this.http = http;
-    this.raw = raw;
-    this.validateRaw = validateRaw;
-    this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
-    this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
-    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
+  constructor(runtime) {
+    this.runtime = runtime;
+    this.http = runtime.http;
+    this.raw = runtime.raw;
+    this.validateRaw = runtime.validateRaw;
   }
+  runtime;
   http;
   raw;
   validateRaw;
-  getSecuritiesAccountNumber;
-  setSecuritiesAccountNumber;
-  resolveSecuritiesAccountNumberFallback;
   priceForOrder(options, queryOptions = {}) {
     return validated(this.validateRaw, "trading.priceForOrder", this.raw.query({ type: "priceForOrderV2", unit: "EUR", ...options }, pickTimeoutOptions(queryOptions)));
   }
@@ -2978,190 +3541,18 @@ var TradingApi = class {
     return validated(this.validateRaw, "trading.dailyPnl", this.http.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { items }));
   }
   resolveSecuritiesAccountNumber() {
-    return resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
-  }
-};
-var DiscoveryApi = class {
-  constructor(http, validateRaw) {
-    this.http = http;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  validateRaw;
-  async exchangeDetails() {
-    return arrayPayload(await this.rawExchangeDetails()).map(normalizeExchangeDetails);
-  }
-  rawExchangeDetails() {
-    return validated(this.validateRaw, "discovery.exchangeDetails", this.http.request("GET", "/api-gateway/instrument-universe/api/v1/exchanges-details", void 0, { includeMaintenanceWindow: false }));
-  }
-  async exchangeSchedule(exchange) {
-    return normalizeExchangeSchedule(await this.rawExchangeSchedule(exchange));
-  }
-  rawExchangeSchedule(exchange) {
-    return validated(this.validateRaw, "discovery.exchangeSchedule", this.http.request("GET", `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`));
-  }
-  async instrumentStatus(isin, exchange) {
-    return normalizeInstrumentStatus(await this.rawInstrumentStatus(isin, exchange));
-  }
-  rawInstrumentStatus(isin, exchange) {
-    return validated(this.validateRaw, "discovery.instrumentStatus", this.http.request("GET", `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`));
-  }
-  watchlists() {
-    return this.rawWatchlists();
-  }
-  async cloudWatchlist(options = {}) {
-    const watchlist = arrayPayload(await this.rawWatchlists())[0];
-    if (!watchlist) return void 0;
-    const normalized = normalizeWatchlist(watchlist);
-    if (!normalized.id) return normalized;
-    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
-    return normalizeWatchlist(watchlist, items);
-  }
-  rawWatchlistItems(watchlistId, options = {}) {
-    return validated(this.validateRaw, "discovery.watchlists.items", this.http.request(
-      "GET",
-      `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`,
-      void 0,
-      { pageSize: options.pageSize ?? 200 }
-    ));
-  }
-  rawWatchlists() {
-    return validated(this.validateRaw, "discovery.watchlists", this.http.request("GET", "/api-gateway/watchlists/api/v2/watchlists"));
-  }
-  createWatchlist(name) {
-    return this.rawCreateWatchlist(name);
-  }
-  rawCreateWatchlist(name) {
-    return validated(this.validateRaw, "discovery.watchlists.create", this.http.request("POST", "/api-gateway/watchlists/api/v2/watchlists", { name }));
-  }
-  renameWatchlist(watchlistId, name) {
-    return this.rawRenameWatchlist(watchlistId, name);
-  }
-  rawRenameWatchlist(watchlistId, name) {
-    return validated(this.validateRaw, "discovery.watchlists.rename", this.http.request("PUT", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, { name }));
-  }
-  deleteWatchlist(watchlistId) {
-    return this.rawDeleteWatchlist(watchlistId);
-  }
-  rawDeleteWatchlist(watchlistId) {
-    return validated(this.validateRaw, "discovery.watchlists.delete", this.http.request("DELETE", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`));
-  }
-  addWatchlistItem(watchlistId, instrumentId, options = {}) {
-    return this.rawAddWatchlistItem(watchlistId, instrumentId, options);
-  }
-  rawAddWatchlistItem(watchlistId, instrumentId, options = {}) {
-    return validated(this.validateRaw, "discovery.watchlists.addItem", this.http.request("POST", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, { instrument_id: instrumentId, item_rank: -1, ...options }));
-  }
-  removeWatchlistItem(watchlistId, instrumentId) {
-    return this.rawRemoveWatchlistItem(watchlistId, instrumentId);
-  }
-  rawRemoveWatchlistItem(watchlistId, instrumentId) {
-    return validated(this.validateRaw, "discovery.watchlists.removeItem", this.http.request("DELETE", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`));
-  }
-  screeners() {
-    return this.rawScreeners();
-  }
-  rawScreeners() {
-    return validated(this.validateRaw, "discovery.screeners", this.http.request("GET", "/api-gateway/screeners/api/v2/screeners"));
-  }
-  screenerOptions() {
-    return this.rawScreenerOptions();
-  }
-  rawScreenerOptions() {
-    return validated(this.validateRaw, "discovery.screenerOptions", this.http.request("GET", "/api-gateway/screeners/api/v2/screeners/options"));
-  }
-  userPreferences() {
-    return this.rawUserPreferences();
-  }
-  rawUserPreferences() {
-    return validated(this.validateRaw, "discovery.userPreferences", this.http.request("GET", "/api-gateway/pro-trading/api/v1/user-preferences"));
-  }
-};
-var DocumentsApi = class {
-  constructor(http, validateRaw) {
-    this.http = http;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  validateRaw;
-  documents() {
-    return this.rawDocuments();
-  }
-  rawDocuments() {
-    return validated(this.validateRaw, "documents.documents", this.http.request("GET", "/api/v1/documents/all"));
-  }
-};
-var TaxApi = class {
-  constructor(http, validateRaw) {
-    this.http = http;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  validateRaw;
-  taxInformation() {
-    return this.rawTaxInformation();
-  }
-  rawTaxInformation() {
-    return validated(this.validateRaw, "tax.taxInformation", this.http.request("GET", "/api/v1/taxes/information"));
-  }
-  exemptionOrder() {
-    return this.rawExemptionOrder();
-  }
-  rawExemptionOrder() {
-    return validated(this.validateRaw, "tax.exemptionOrder", this.http.request("GET", "/api/v1/taxes/exemptionorders"));
-  }
-  taxResidencies() {
-    return this.rawTaxResidencies();
-  }
-  rawTaxResidencies() {
-    return validated(this.validateRaw, "tax.taxResidencies", this.http.request("GET", "/api/v1/auth/account/change/taxresidencies"));
-  }
-  taxResidencyCountries() {
-    return this.rawTaxResidencyCountries();
-  }
-  rawTaxResidencyCountries() {
-    return validated(this.validateRaw, "tax.taxResidencyCountries", this.http.request("GET", "/api/v1/country/taxresidency"));
-  }
-};
-var PaymentsApi = class {
-  constructor(http, validateRaw) {
-    this.http = http;
-    this.validateRaw = validateRaw;
-  }
-  http;
-  validateRaw;
-  paymentMethods() {
-    return this.rawPaymentMethods();
-  }
-  rawPaymentMethods() {
-    return validated(this.validateRaw, "payments.paymentMethods", this.http.request("GET", "/api/v2/payment/methods"));
-  }
-  iban() {
-    return this.rawIban();
-  }
-  rawIban() {
-    return validated(this.validateRaw, "payments.iban", this.http.request("GET", "/api/v1/auth/account/iban"));
-  }
-  interestDetails() {
-    return this.rawInterestDetails();
-  }
-  rawInterestDetails() {
-    return validated(this.validateRaw, "payments.interestDetails", this.http.request("GET", "/api/v1/interest/details"));
+    return this.runtime.resolveSecuritiesAccountNumber();
   }
 };
 var WebApi = class {
-  constructor(http, raw, getSecuritiesAccountNumber, setSecuritiesAccountNumber, resolveSecuritiesAccountNumberFallback) {
-    this.http = http;
-    this.raw = raw;
-    this.getSecuritiesAccountNumber = getSecuritiesAccountNumber;
-    this.setSecuritiesAccountNumber = setSecuritiesAccountNumber;
-    this.resolveSecuritiesAccountNumberFallback = resolveSecuritiesAccountNumberFallback;
+  constructor(runtime) {
+    this.runtime = runtime;
+    this.http = runtime.http;
+    this.raw = runtime.raw;
   }
+  runtime;
   http;
   raw;
-  getSecuritiesAccountNumber;
-  setSecuritiesAccountNumber;
-  resolveSecuritiesAccountNumberFallback;
   request(method, path, options = {}) {
     return this.http.request(method, path, options.body, options.query);
   }
@@ -3313,7 +3704,7 @@ var WebApi = class {
     return this.request("GET", "/api-gateway/screeners/api/v2/screeners/options");
   }
   async withSecAccNo(secAccNo, fn) {
-    const accountNumber = secAccNo ?? await resolveSecuritiesAccountNumber(this.raw, this.getSecuritiesAccountNumber?.(), this.setSecuritiesAccountNumber, void 0, this.resolveSecuritiesAccountNumberFallback);
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
     return fn(accountNumber);
   }
 };

@@ -9,6 +9,18 @@ interface RawSchemaValidationFailure {
     value: unknown;
     error: unknown;
 }
+interface WebSocketDisconnectEvent {
+    disconnectedAt: string;
+    code?: number | undefined;
+    reason?: string | undefined;
+    reconnectDelayMs: number;
+}
+interface WebSocketReconnectEvent {
+    disconnectedAt: string;
+    reconnectedAt: string;
+    downtimeMs: number;
+    reconnectAttempts: number;
+}
 interface TradeRepublicClientOptions {
     apiBaseUrl?: string | undefined;
     websocketUrl?: string | undefined;
@@ -21,6 +33,10 @@ interface TradeRepublicClientOptions {
     endpoints?: EndpointMap | undefined;
     fetch?: typeof fetch | undefined;
     websocketFactory?: WebSocketFactory | undefined;
+    websocketMode?: 'shared' | 'isolated' | undefined;
+    websocketReconnectDelayMs?: number | undefined;
+    onWebSocketDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined;
+    onWebSocketReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined;
     rawSchemaValidation?: RawSchemaValidationMode | undefined;
     onRawSchemaValidationFailure?: ((failure: RawSchemaValidationFailure) => void) | undefined;
 }
@@ -84,6 +100,7 @@ interface Asset {
     exchangeIds?: string[] | undefined;
     raw: unknown;
 }
+type AssetSearchType = 'stock' | 'etf' | 'fund' | 'mutualFund' | 'privateFund' | 'derivative' | 'crypto' | 'bond' | 'synthetic';
 interface WatchlistItem extends Asset {
     rank?: number | undefined;
 }
@@ -189,18 +206,23 @@ interface OrderPreview {
     estimatedTotal?: number | undefined;
     raw: unknown;
 }
-type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | string;
+type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | 'outcomeUnknown' | string;
 interface OrderSubmission {
     status: OrderSubmissionStatus;
     orderId?: string | undefined;
     clientProcessId: string;
     updates: unknown[];
+    outcomeReason?: 'disconnect' | 'timeout' | undefined;
+    connectionLoss?: WebSocketDisconnectEvent | undefined;
     error?: unknown;
     raw: unknown;
 }
 interface OrderCancellation {
     orderId: string;
     status?: string | undefined;
+    outcomeReason?: 'disconnect' | 'timeout' | undefined;
+    connectionLoss?: WebSocketDisconnectEvent | undefined;
+    error?: unknown;
     raw: unknown;
 }
 interface OrdersListOptions {
@@ -496,26 +518,61 @@ declare class AuthApi {
     private pollLoginProgress;
 }
 
-interface RawSubscription extends AsyncIterable<unknown> {
+declare class TradeRepublicError extends Error {
+    readonly cause?: unknown | undefined;
+    constructor(message: string, cause?: unknown | undefined);
+}
+declare class TradeRepublicHttpError extends TradeRepublicError {
+    readonly status: number;
+    readonly responseBody: unknown;
+    constructor(message: string, status: number, responseBody: unknown);
+}
+declare class TradeRepublicProtocolError extends TradeRepublicError {
+    constructor(message: string, cause?: unknown);
+}
+declare class TradeRepublicSchemaError extends TradeRepublicError {
+    readonly schemaName: string;
+    readonly issues: unknown;
+    readonly rawSummary: unknown;
+    constructor(message: string, schemaName: string, issues: unknown, rawSummary: unknown, cause?: unknown);
+}
+
+interface MapperSubscription extends AsyncIterable<unknown> {
     close(): void;
+}
+interface MapperSubscriptionOptions {
+    replayOnReconnect?: boolean | undefined;
+}
+
+interface RawSubscription extends MapperSubscription {
+}
+interface RawSubscriptionOptions extends MapperSubscriptionOptions {
+}
+interface RawQueryOptions extends RawSubscriptionOptions {
+    timeoutMs?: number | undefined;
 }
 declare class RawApi {
     private readonly http;
     private readonly websocketUrl;
     private readonly websocketFactory;
     private readonly getSession;
-    constructor(http: HttpClient, websocketUrl: string, websocketFactory: WebSocketFactory, getSession: () => Session | undefined);
+    private readonly reconnectDelayMs;
+    private readonly onWebSocketDisconnect?;
+    private readonly onWebSocketReconnect?;
+    private readonly sharedConnection;
+    private readonly isolatedConnections;
+    constructor(http: HttpClient, websocketUrl: string, websocketFactory: WebSocketFactory, getSession: () => Session | undefined, websocketMode?: 'shared' | 'isolated', reconnectDelayMs?: number, onWebSocketDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined, onWebSocketReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined);
     request<T = unknown>(request: RawRequest): Promise<T>;
     subscribe(topic: string, payload?: unknown): RawSubscription;
     subscribeLegacy(topic: string, payload?: unknown): RawSubscription;
-    subscribeResource(payload: Record<string, unknown>): RawSubscription;
-    query<T = unknown>(payload: Record<string, unknown>, options?: {
-        timeoutMs?: number;
-    }): Promise<T>;
-    queryResource<T = unknown>(payload: Record<string, unknown>, options?: {
-        timeoutMs?: number;
-    }): Promise<T>;
+    subscribeResource(payload: Record<string, unknown>, options?: RawSubscriptionOptions): RawSubscription;
+    query<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
+    queryResource<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
+    /** Reconnect active subscriptions after session or browser-context changes. */
+    refreshSession(): void;
+    close(): void;
     private openSubscription;
+    private createConnection;
 }
 
 interface QuerySpec<TParams, TResult> {
@@ -561,6 +618,143 @@ declare class CandleQuery {
     }): Promise<Candle[]>;
 }
 
+interface OperationBase<TParams, TResult> {
+    name: string;
+    schemaName?: string | undefined;
+    normalize: (raw: unknown, params: TParams) => TResult;
+}
+interface RestOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
+    transport: 'rest';
+    method?: HttpMethod | undefined;
+    path?: string | ((params: TParams) => string) | undefined;
+    endpoint?: EndpointKey | undefined;
+    pathParams?: ((params: TParams) => Record<string, string | number>) | undefined;
+    query?: ((params: TParams) => Record<string, string | number | boolean | undefined>) | undefined;
+    body?: ((params: TParams) => unknown) | undefined;
+}
+interface MapperQueryOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
+    transport: 'mapper-query';
+    payload: (params: TParams) => Record<string, unknown>;
+    timeoutMs?: ((params: TParams) => number | undefined) | undefined;
+}
+interface MapperStreamOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
+    transport: 'mapper-stream';
+    payload: (params: TParams) => Record<string, unknown>;
+}
+type Operation<TParams, TResult> = RestOperation<TParams, TResult> | MapperQueryOperation<TParams, TResult> | MapperStreamOperation<TParams, TResult>;
+declare class OperationClient {
+    private readonly http;
+    private readonly raw;
+    private readonly validateRaw;
+    private readonly endpoints?;
+    constructor(http: HttpClient, raw: RawApi, validateRaw: RawSchemaValidator, endpoints?: EndpointResolver | undefined);
+    execute<TParams, TResult>(operation: Exclude<Operation<TParams, TResult>, MapperStreamOperation<TParams, TResult>>, params: TParams): Promise<TResult>;
+    executeRaw<TParams, TResult>(operation: Exclude<Operation<TParams, TResult>, MapperStreamOperation<TParams, TResult>>, params: TParams): Promise<unknown>;
+    stream<TParams, TResult>(operation: MapperStreamOperation<TParams, TResult>, params: TParams): Subscription<TResult>;
+    private resolvePath;
+}
+
+interface AccountIdentityAdapter {
+    get(): string | undefined;
+    set(value: string): void;
+    fallback?(): Promise<string | undefined>;
+}
+/** Shared internal dependency and account-identity boundary for all domain APIs. */
+declare class ClientRuntime {
+    readonly http: HttpClient;
+    readonly endpoints: EndpointResolver;
+    readonly raw: RawApi;
+    readonly validateRaw: RawSchemaValidator;
+    private readonly accountIdentity;
+    readonly resources: ResourceClient;
+    readonly operations: OperationClient;
+    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, accountIdentity: AccountIdentityAdapter);
+    get securitiesAccountNumber(): string | undefined;
+    rememberSecuritiesAccountNumber(value: string): void;
+    resolveSecuritiesAccountNumber(timeoutMs?: number): Promise<string>;
+}
+
+declare class AccountApi {
+    private readonly operations;
+    constructor(operations: OperationClient);
+    current(): Promise<unknown>;
+    session(): Promise<unknown>;
+    accountSettings(): Promise<unknown>;
+    personalDetails(): Promise<unknown>;
+    relationships(): Promise<unknown>;
+    cardsHome(): Promise<unknown>;
+}
+declare class BoardsApi {
+    private readonly operations;
+    constructor(operations: OperationClient);
+    list(): Promise<Board[]>;
+    get(boardId: string): Promise<Board>;
+}
+
+declare class DocumentsApi {
+    private readonly operations;
+    constructor(operations: OperationClient);
+    documents(): Promise<unknown>;
+    rawDocuments(): Promise<unknown>;
+}
+declare class TaxApi {
+    private readonly operations;
+    constructor(operations: OperationClient);
+    taxInformation(): Promise<unknown>;
+    rawTaxInformation(): Promise<unknown>;
+    exemptionOrder(): Promise<unknown>;
+    rawExemptionOrder(): Promise<unknown>;
+    taxResidencies(): Promise<unknown>;
+    rawTaxResidencies(): Promise<unknown>;
+    taxResidencyCountries(): Promise<unknown>;
+    rawTaxResidencyCountries(): Promise<unknown>;
+}
+declare class PaymentsApi {
+    private readonly operations;
+    constructor(operations: OperationClient);
+    paymentMethods(): Promise<unknown>;
+    rawPaymentMethods(): Promise<unknown>;
+    iban(): Promise<unknown>;
+    rawIban(): Promise<unknown>;
+    interestDetails(): Promise<unknown>;
+    rawInterestDetails(): Promise<unknown>;
+}
+
+declare class DiscoveryApi {
+    private readonly operations;
+    constructor(operations: OperationClient);
+    exchangeDetails(): Promise<ExchangeDetails[]>;
+    rawExchangeDetails(): Promise<unknown>;
+    exchangeSchedule(exchange: string): Promise<ExchangeSchedule>;
+    rawExchangeSchedule(exchange: string): Promise<unknown>;
+    instrumentStatus(isin: string, exchange: string): Promise<InstrumentStatus>;
+    rawInstrumentStatus(isin: string, exchange: string): Promise<unknown>;
+    watchlists(): Promise<unknown>;
+    cloudWatchlist(options?: {
+        pageSize?: number;
+    }): Promise<Watchlist | undefined>;
+    rawWatchlistItems(watchlistId: string, options?: {
+        pageSize?: number;
+    }): Promise<unknown>;
+    rawWatchlists(): Promise<unknown>;
+    cloneWatchlist(watchlistId: string): Promise<unknown>;
+    rawCloneWatchlist(watchlistId: string): Promise<unknown>;
+    renameWatchlist(watchlistId: string, name: string): Promise<unknown>;
+    rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown>;
+    deleteWatchlist(watchlistId: string): Promise<unknown>;
+    rawDeleteWatchlist(watchlistId: string): Promise<unknown>;
+    addWatchlistItem(watchlistId: string, instrumentId: string, options?: Record<string, unknown>): Promise<unknown>;
+    rawAddWatchlistItem(watchlistId: string, instrumentId: string, options?: Record<string, unknown>): Promise<unknown>;
+    removeWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown>;
+    rawRemoveWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown>;
+    screeners(): Promise<unknown>;
+    rawScreeners(): Promise<unknown>;
+    screenerOptions(): Promise<unknown>;
+    rawScreenerOptions(): Promise<unknown>;
+    userPreferences(): Promise<unknown>;
+    rawUserPreferences(): Promise<unknown>;
+}
+
 declare class TradeRepublicClient {
     readonly auth: AuthApi;
     readonly raw: RawApi;
@@ -585,12 +779,15 @@ declare class TradeRepublicClient {
     private readonly http;
     private readonly endpoints;
     private readonly resources;
+    private readonly operations;
+    private readonly runtime;
     private readonly validateRaw;
     constructor(options?: TradeRepublicClientOptions);
     static create(options?: TradeRepublicClientOptions): TradeRepublicClient;
     getSession(): Session | undefined;
     setSession(session: Session): void;
     useWebContext(webContext: TradeRepublicWebContext): Session;
+    close(): void;
     private setSecuritiesAccountNumber;
     private captureSecuritiesAccountNumber;
     private resolveSecuritiesAccountNumberFromRest;
@@ -602,36 +799,16 @@ declare class AssetsApi {
     search(query: string, options?: {
         limit?: number;
         page?: number;
-        type?: string;
+        type?: AssetSearchType;
         filters?: Record<string, string | number | boolean | undefined>;
     }): Promise<Asset[]>;
     get(assetId: string): Promise<AssetDetail>;
     listAll(options?: {
         cursor?: string;
         limit?: number;
-        type?: string;
+        type?: AssetSearchType;
         filters?: Record<string, string | number | boolean | undefined>;
     }): Promise<Asset[]>;
-}
-declare class AccountApi {
-    private readonly http;
-    private readonly endpoints;
-    private readonly validateRaw;
-    constructor(http: HttpClient, endpoints: EndpointResolver, validateRaw: RawSchemaValidator);
-    current(): Promise<unknown>;
-    session(): Promise<unknown>;
-    accountSettings(): Promise<unknown>;
-    personalDetails(): Promise<unknown>;
-    relationships(): Promise<unknown>;
-    cardsHome(): Promise<unknown>;
-}
-declare class BoardsApi {
-    private readonly http;
-    private readonly endpoints;
-    private readonly validateRaw;
-    constructor(http: HttpClient, endpoints: EndpointResolver, validateRaw: RawSchemaValidator);
-    list(): Promise<Board[]>;
-    get(boardId: string): Promise<Board>;
 }
 declare class DerivativesApi {
     private readonly raw;
@@ -650,14 +827,12 @@ declare class DerivativesApi {
     get(derivativeId: string): Promise<Derivative>;
 }
 declare class OrdersApi {
+    private readonly runtime;
     private readonly http;
     private readonly endpoints;
     private readonly raw;
     private readonly validateRaw;
-    private readonly getSecuritiesAccountNumber?;
-    private readonly setSecuritiesAccountNumber?;
-    private readonly resolveSecuritiesAccountNumberFallback?;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
+    constructor(runtime: ClientRuntime);
     open(options?: OrdersListOptions): Promise<Order[]>;
     closed(options?: OrdersListOptions): Promise<Order[]>;
     executed(options?: OrdersListOptions): Promise<Order[]>;
@@ -678,14 +853,11 @@ declare class OrdersApi {
     private resolveAmountSizeStep;
 }
 declare class PortfolioApi {
+    private readonly runtime;
     private readonly http;
-    private readonly endpoints;
     private readonly raw;
     private readonly validateRaw;
-    private readonly getSecuritiesAccountNumber?;
-    private readonly setSecuritiesAccountNumber?;
-    private readonly resolveSecuritiesAccountNumberFallback?;
-    constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
+    constructor(runtime: ClientRuntime);
     current(options?: {
         timeoutMs?: number;
     }): Promise<Portfolio>;
@@ -768,11 +940,8 @@ declare class PriceAlarmsApi {
     create(options: {
         isin: string;
         price: number;
-        currency?: string;
-        crossing?: string;
-        note?: string;
         timeoutMs?: number;
-    } & Record<string, unknown>): Promise<unknown>;
+    }): Promise<unknown>;
     rawCreate(payload: Record<string, unknown>, options?: {
         timeoutMs?: number;
     }): Promise<unknown>;
@@ -831,13 +1000,11 @@ declare class InstrumentsApi {
     }): Promise<unknown>;
 }
 declare class TradingApi {
+    private readonly runtime;
     private readonly http;
     private readonly raw;
     private readonly validateRaw;
-    private readonly getSecuritiesAccountNumber?;
-    private readonly setSecuritiesAccountNumber?;
-    private readonly resolveSecuritiesAccountNumberFallback?;
-    constructor(http: HttpClient, raw: RawApi, validateRaw: RawSchemaValidator, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
+    constructor(runtime: ClientRuntime);
     priceForOrder(options: {
         isin: string;
         exchangeId: string;
@@ -857,79 +1024,11 @@ declare class TradingApi {
     rawDailyPnl(items: unknown[]): Promise<unknown>;
     private resolveSecuritiesAccountNumber;
 }
-declare class DiscoveryApi {
-    private readonly http;
-    private readonly validateRaw;
-    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
-    exchangeDetails(): Promise<ExchangeDetails[]>;
-    rawExchangeDetails(): Promise<unknown>;
-    exchangeSchedule(exchange: string): Promise<ExchangeSchedule>;
-    rawExchangeSchedule(exchange: string): Promise<unknown>;
-    instrumentStatus(isin: string, exchange: string): Promise<InstrumentStatus>;
-    rawInstrumentStatus(isin: string, exchange: string): Promise<unknown>;
-    watchlists(): Promise<unknown>;
-    cloudWatchlist(options?: {
-        pageSize?: number;
-    }): Promise<Watchlist | undefined>;
-    rawWatchlistItems(watchlistId: string, options?: {
-        pageSize?: number;
-    }): Promise<unknown>;
-    rawWatchlists(): Promise<unknown>;
-    createWatchlist(name: string): Promise<unknown>;
-    rawCreateWatchlist(name: string): Promise<unknown>;
-    renameWatchlist(watchlistId: string, name: string): Promise<unknown>;
-    rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown>;
-    deleteWatchlist(watchlistId: string): Promise<unknown>;
-    rawDeleteWatchlist(watchlistId: string): Promise<unknown>;
-    addWatchlistItem(watchlistId: string, instrumentId: string, options?: Record<string, unknown>): Promise<unknown>;
-    rawAddWatchlistItem(watchlistId: string, instrumentId: string, options?: Record<string, unknown>): Promise<unknown>;
-    removeWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown>;
-    rawRemoveWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown>;
-    screeners(): Promise<unknown>;
-    rawScreeners(): Promise<unknown>;
-    screenerOptions(): Promise<unknown>;
-    rawScreenerOptions(): Promise<unknown>;
-    userPreferences(): Promise<unknown>;
-    rawUserPreferences(): Promise<unknown>;
-}
-declare class DocumentsApi {
-    private readonly http;
-    private readonly validateRaw;
-    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
-    documents(): Promise<unknown>;
-    rawDocuments(): Promise<unknown>;
-}
-declare class TaxApi {
-    private readonly http;
-    private readonly validateRaw;
-    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
-    taxInformation(): Promise<unknown>;
-    rawTaxInformation(): Promise<unknown>;
-    exemptionOrder(): Promise<unknown>;
-    rawExemptionOrder(): Promise<unknown>;
-    taxResidencies(): Promise<unknown>;
-    rawTaxResidencies(): Promise<unknown>;
-    taxResidencyCountries(): Promise<unknown>;
-    rawTaxResidencyCountries(): Promise<unknown>;
-}
-declare class PaymentsApi {
-    private readonly http;
-    private readonly validateRaw;
-    constructor(http: HttpClient, validateRaw: RawSchemaValidator);
-    paymentMethods(): Promise<unknown>;
-    rawPaymentMethods(): Promise<unknown>;
-    iban(): Promise<unknown>;
-    rawIban(): Promise<unknown>;
-    interestDetails(): Promise<unknown>;
-    rawInterestDetails(): Promise<unknown>;
-}
 declare class WebApi {
+    private readonly runtime;
     private readonly http;
     private readonly raw;
-    private readonly getSecuritiesAccountNumber?;
-    private readonly setSecuritiesAccountNumber?;
-    private readonly resolveSecuritiesAccountNumberFallback?;
-    constructor(http: HttpClient, raw: RawApi, getSecuritiesAccountNumber?: (() => string | undefined) | undefined, setSecuritiesAccountNumber?: ((value: string) => void) | undefined, resolveSecuritiesAccountNumberFallback?: (() => Promise<string | undefined>) | undefined);
+    constructor(runtime: ClientRuntime);
     request<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, options?: {
         body?: unknown;
         query?: Record<string, string | number | boolean | undefined>;
@@ -1001,25 +1100,6 @@ declare class WebApi {
     screeners(): Promise<unknown>;
     screenerOptions(): Promise<unknown>;
     private withSecAccNo;
-}
-
-declare class TradeRepublicError extends Error {
-    readonly cause?: unknown | undefined;
-    constructor(message: string, cause?: unknown | undefined);
-}
-declare class TradeRepublicHttpError extends TradeRepublicError {
-    readonly status: number;
-    readonly responseBody: unknown;
-    constructor(message: string, status: number, responseBody: unknown);
-}
-declare class TradeRepublicProtocolError extends TradeRepublicError {
-    constructor(message: string, cause?: unknown);
-}
-declare class TradeRepublicSchemaError extends TradeRepublicError {
-    readonly schemaName: string;
-    readonly issues: unknown;
-    readonly rawSummary: unknown;
-    constructor(message: string, schemaName: string, issues: unknown, rawSummary: unknown, cause?: unknown);
 }
 
 declare function redactSession(session: Session): Record<string, unknown>;
@@ -1100,4 +1180,4 @@ declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicS
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderSide, type OrderSubmission, type OrderSubmissionStatus, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type Asset, type AssetDetail, type AssetSearchType, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderSide, type OrderSubmission, type OrderSubmissionStatus, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

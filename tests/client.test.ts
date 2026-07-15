@@ -663,6 +663,33 @@ describe('TradeRepublicClient', () => {
     expect(parseSubPayload(sockets[2]?.sent[1])).toEqual({ type: 'instrument', id: 'US1' });
   });
 
+  it('maps ETF and mutual-fund searches to Trade Republic neonSearch types', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'neonSearch') {
+            socket.emit('message', `${id} neonSearch ${JSON.stringify({ results: [] })}`);
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await client.assets.search('bitcoin', { type: 'etf' });
+    await client.assets.search('income', { type: 'mutualFund' });
+
+    expect(parseSubPayload(sockets[0]?.sent[1])).toMatchObject({
+      type: 'neonSearch',
+      data: { filter: [{ key: 'type', value: 'fund' }, { key: 'jurisdiction', value: 'DE' }] },
+    });
+    expect(parseSubPayload(sockets[1]?.sent[1])).toMatchObject({
+      type: 'neonSearch',
+      data: { filter: [{ key: 'type', value: 'mutualFund' }, { key: 'jurisdiction', value: 'DE' }] },
+    });
+  });
+
   it('queries derivatives through neonSearch, derivatives, and instrument resources', async () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
@@ -829,6 +856,69 @@ describe('TradeRepublicClient', () => {
     });
   });
 
+  it('returns outcomeUnknown and never replays an order after connection loss', async () => {
+    const sockets: FakeSocket[] = [];
+    const submittedPayloads: Record<string, unknown>[] = [];
+    const disconnects: unknown[] = [];
+    const reconnects: unknown[] = [];
+    const client = TradeRepublicClient.create({
+      websocketReconnectDelayMs: 0,
+      onWebSocketDisconnect: (event) => { disconnects.push(event); },
+      onWebSocketReconnect: (event) => { reconnects.push(event); },
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload) => {
+          if (payload.type !== 'simpleCreateOrder') return;
+          submittedPayloads.push(payload);
+          if (submittedPayloads.length === 1) {
+            queueMicrotask(() => socket.emit('close', 1006, Buffer.from('network lost')));
+          }
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const result = await client.orders.submit({
+      instrumentId: 'US0378331005',
+      exchangeId: 'LSX',
+      side: 'buy',
+      mode: 'market',
+      size: 1,
+      lastClientPrice: 201.5,
+      clientProcessId: 'lost-process-1',
+      secAccNo: '0000000000',
+    });
+
+    expect(result).toMatchObject({
+      status: 'outcomeUnknown',
+      outcomeReason: 'disconnect',
+      clientProcessId: 'lost-process-1',
+      connectionLoss: { code: 1006, reason: 'network lost' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(sockets).toHaveLength(2);
+    expect(submittedPayloads).toHaveLength(1);
+    expect(disconnects).toHaveLength(1);
+    expect(reconnects).toHaveLength(1);
+    client.close();
+  });
+
+  it('returns outcomeUnknown when an order submission times out', async () => {
+    const client = TradeRepublicClient.create({ websocketFactory: () => new FakeSocket() });
+
+    const result = await client.orders.submit({
+      instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
+      lastClientPrice: 201.5, clientProcessId: 'timed-out-process-1', secAccNo: '0000000000', timeoutMs: 1,
+    });
+
+    expect(result).toMatchObject({
+      status: 'outcomeUnknown',
+      outcomeReason: 'timeout',
+      clientProcessId: 'timed-out-process-1',
+    });
+    client.close();
+  });
+
   it('supports current amount-based order payloads while previewing fees by derived size', async () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
@@ -870,6 +960,33 @@ describe('TradeRepublicClient', () => {
     });
     await expect(client.orders.cancel('order-1')).resolves.toMatchObject({ orderId: 'order-1', status: 'succeeded' });
     expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({ type: 'cancelOrder', orderId: 'order-1' });
+  });
+
+  it('returns outcomeUnknown and never replays cancellation after connection loss', async () => {
+    const payloads: Record<string, unknown>[] = [];
+    const client = TradeRepublicClient.create({
+      websocketReconnectDelayMs: 0,
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload) => {
+          if (payload.type !== 'cancelOrder') return;
+          payloads.push(payload);
+          if (payloads.length === 1) queueMicrotask(() => socket.emit('close', 1006, Buffer.from('network lost')));
+        });
+        return socket;
+      },
+    });
+
+    const result = await client.orders.cancel('order-1');
+
+    expect(result).toMatchObject({
+      orderId: 'order-1',
+      status: 'outcomeUnknown',
+      outcomeReason: 'disconnect',
+      connectionLoss: { code: 1006, reason: 'network lost' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(payloads).toHaveLength(1);
+    client.close();
   });
 
   it('rejects malformed order options before opening a websocket', async () => {
@@ -1119,7 +1236,7 @@ describe('TradeRepublicClient', () => {
       websocketFactory: () => {
         const socket = new FakeSocket((payload, id) => {
           if (payload.type === 'createPriceAlarm') {
-            socket.emit('message', `${id} createPriceAlarm ${JSON.stringify({ id: 'alarm-1' })}`);
+            socket.emit('message', `${id} createPriceAlarm ${JSON.stringify({ status: 'created', alarmId: 'alarm-1' })}`);
           }
           if (payload.type === 'cancelPriceAlarm') {
             socket.emit('message', `${id} cancelPriceAlarm ${JSON.stringify({ status: 'ok', id: payload.id })}`);
@@ -1130,13 +1247,13 @@ describe('TradeRepublicClient', () => {
       },
     });
 
-    await expect(client.priceAlarms.create({ isin: 'US1', price: 123.45, currency: 'EUR' })).resolves.toEqual({ id: 'alarm-1' });
+    await expect(client.priceAlarms.create({ isin: 'US1', price: 123.45 })).resolves.toEqual({ status: 'created', alarmId: 'alarm-1' });
     await expect(client.priceAlarms.cancel('alarm-1')).resolves.toEqual({ status: 'ok', id: 'alarm-1' });
 
     expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({
       type: 'createPriceAlarm',
-      isin: 'US1',
-      price: { value: '123.45', currency: 'EUR' },
+      instrumentId: 'US1',
+      targetPrice: 123.45,
     });
     expect(parseSubPayload(sockets[1]?.sent[1])).toEqual({ type: 'cancelPriceAlarm', id: 'alarm-1' });
   });
@@ -1145,22 +1262,22 @@ describe('TradeRepublicClient', () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
       fetch: mockFetchSequence(calls, [
-        jsonResponse({ id: 'watchlist-1', name: 'sdk-test-watchlist' }),
+        jsonResponse({ id: 'watchlist-1', name: 'sdk-test-watchlist-copy' }),
         jsonResponse({ id: 'watchlist-1', name: 'sdk-test-watchlist-renamed' }),
         jsonResponse({ id: 'watchlist-1', instrumentId: 'US1' }),
-        jsonResponse({}),
-        jsonResponse({}),
+        new Response(null, { status: 204 }),
+        new Response(null, { status: 204 }),
       ]),
     });
 
-    await expect(client.discovery.createWatchlist('sdk-test-watchlist')).resolves.toEqual({ id: 'watchlist-1', name: 'sdk-test-watchlist' });
+    await expect(client.discovery.cloneWatchlist('source-watchlist')).resolves.toEqual({ id: 'watchlist-1', name: 'sdk-test-watchlist-copy' });
     await expect(client.discovery.renameWatchlist('watchlist-1', 'sdk-test-watchlist-renamed')).resolves.toEqual({ id: 'watchlist-1', name: 'sdk-test-watchlist-renamed' });
     await expect(client.discovery.addWatchlistItem('watchlist-1', 'US1')).resolves.toEqual({ id: 'watchlist-1', instrumentId: 'US1' });
-    await expect(client.discovery.removeWatchlistItem('watchlist-1', 'US1')).resolves.toEqual({});
-    await expect(client.discovery.deleteWatchlist('watchlist-1')).resolves.toEqual({});
+    await expect(client.discovery.removeWatchlistItem('watchlist-1', 'US1')).resolves.toEqual(undefined);
+    await expect(client.discovery.deleteWatchlist('watchlist-1')).resolves.toEqual(undefined);
 
     expect(calls.map((call) => [call.init.method, new URL(call.url).pathname, call.init.body])).toEqual([
-      ['POST', '/api-gateway/watchlists/api/v2/watchlists', JSON.stringify({ name: 'sdk-test-watchlist' })],
+      ['POST', '/api-gateway/watchlists/api/v2/watchlists/source-watchlist/clone', undefined],
       ['PUT', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1', JSON.stringify({ name: 'sdk-test-watchlist-renamed' })],
       ['POST', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1/items', JSON.stringify({ instrument_id: 'US1', item_rank: -1 })],
       ['DELETE', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1/items/US1', undefined],

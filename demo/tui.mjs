@@ -14,6 +14,7 @@ const defaultInstrumentQuery = cleanString(process.env.TR_TUI_INSTRUMENT) || 'AA
 const deviceName = cleanString(process.env.TR_DEVICE_NAME) || 'handelsrepublik tui demo';
 const loginPhoneNumber = cleanString(process.env.TR_PHONE_NUMBER);
 const loginPin = cleanString(process.env.TR_PIN);
+const demoClientOptions = readDemoClientOptions();
 const wafLoadingFrames = ['Collecting WAF.', 'Collecting WAF..', 'Collecting WAF...'];
 const qrRefreshSkewMs = 8_000;
 const minQrDisplayMs = 8_000;
@@ -24,7 +25,7 @@ const searchAssetClasses = [
   { type: 'stock', label: 'Stocks' },
   { type: 'crypto', label: 'Crypto' },
   { type: 'etf', label: 'ETFs' },
-  { type: 'fund', label: 'Funds' },
+  { type: 'mutualFund', label: 'Mutual funds' },
   { type: 'bond', label: 'Bonds' },
 ];
 
@@ -44,6 +45,7 @@ const state = {
   phase: 'booting',
   status: 'Booting browser in the background and collecting the WAF token.',
   error: '',
+  schemaWarning: '',
   client: undefined,
   browser: undefined,
   webContext: undefined,
@@ -69,6 +71,7 @@ const state = {
     instrument: undefined,
     watchlist: undefined,
     watchlistItemIndex: 0,
+    watchlistMutation: undefined,
     selectionGeneration: 0,
     assetNames: new Map(),
     account: undefined,
@@ -96,15 +99,16 @@ const state = {
   },
   search: {
     visible: false,
+    focusIndex: 0,
     assetClassIndex: 0,
     query: '',
     results: [],
     selected: 0,
     loading: false,
     error: '',
+    notice: '',
     debounceTimer: undefined,
     requestGeneration: 0,
-    suppressNextSubmit: false,
     focusResultsOnSubmit: false,
   },
   order: {
@@ -186,7 +190,7 @@ const searchHeading = blessed.text({
   left: 2,
   right: 2,
   height: 1,
-  content: 'Tab / Shift-Tab moves focus. Use Left / Right on Asset class and Up / Down in Results.',
+  content: 'Tab / Shift-Tab moves focus. Left / Right changes class. Enter opens a result; A adds it to the watchlist.',
   style: {
     fg: 'white',
   },
@@ -383,8 +387,8 @@ screen.key(['o'], () => {
   if (state.phase === 'dashboard' && !state.search.visible && !state.order.visible) void openOrderFlow();
 });
 
-screen.key(['r'], () => {
-  if (state.phase === 'dashboard' && !state.order.visible) void refreshDashboard(true);
+screen.key(['delete'], () => {
+  if (state.phase === 'dashboard' && !state.search.visible && !state.order.visible) void removeSelectedWatchlistItem();
 });
 
 screen.key(['l'], () => {
@@ -404,11 +408,8 @@ screen.key(['enter'], () => {
 });
 
 searchInput.on('submit', (value) => {
-  const suppress = state.search.suppressNextSubmit;
   const focusResults = state.search.focusResultsOnSubmit;
-  state.search.suppressNextSubmit = false;
   state.search.focusResultsOnSubmit = false;
-  if (suppress) return;
   const query = cleanString(value);
   if (!query) {
     resetSearchResults('Start typing to search.');
@@ -427,7 +428,20 @@ searchInput.on('cancel', () => {
 });
 
 searchInput.on('focus', () => {
+  state.search.focusIndex = 0;
   if (state.search.visible && !searchInput._reading) searchInput.readInput();
+});
+
+searchAssetTabs.on('focus', () => {
+  state.search.focusIndex = 1;
+});
+
+searchResults.on('focus', () => {
+  state.search.focusIndex = 2;
+});
+
+searchResults.on('select item', (_, index) => {
+  if (state.search.results[index]) state.search.selected = index;
 });
 
 searchResults.on('select', async (_, index) => {
@@ -439,7 +453,8 @@ searchResults.on('select', async (_, index) => {
 
 searchResults.on('keypress', (ch, key) => {
   if (key.name === 'escape') closeSearch();
-  if (key.name === 'tab') cycleSearchFocus(searchResults, key.shift ? -1 : 1);
+  if (key.name === 'tab') moveSearchFocus(key.shift ? -1 : 1);
+  if (key.name === 'a') void addSelectedSearchResultToWatchlist();
 });
 
 searchAssetTabs.on('keypress', (ch, key) => {
@@ -448,7 +463,7 @@ searchAssetTabs.on('keypress', (ch, key) => {
     return;
   }
   if (key.name === 'tab') {
-    cycleSearchFocus(searchAssetTabs, key.shift ? -1 : 1);
+    moveSearchFocus(key.shift ? -1 : 1);
     return;
   }
   if (key.name === 'left' || key.name === 'h') {
@@ -473,19 +488,11 @@ searchInput.on('keypress', (ch, key) => {
     return;
   }
   if (key.name === 'tab') {
-    const inputValue = searchInput.getValue();
-    suppressSearchSubmitForFocusChange();
-    cycleSearchFocus(searchInput, key.shift ? -1 : 1);
-    setImmediate(() => {
-      if (!state.search.visible) return;
-      searchInput.setValue(inputValue);
-      render();
-    });
+    moveSearchFocus(key.shift ? -1 : 1);
     return;
   }
   if (key.name === 'down' && state.search.results.length) {
-    suppressSearchSubmitForFocusChange();
-    searchResults.focus();
+    focusSearchStage(2);
     return;
   }
   setImmediate(scheduleSearchFromInput);
@@ -498,6 +505,7 @@ function scheduleSearchFromInput() {
   const query = cleanString(searchInput.getValue());
   if (query === state.search.query) return;
   state.search.query = query;
+  state.search.notice = '';
   const generation = ++state.search.requestGeneration;
 
   if (!query) {
@@ -523,6 +531,7 @@ async function runSearch(query, generation, options = {}) {
   if (!state.client || !state.search.visible || generation !== state.search.requestGeneration) return;
   const assetClass = activeSearchAssetClass();
   state.search.query = query;
+  state.search.notice = '';
   state.search.loading = true;
   state.search.error = '';
   searchResults.setLabel(` ${assetClass.label} results `);
@@ -567,19 +576,28 @@ function activeSearchAssetClass() {
   return searchAssetClasses[state.search.assetClassIndex] ?? searchAssetClasses[0];
 }
 
-function suppressSearchSubmitForFocusChange() {
-  state.search.suppressNextSubmit = true;
+function moveSearchFocus(offset) {
+  const nextIndex = (state.search.focusIndex + offset + 3) % 3;
+  focusSearchStage(nextIndex);
+}
+
+function stopSearchInputForFocusChange() {
+  if (state.search.focusIndex !== 0 || !searchInput._reading) return;
+  const value = searchInput.getValue();
+  searchInput._done?.('stop');
   setImmediate(() => {
-    state.search.suppressNextSubmit = false;
+    if (!state.search.visible) return;
+    searchInput.setValue(value);
+    render();
   });
 }
 
-function cycleSearchFocus(current, offset) {
-  const widgets = [searchInput, searchAssetTabs, searchResults];
-  const currentIndex = Math.max(widgets.indexOf(current), 0);
-  const nextIndex = (currentIndex + offset + widgets.length) % widgets.length;
-  if (widgets[nextIndex] === searchInput) focusSearchInput();
-  else widgets[nextIndex].focus();
+function focusSearchStage(index) {
+  if (index !== 0) stopSearchInputForFocusChange();
+  state.search.focusIndex = index;
+  if (index === 0) focusSearchInput();
+  else if (index === 1) searchAssetTabs.focus();
+  else searchResults.focus();
   render();
 }
 
@@ -609,6 +627,7 @@ function selectSearchAssetClass(index) {
   const generation = ++state.search.requestGeneration;
   state.search.loading = false;
   state.search.error = '';
+  state.search.notice = '';
   state.search.results = [];
   state.search.selected = 0;
 
@@ -619,6 +638,78 @@ function selectSearchAssetClass(index) {
   }
 
   void runSearch(query, generation);
+}
+
+async function addSelectedSearchResultToWatchlist() {
+  if (!state.client || state.dashboard.watchlistMutation) return;
+  const result = state.search.results[state.search.selected];
+  const watchlist = state.dashboard.watchlist;
+  const instrumentId = watchlistInstrumentId(result);
+  if (!result || !instrumentId) return;
+  if (!watchlist?.id) {
+    state.search.notice = 'No watchlist is available to add this instrument to.';
+    render();
+    return;
+  }
+  const name = result.name || instrumentId;
+  if (watchlist.items?.some((item) => watchlistInstrumentId(item) === instrumentId)) {
+    state.search.notice = `${name} is already in ${watchlist.name || 'the watchlist'}.`;
+    render();
+    return;
+  }
+
+  state.dashboard.watchlistMutation = 'adding';
+  state.dashboard.watchlistsError = '';
+  state.search.notice = `Adding ${name} to ${watchlist.name || 'the watchlist'}...`;
+  render();
+  try {
+    await state.client.discovery.addWatchlistItem(watchlist.id, instrumentId);
+    await refreshWatchlists();
+    state.search.notice = `Added ${name} to ${watchlist.name || 'the watchlist'}.`;
+    state.status = state.search.notice;
+  } catch (error) {
+    if (await handleUnauthorized(error)) return;
+    state.dashboard.watchlistsError = formatError(error);
+    state.search.notice = `Could not add ${name}: ${state.dashboard.watchlistsError}`;
+    state.status = `Watchlist add failed for ${name}.`;
+  } finally {
+    state.dashboard.watchlistMutation = undefined;
+    render();
+  }
+}
+
+async function removeSelectedWatchlistItem() {
+  if (!state.client || state.dashboard.watchlistMutation) return;
+  const watchlist = state.dashboard.watchlist;
+  const item = watchlist?.items?.[state.dashboard.watchlistItemIndex];
+  const instrumentId = watchlistInstrumentId(item);
+  if (!watchlist?.id || !item || !instrumentId) {
+    state.status = watchlist?.items?.length ? 'The selected watchlist entry has no instrument id.' : 'The watchlist is empty.';
+    render();
+    return;
+  }
+
+  const name = item.name || instrumentId;
+  state.dashboard.watchlistMutation = 'removing';
+  state.dashboard.watchlistsError = '';
+  state.status = `Removing ${name} from ${watchlist.name || 'the watchlist'}...`;
+  render();
+  try {
+    await state.client.discovery.removeWatchlistItem(watchlist.id, instrumentId);
+    await refreshWatchlists();
+    state.status = `Removed ${name} from ${watchlist.name || 'the watchlist'}.`;
+  } catch (error) {
+    if (await handleUnauthorized(error)) return;
+    state.dashboard.watchlistsError = formatError(error);
+    state.status = `Could not remove ${name} from the watchlist.`;
+  } finally {
+    state.dashboard.watchlistMutation = undefined;
+    render();
+  }
+}
+
+function watchlistInstrumentId(item) {
+  return cleanString(item?.isin) || cleanString(item?.instrumentId) || cleanString(item?.id);
 }
 
 loginBox.key(['escape'], () => {
@@ -660,6 +751,11 @@ async function boot() {
     render();
     state.client = TradeRepublicClient.create({
       sessionStore,
+      ...demoClientOptions,
+      onRawSchemaValidationFailure: ({ schemaName, error }) => {
+        state.schemaWarning = `${schemaName}: ${formatError(error)}`;
+        render();
+      },
     });
     await state.client.auth.restoreSession();
     const restored = state.client.getSession();
@@ -1698,12 +1794,13 @@ function openSearch() {
   state.search.selected = 0;
   state.search.loading = false;
   state.search.error = '';
+  state.search.notice = '';
   searchOverlay.show();
   searchOverlay.setFront();
   searchInput.setValue('');
   searchAssetTabs.select(state.search.assetClassIndex);
   resetSearchResults('Start typing to search.');
-  focusSearchInput();
+  focusSearchStage(0);
   render();
 }
 
@@ -1712,7 +1809,6 @@ function closeSearch() {
   clearTimeout(state.search.debounceTimer);
   state.search.debounceTimer = undefined;
   state.search.requestGeneration += 1;
-  state.search.suppressNextSubmit = false;
   state.search.focusResultsOnSubmit = false;
   state.search.visible = false;
   searchOverlay.hide();
@@ -1805,10 +1901,15 @@ function render() {
   }
 
   if (state.search.visible) {
+    updateSearchHeading();
     searchOverlay.show();
   }
 
   screen.render();
+}
+
+function updateSearchHeading() {
+  searchHeading.setContent(state.search.notice || 'Tab / Shift-Tab moves focus. Left / Right changes class. Enter opens a result; A adds it to the watchlist.');
 }
 
 function updateStatusBox() {
@@ -1826,10 +1927,17 @@ function updateStatusBox() {
   if (state.dashboard.instrument?.name) {
     parts.push(`instrument: {white-fg}${escapeTags(state.dashboard.instrument.name)}{/white-fg}`);
   }
+  if (state.schemaWarning) {
+    parts.push('{yellow-fg}schema drift{/yellow-fg}');
+  }
   statusBox.setContent([
     parts.join('  |  '),
     state.phase !== 'booting' && state.status ? `${state.status}${state.login.countdown ? `  |  QR refreshes in ${state.login.countdown}` : ''}` : '',
-    state.error ? `{red-fg}${escapeTags(state.error)}{/red-fg}` : '',
+    state.error
+      ? `{red-fg}${escapeTags(state.error)}{/red-fg}`
+      : state.schemaWarning
+        ? `{yellow-fg}${escapeTags(state.schemaWarning)}{/yellow-fg}`
+        : '',
   ].filter(Boolean).join('\n'));
 }
 
@@ -1884,8 +1992,8 @@ function renderKeysBox() {
         '/ or s: search instrument',
         'q: close search',
         'Up/Down or j/k: select watchlist item',
+        'Delete: remove selected watchlist item',
         'o: place buy/sell order',
-        'r: refresh data',
         'l: clear session and relogin',
         'Ctrl-C: quit',
       ];
@@ -1895,25 +2003,34 @@ function renderKeysBox() {
 function formatWatchlistBox() {
   const lines = [];
   const watchlist = state.dashboard.watchlist;
-  if (state.dashboard.loading.watchlists && !watchlist) lines.push('Loading cloud watchlist...');
+  if (state.dashboard.loading.watchlists && !watchlist) lines.push('Loading watchlist...');
   if (!watchlist) {
-    if (!state.dashboard.loading.watchlists) lines.push('No cloud watchlist available.');
+    if (!state.dashboard.loading.watchlists) lines.push('No watchlist available.');
     if (state.dashboard.watchlistsError) lines.push(`Error: ${state.dashboard.watchlistsError}`);
     return lines.join('\n');
   }
-  lines.push(`${watchlist.name || 'Cloud watchlist'}`);
+  lines.push(`${watchlist.name || 'Watchlist'}`);
   lines.push(`Count: ${Array.isArray(watchlist?.items) ? watchlist.items.length : 0}`);
+  if (state.dashboard.watchlistMutation) lines.push(`${state.dashboard.watchlistMutation === 'adding' ? 'Adding' : 'Removing'} watchlist entry...`);
   lines.push('');
   const allItems = Array.isArray(watchlist?.items) ? watchlist.items : [];
-  const start = clamp(state.dashboard.watchlistItemIndex - 3, 0, Math.max(0, allItems.length - 8));
-  const items = allItems.slice(start, start + 8);
+  const boxHeight = numericWidgetDimension(watchlistBox.height, 10);
+  const errorRows = state.dashboard.watchlistsError ? 1 : 0;
+  const visibleRows = Math.max(1, boxHeight - 2 - lines.length - errorRows);
+  const start = clamp(
+    state.dashboard.watchlistItemIndex - Math.floor(visibleRows / 2),
+    0,
+    Math.max(0, allItems.length - visibleRows),
+  );
+  const items = allItems.slice(start, start + visibleRows);
   if (!items.length) {
-    lines.push('The cloud watchlist is empty.');
+    lines.push('The watchlist is empty.');
     return lines.join('\n');
   }
+  const itemWidth = Math.max(8, numericWidgetDimension(watchlistBox.width, 30) - 6);
   for (const [offset, item] of items.entries()) {
     const selected = start + offset === state.dashboard.watchlistItemIndex;
-    lines.push(`${selected ? '{cyan-fg}>{/cyan-fg}' : ' '} ${formatWatchlistItem(item)}`);
+    lines.push(`${selected ? '{cyan-fg}>{/cyan-fg}' : ' '} ${truncateLine(formatWatchlistItem(item), itemWidth)}`);
   }
   if (state.dashboard.watchlistsError) lines.push(`Error: ${state.dashboard.watchlistsError}`);
   return lines.join('\n');
@@ -2049,6 +2166,17 @@ function formatSearchResult(item, index) {
 
 function formatWatchlistItem(item) {
   return firstString(item?.name, item?.title, item?.instrumentName) || 'Unknown instrument';
+}
+
+function numericWidgetDimension(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : fallback;
+}
+
+function truncateLine(value, width) {
+  const text = String(value);
+  if (text.length <= width) return text;
+  return width <= 1 ? text.slice(0, width) : `${text.slice(0, width - 1)}…`;
 }
 
 function summarizeObject(value, preferredKeys, maxLines = 6) {
@@ -2475,9 +2603,30 @@ async function shutdown(code = 0) {
     clearTimeout(state.login.retryTimer);
     state.login.pollAbort?.abort();
     if (state.browser) await state.browser.close().catch(() => undefined);
+    state.client?.close();
   } finally {
     screen.program.showCursor();
     screen.destroy();
     process.exit(code);
   }
+}
+
+function readDemoClientOptions() {
+  return {
+    websocketMode: process.env.TR_WEBSOCKET_MODE === 'isolated' ? 'isolated' : 'shared',
+    websocketReconnectDelayMs: positiveInteger(process.env.TR_WEBSOCKET_RECONNECT_MS, 250),
+    rawSchemaValidation: schemaValidationMode(process.env.TR_RAW_SCHEMA_VALIDATION),
+  };
+}
+
+function schemaValidationMode(value) {
+  const normalized = cleanString(value)?.toLowerCase();
+  if (normalized === 'false' || normalized === 'off' || normalized === 'disabled') return false;
+  if (normalized === 'true' || normalized === 'throw' || normalized === 'strict') return true;
+  return 'passthrough';
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }

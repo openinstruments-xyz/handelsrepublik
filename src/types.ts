@@ -36,6 +36,20 @@ export interface RawSchemaValidationFailure {
   error: unknown;
 }
 
+export interface WebSocketDisconnectEvent {
+  disconnectedAt: string;
+  code?: number | undefined;
+  reason?: string | undefined;
+  reconnectDelayMs: number;
+}
+
+export interface WebSocketReconnectEvent {
+  disconnectedAt: string;
+  reconnectedAt: string;
+  downtimeMs: number;
+  reconnectAttempts: number;
+}
+
 export interface TradeRepublicClientOptions {
   apiBaseUrl?: string | undefined;
   websocketUrl?: string | undefined;
@@ -48,6 +62,10 @@ export interface TradeRepublicClientOptions {
   endpoints?: EndpointMap | undefined;
   fetch?: typeof fetch | undefined;
   websocketFactory?: WebSocketFactory | undefined;
+  websocketMode?: 'shared' | 'isolated' | undefined;
+  websocketReconnectDelayMs?: number | undefined;
+  onWebSocketDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined;
+  onWebSocketReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined;
   rawSchemaValidation?: RawSchemaValidationMode | undefined;
   onRawSchemaValidationFailure?: ((failure: RawSchemaValidationFailure) => void) | undefined;
 }
@@ -124,6 +142,17 @@ export interface Asset {
   exchangeIds?: string[] | undefined;
   raw: unknown;
 }
+
+export type AssetSearchType =
+  | 'stock'
+  | 'etf'
+  | 'fund'
+  | 'mutualFund'
+  | 'privateFund'
+  | 'derivative'
+  | 'crypto'
+  | 'bond'
+  | 'synthetic';
 
 export interface WatchlistItem extends Asset {
   rank?: number | undefined;
@@ -233,13 +262,15 @@ export interface OrderPreview {
   raw: unknown;
 }
 
-export type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | string;
+export type OrderSubmissionStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed' | 'outcomeUnknown' | string;
 
 export interface OrderSubmission {
   status: OrderSubmissionStatus;
   orderId?: string | undefined;
   clientProcessId: string;
   updates: unknown[];
+  outcomeReason?: 'disconnect' | 'timeout' | undefined;
+  connectionLoss?: WebSocketDisconnectEvent | undefined;
   error?: unknown;
   raw: unknown;
 }
@@ -247,6 +278,9 @@ export interface OrderSubmission {
 export interface OrderCancellation {
   orderId: string;
   status?: string | undefined;
+  outcomeReason?: 'disconnect' | 'timeout' | undefined;
+  connectionLoss?: WebSocketDisconnectEvent | undefined;
+  error?: unknown;
   raw: unknown;
 }
 

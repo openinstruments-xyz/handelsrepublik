@@ -7,19 +7,18 @@ import {
   schemaRegistry,
   TradeRepublicClient,
   TradeRepublicHttpError,
-  TradeRepublicProtocolError,
-  TradeRepublicSchemaError,
 } from '../../src/index.js';
+import type { AssetSearchType } from '../../src/index.js';
 
 const enabled = process.env.TR_INTEGRATION === '1';
 const sessionPath = process.env.TR_SESSION_FILE ?? join(process.cwd(), 'demo', '.demo-session.json');
 const testAssetId = process.env.TR_INTEGRATION_ISIN ?? 'US0378331005';
 const testExchangeId = process.env.TR_INTEGRATION_EXCHANGE ?? 'LSX';
 const testQuery = process.env.TR_INTEGRATION_QUERY ?? 'apple';
-const testAssetType = process.env.TR_INTEGRATION_TYPE ?? 'stock';
+const testAssetType = (process.env.TR_INTEGRATION_TYPE ?? 'stock') as AssetSearchType;
 const testPriceAlarmPrice = Number(process.env.TR_INTEGRATION_PRICE_ALARM_PRICE ?? '1');
 
-describe('TradeRepublicClient readonly live integration', { skip: enabled ? false : 'set TR_INTEGRATION=1 to run live Trade Republic integration tests' }, () => {
+describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set TR_INTEGRATION=1 to run live Trade Republic integration tests' }, () => {
   it('restores and refreshes an existing real web session', { timeout: 30_000 }, async () => {
     const { client } = await createLiveClient();
 
@@ -85,20 +84,19 @@ describe('TradeRepublicClient readonly live integration', { skip: enabled ? fals
       { name: 'discovery.screenerOptions', run: () => client.discovery.screenerOptions() },
       { name: 'discovery.userPreferences', run: () => client.discovery.userPreferences() },
     ];
-    const results = await Promise.allSettled(calls.map((call) => call.run()));
-
-    const failures: string[] = [];
-    results.forEach((result, index) => {
-      if (result.status !== 'rejected') return;
-      const call = calls[index]!;
-      const message = `${call.name}: ${formatError(result.reason)}`;
-      if (call.optional && !isAuthFailure(result.reason)) {
-        t.diagnostic(`optional read endpoint unavailable for this account: ${message}`);
-        return;
-      }
-      failures.push(message);
-    });
-    assert.deepEqual(failures, []);
+    for (const call of calls) {
+      await t.test(call.name, async (endpointTest) => {
+        try {
+          await call.run();
+        } catch (error) {
+          if (call.optional && isOptionalStatus(call.name, error)) {
+            endpointTest.skip(`endpoint unavailable for this account: ${formatError(error)}`);
+            return;
+          }
+          throw error;
+        }
+      });
+    }
   });
 
   it('receives at least one read-only websocket resource message', { timeout: 30_000 }, async () => {
@@ -130,18 +128,16 @@ describe('TradeRepublicClient readonly live integration', { skip: enabled ? fals
     ].sort());
   });
 
-  it('validates disposable low-risk price alarm mutations with cleanup', { timeout: 45_000 }, async (t) => {
+  it('validates disposable low-risk price alarm mutations with cleanup', { timeout: 45_000 }, async () => {
     const { client } = await createLiveClient();
     let alarmId: string | undefined;
 
     try {
-      const created = await runFeatureGated(t, 'priceAlarms.create', () => client.priceAlarms.create({
+      const created = await client.priceAlarms.create({
         isin: testAssetId,
         price: testPriceAlarmPrice,
-        currency: 'EUR',
         timeoutMs: 15_000,
-      }));
-      if (created === undefined) return;
+      });
       alarmId = firstStringByKey(created, 'id', 'priceAlarmId', 'alarmId');
 
       const alarms = await client.priceAlarms.list({ timeoutMs: 15_000 });
@@ -154,22 +150,82 @@ describe('TradeRepublicClient readonly live integration', { skip: enabled ? fals
     }
   });
 
-  it('validates disposable low-risk watchlist mutations with cleanup', { timeout: 45_000 }, async (t) => {
+  it('validates restorable low-risk watchlist mutations', { timeout: 45_000 }, async (t) => {
+    const { client } = await createLiveClient();
+    const watchlists = await client.discovery.watchlists();
+    const watchlistId = firstStringByKey(watchlists, 'id', 'watchlistId');
+    assert.ok(watchlistId, 'expected an existing cloud watchlist');
+
+    const items = await client.discovery.rawWatchlistItems(watchlistId);
+    const candidates = [testAssetId, 'US5949181045', 'US67066G1040'];
+    const instrumentId = candidates.find((candidate) => !hasStringByKey(items, candidate, 'instrumentId', 'instrument_id', 'isin'));
+    assert.ok(instrumentId, 'expected at least one test instrument that is not already in the watchlist');
+
+    await t.test('renames the cloud watchlist when the account supports rename', async (renameTest) => {
+      try {
+        await client.discovery.renameWatchlist(watchlistId, firstStringByKey(watchlists, 'name', 'title') ?? '');
+      } catch (error) {
+        if (isOptionalStatus('discovery.watchlists.rename', error)) {
+          renameTest.skip(`cloud watchlist cannot be renamed for this account: ${formatError(error)}`);
+          return;
+        }
+        throw error;
+      }
+    });
+
+    await t.test('adds and removes a disposable watchlist item', async () => {
+      let added = false;
+      try {
+        await client.discovery.addWatchlistItem(watchlistId, instrumentId);
+        added = true;
+        assert.equal(hasStringByKey(await client.discovery.rawWatchlistItems(watchlistId), instrumentId, 'instrumentId', 'instrument_id', 'isin'), true);
+        await client.discovery.removeWatchlistItem(watchlistId, instrumentId);
+        added = false;
+        assert.equal(hasStringByKey(await client.discovery.rawWatchlistItems(watchlistId), instrumentId, 'instrumentId', 'instrument_id', 'isin'), false);
+      } finally {
+        if (added) await client.discovery.removeWatchlistItem(watchlistId, instrumentId);
+      }
+    });
+  });
+
+  it('validates disposable watchlist clone/delete when the account supports clones', { timeout: 60_000 }, async (t) => {
     const { client } = await createLiveClient();
     const name = `sdk-test-${Date.now()}`;
     const renamed = `${name}-renamed`;
     let watchlistId: string | undefined;
 
     try {
-      const created = await runFeatureGated(t, 'discovery.watchlists.create', () => client.discovery.createWatchlist(name));
-      if (created === undefined) return;
-      watchlistId = firstStringByKey(created, 'id', 'watchlistId');
-      if (!watchlistId) watchlistId = findWatchlistId(await client.discovery.watchlists(), name);
-      assert.ok(watchlistId, 'expected disposable watchlist id after create');
+      const before = await client.discovery.watchlists();
+      const sourceWatchlistId = firstStringByKey(before, 'id', 'watchlistId');
+      assert.ok(sourceWatchlistId, 'expected an existing watchlist to clone');
+      const existingIds = new Set(allStringsByKey(before, 'id', 'watchlistId'));
+
+      let created: unknown;
+      try {
+        created = await client.discovery.cloneWatchlist(sourceWatchlistId);
+      } catch (error) {
+        if (isOptionalStatus('discovery.watchlists.clone', error)) {
+          t.skip(`cloud watchlist cannot be cloned for this account: ${formatError(error)}`);
+          return;
+        }
+        throw error;
+      }
+      watchlistId = allStringsByKey(created, 'id', 'watchlistId').find((id) => !existingIds.has(id));
+      for (let attempt = 0; !watchlistId && attempt < 10; attempt += 1) {
+        await delay(500);
+        watchlistId = allStringsByKey(await client.discovery.watchlists(), 'id', 'watchlistId').find((id) => !existingIds.has(id));
+      }
+      assert.ok(watchlistId, 'expected disposable watchlist id after clone');
 
       await client.discovery.renameWatchlist(watchlistId, renamed);
+      const clonedItems = await client.discovery.rawWatchlistItems(watchlistId);
+      if (hasStringByKey(clonedItems, testAssetId, 'instrumentId', 'instrument_id', 'isin')) {
+        await client.discovery.removeWatchlistItem(watchlistId, testAssetId);
+      }
       await client.discovery.addWatchlistItem(watchlistId, testAssetId);
+      assert.equal(hasStringByKey(await client.discovery.rawWatchlistItems(watchlistId), testAssetId, 'instrumentId', 'instrument_id', 'isin'), true);
       await client.discovery.removeWatchlistItem(watchlistId, testAssetId);
+      assert.equal(hasStringByKey(await client.discovery.rawWatchlistItems(watchlistId), testAssetId, 'instrumentId', 'instrument_id', 'isin'), false);
 
       const watchlists = await client.discovery.watchlists();
       assert.equal(findWatchlistId(watchlists, renamed), watchlistId);
@@ -201,6 +257,7 @@ function delay(ms: number): Promise<void> {
 }
 
 function formatError(error: unknown): string {
+  if (error instanceof TradeRepublicHttpError) return `${error.name} (status ${error.status}): ${error.message}`;
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   try {
     return JSON.stringify(error);
@@ -209,27 +266,10 @@ function formatError(error: unknown): string {
   }
 }
 
-function isAuthFailure(error: unknown): boolean {
-  return error instanceof TradeRepublicHttpError && (error.status === 401 || error.status === 403);
-}
-
-async function runFeatureGated<T>(t: { diagnostic(message: string): void }, label: string, run: () => Promise<T>): Promise<T | undefined> {
-  try {
-    return await run();
-  } catch (error) {
-    if (error instanceof TradeRepublicSchemaError || isAuthFailure(error)) throw error;
-    if (isFeatureUnavailable(error)) {
-      t.diagnostic(`optional low-risk endpoint unavailable for this account/API shape: ${label}: ${formatError(error)}`);
-      return undefined;
-    }
-    throw error;
-  }
-}
-
-function isFeatureUnavailable(error: unknown): boolean {
-  if (error instanceof TradeRepublicHttpError) return [400, 404, 405, 409, 422, 500].includes(error.status);
-  if (error instanceof TradeRepublicProtocolError) return /JSON_PARSE_ERROR|BAD_SUBSCRIPTION_TYPE|validation failed/i.test(error.message);
-  return false;
+function isOptionalStatus(schemaName: string, error: unknown): boolean {
+  if (!(error instanceof TradeRepublicHttpError)) return false;
+  const optionalStatuses = schemaRegistry.find((entry) => entry.name === schemaName)?.live?.optionalStatuses ?? [];
+  return optionalStatuses.includes(error.status);
 }
 
 function firstStringByKey(value: unknown, ...keys: string[]): string | undefined {
@@ -251,6 +291,20 @@ function firstStringByKey(value: unknown, ...keys: string[]): string | undefined
     if (found) return found;
   }
   return undefined;
+}
+
+function allStringsByKey(value: unknown, ...keys: string[]): string[] {
+  if (!value || typeof value !== 'object') return [];
+  if (Array.isArray(value)) return value.flatMap((item) => allStringsByKey(item, ...keys));
+  const record = value as Record<string, unknown>;
+  return [
+    ...keys.flatMap((key) => typeof record[key] === 'string' && record[key] ? [record[key] as string] : []),
+    ...Object.values(record).flatMap((candidate) => allStringsByKey(candidate, ...keys)),
+  ];
+}
+
+function hasStringByKey(value: unknown, expected: string, ...keys: string[]): boolean {
+  return allStringsByKey(value, ...keys).includes(expected);
 }
 
 function findWatchlistId(value: unknown, name: string): string | undefined {

@@ -8,6 +8,7 @@ import {
   TradeRepublicSchemaError,
   validateRawResponse,
 } from '../src/index.js';
+import { operationCatalog } from '../src/operation-specs.js';
 
 describe('schema registry', () => {
   it('validates committed raw fixtures', () => {
@@ -39,7 +40,7 @@ describe('schema registry', () => {
 
     assert.deepEqual(lowRisk.sort(), [
       'discovery.watchlists.addItem',
-      'discovery.watchlists.create',
+      'discovery.watchlists.clone',
       'discovery.watchlists.delete',
       'discovery.watchlists.removeItem',
       'discovery.watchlists.rename',
@@ -57,6 +58,14 @@ describe('schema registry', () => {
     for (const entry of schemaRegistry) {
       assert.equal(typeof entry.requestSchema.safeParse, 'function', entry.name);
       assert.equal(typeof entry.responseSchema.safeParse, 'function', entry.name);
+    }
+  });
+
+  it('backs every declarative operation with a registered response schema', () => {
+    const schemaNames = new Set(schemaRegistry.map((entry) => entry.name));
+    for (const operation of operationCatalog) {
+      assert.ok(operation.schemaName, `${operation.name} has no response schema`);
+      assert.equal(schemaNames.has(operation.schemaName), true, `${operation.name} uses unknown schema ${operation.schemaName}`);
     }
   });
 
