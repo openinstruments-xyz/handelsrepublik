@@ -768,11 +768,8 @@ declare class PriceAlarmsApi {
     create(options: {
         isin: string;
         price: number;
-        currency?: string;
-        crossing?: string;
-        note?: string;
         timeoutMs?: number;
-    } & Record<string, unknown>): Promise<unknown>;
+    }): Promise<unknown>;
     rawCreate(payload: Record<string, unknown>, options?: {
         timeoutMs?: number;
     }): Promise<unknown>;
@@ -875,8 +872,8 @@ declare class DiscoveryApi {
         pageSize?: number;
     }): Promise<unknown>;
     rawWatchlists(): Promise<unknown>;
-    createWatchlist(name: string): Promise<unknown>;
-    rawCreateWatchlist(name: string): Promise<unknown>;
+    cloneWatchlist(watchlistId: string): Promise<unknown>;
+    rawCloneWatchlist(watchlistId: string): Promise<unknown>;
     renameWatchlist(watchlistId: string, name: string): Promise<unknown>;
     rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown>;
     deleteWatchlist(watchlistId: string): Promise<unknown>;

@@ -39,7 +39,7 @@ describe('schema registry', () => {
 
     assert.deepEqual(lowRisk.sort(), [
       'discovery.watchlists.addItem',
-      'discovery.watchlists.create',
+      'discovery.watchlists.clone',
       'discovery.watchlists.delete',
       'discovery.watchlists.removeItem',
       'discovery.watchlists.rename',

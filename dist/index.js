@@ -1820,10 +1820,12 @@ var sessionSchema = z.union([
 var priceAlarmMutationSchema = z.union([
   emptyObject,
   z.strictObject({ id: z.string() }),
+  z.strictObject({ status: z.string().optional(), alarmId: z.string() }),
   z.strictObject({ priceAlarmId: z.string() }),
   z.strictObject({ status: z.string().optional(), id: z.string().optional() })
 ]);
 var watchlistMutationSchema = z.union([
+  z.undefined(),
   emptyObject,
   jsonRecord
 ]);
@@ -1882,8 +1884,8 @@ var schemaRegistry = [
   entry("discovery.instrumentStatus", "Instrument status", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}", jsonRecord),
   entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", jsonValue),
   entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", jsonValue),
-  entry("discovery.watchlists.create", "Create watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
+  entry("discovery.watchlists.clone", "Clone watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone", watchlistMutationSchema, { live: { sample: "cleanup", optionalStatuses: [404] } }),
+  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup", optionalStatuses: [404] } }),
   entry("discovery.watchlists.delete", "Delete watchlist", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.addItem", "Add watchlist item", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.removeItem", "Remove watchlist item", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
@@ -2870,8 +2872,8 @@ var PriceAlarmsApi = class {
     return validated(this.validateRaw, "priceAlarms.notifications", this.raw.query({ type: "priceAlarmNotifications" }, pickTimeoutOptions(options)));
   }
   create(options) {
-    const { timeoutMs, currency = "EUR", price, ...rest } = options;
-    const payload = { ...rest, price: { value: String(price), currency } };
+    const { timeoutMs, isin, price } = options;
+    const payload = { instrumentId: isin, targetPrice: price };
     return this.rawCreate(payload, timeoutMs === void 0 ? {} : { timeoutMs });
   }
   rawCreate(payload, options = {}) {
@@ -3028,11 +3030,11 @@ var DiscoveryApi = class {
   rawWatchlists() {
     return validated(this.validateRaw, "discovery.watchlists", this.http.request("GET", "/api-gateway/watchlists/api/v2/watchlists"));
   }
-  createWatchlist(name) {
-    return this.rawCreateWatchlist(name);
+  cloneWatchlist(watchlistId) {
+    return this.rawCloneWatchlist(watchlistId);
   }
-  rawCreateWatchlist(name) {
-    return validated(this.validateRaw, "discovery.watchlists.create", this.http.request("POST", "/api-gateway/watchlists/api/v2/watchlists", { name }));
+  rawCloneWatchlist(watchlistId) {
+    return validated(this.validateRaw, "discovery.watchlists.clone", this.http.request("POST", `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/clone`));
   }
   renameWatchlist(watchlistId, name) {
     return this.rawRenameWatchlist(watchlistId, name);

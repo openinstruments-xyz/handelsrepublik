@@ -130,11 +130,13 @@ const sessionSchema = z.union([
 const priceAlarmMutationSchema = z.union([
   emptyObject,
   z.strictObject({ id: z.string() }),
+  z.strictObject({ status: z.string().optional(), alarmId: z.string() }),
   z.strictObject({ priceAlarmId: z.string() }),
   z.strictObject({ status: z.string().optional(), id: z.string().optional() }),
 ]);
 
 const watchlistMutationSchema = z.union([
+  z.undefined(),
   emptyObject,
   jsonRecord,
 ]);
@@ -194,8 +196,8 @@ export const schemaRegistry = [
   entry('discovery.instrumentStatus', 'Instrument status', 'rest', 'read', 'GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}', jsonRecord),
   entry('discovery.watchlists', 'Watchlists', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists', jsonValue),
   entry('discovery.watchlists.items', 'Watchlist items', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', jsonValue),
-  entry('discovery.watchlists.create', 'Create watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
-  entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
+  entry('discovery.watchlists.clone', 'Clone watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone', watchlistMutationSchema, { live: { sample: 'cleanup', optionalStatuses: [404] } }),
+  entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup', optionalStatuses: [404] } }),
   entry('discovery.watchlists.delete', 'Delete watchlist', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.addItem', 'Add watchlist item', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.removeItem', 'Remove watchlist item', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),

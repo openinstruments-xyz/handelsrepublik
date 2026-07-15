@@ -1072,9 +1072,9 @@ export class PriceAlarmsApi {
     return validated(this.validateRaw, 'priceAlarms.notifications', this.raw.query({ type: 'priceAlarmNotifications' }, pickTimeoutOptions(options)));
   }
 
-  create(options: { isin: string; price: number; currency?: string; crossing?: string; note?: string; timeoutMs?: number } & Record<string, unknown>): Promise<unknown> {
-    const { timeoutMs, currency = 'EUR', price, ...rest } = options;
-    const payload = { ...rest, price: { value: String(price), currency } };
+  create(options: { isin: string; price: number; timeoutMs?: number }): Promise<unknown> {
+    const { timeoutMs, isin, price } = options;
+    const payload = { instrumentId: isin, targetPrice: price };
     return this.rawCreate(payload, timeoutMs === undefined ? {} : { timeoutMs });
   }
 
@@ -1261,12 +1261,12 @@ export class DiscoveryApi {
     return validated(this.validateRaw, 'discovery.watchlists', this.http.request('GET', '/api-gateway/watchlists/api/v2/watchlists'));
   }
 
-  createWatchlist(name: string): Promise<unknown> {
-    return this.rawCreateWatchlist(name);
+  cloneWatchlist(watchlistId: string): Promise<unknown> {
+    return this.rawCloneWatchlist(watchlistId);
   }
 
-  rawCreateWatchlist(name: string): Promise<unknown> {
-    return validated(this.validateRaw, 'discovery.watchlists.create', this.http.request('POST', '/api-gateway/watchlists/api/v2/watchlists', { name }));
+  rawCloneWatchlist(watchlistId: string): Promise<unknown> {
+    return validated(this.validateRaw, 'discovery.watchlists.clone', this.http.request('POST', `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/clone`));
   }
 
   renameWatchlist(watchlistId: string, name: string): Promise<unknown> {
