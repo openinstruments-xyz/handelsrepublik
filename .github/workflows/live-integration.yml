@@ -63,7 +63,16 @@ jobs:
       - name: Rotate encrypted GitHub session secret
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION || secrets.TR_SECRET_ROTATION_TOKEN }}
-        run: gh secret set TR_SESSION_JSON --env trade-republic-tests --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh secret set TR_SESSION_JSON --env trade-republic-tests --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
       - name: Run strict non-order live integration tests
         run: npm run test:integration
       - name: Remove materialized session
