@@ -2,6 +2,14 @@ export { TradeRepublicClient } from './traderepublic-client.js';
 export { TradeRepublicError, TradeRepublicHttpError, TradeRepublicProtocolError, TradeRepublicSchemaError } from './errors.js';
 export { MemorySessionStore, FileSessionStore, redactSession } from './session.js';
 export { CandleQuery } from './candles.js';
+export {
+  BOND_CANDLE_RESOLUTIONS,
+  CANDLE_TIMEFRAME_MS,
+  DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS,
+  STANDARD_CANDLE_RESOLUTIONS,
+  candleResolutionMs,
+  candleResolutionsForInstrumentType,
+} from './candle-resolutions.js';
 export { collectTradeRepublicWebContext } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
 export { MapperConnectionLostError, MapperRequestError } from './mapper-connection.js';
@@ -22,8 +30,12 @@ export type {
   Asset,
   AssetDetail,
   AssetSearchType,
+  AvailableCandleResolutionsOptions,
   Candle,
   CandleDownloadOptions,
+  CandleRange,
+  CandleResolution,
+  CandleSeries,
   CandleTimeframe,
   CashSummary,
   Derivative,
@@ -53,8 +65,12 @@ export type {
   OrderExpiry,
   OrderFeeItem,
   OrderMode,
+  OrderPriceOptions,
+  OrderPriceQuote,
   OrderPreview,
   OrderSide,
+  OrderValidity,
+  OrderValidityPreset,
   OrderSubmission,
   OrderSubmissionFailed,
   OrderSubmissionOutcomeUnknown,
@@ -78,6 +94,8 @@ export type {
   TimelineItem,
   Trade,
   TradeRepublicClientOptions,
+  TradeRepublicDefaultHeaders,
+  TradeRepublicDeviceInfo,
   TradeRepublicWebContext,
   WebSocketDisconnectEvent,
   WebSocketReconnectEvent,

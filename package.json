@@ -23,6 +23,7 @@
     "demo:tui": "npm run build && node ./demo/tui.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:integration": "node --import tsx --test tests/integration/*.test.ts",
+    "ci:reauth": "node --import tsx scripts/reauth-ci.ts",
     "typecheck": "tsc --noEmit",
     "schemas:doc": "node --import tsx scripts/generate-schema-catalog.ts",
     "reference:download": "node ../../references/traderepublic-web/download-bundles.mjs"

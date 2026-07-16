@@ -1,91 +1,71 @@
-name: test
+name: live-integration
 
 on:
-  push:
   schedule:
-    - cron: "15 2 * * *"
+    # Both runs stay inside the 07:00-23:00 L2 test window even when GitHub
+    # starts a scheduled workflow up to an hour late.
+    - cron: "15 8,20 * * *"
+      timezone: Europe/Berlin
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
+  group: live-integration-main
+  cancel-in-progress: false
 
 jobs:
-  quality:
-    name: unit, typecheck, and build
+  unit-gate:
+    name: owner gate and unit tests
+    if: >-
+      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'VIEWVIEWVIEW'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run unit tests
-        run: npm test
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build package
-        run: npm run build
+      - run: npm ci
+      - run: npm test
 
   live:
-    name: live account integration
-    if: github.ref == 'refs/heads/main'
+    name: live integration (no orders)
+    needs: unit-gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: trade-republic-tests
     env:
       TR_INTEGRATION: "1"
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           package-manager-cache: false
-
-      - name: Install dependencies
-        run: npm ci
-
+      - run: npm ci
       - name: Configure ephemeral session path
         run: echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
-
       - name: Materialize encrypted test session
         env:
           TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
         run: node --import tsx scripts/ci-session.ts materialize "$TR_SESSION_FILE"
-
       - name: Refresh Trade Republic session
         run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
-
       - name: Rotate encrypted GitHub session secret
         env:
           GH_TOKEN: ${{ secrets.TR_SECRET_ROTATION_TOKEN }}
         run: gh secret set TR_SESSION_JSON --env trade-republic-tests --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
-
-      - name: Run non-order live integration tests
+      - name: Run strict non-order live integration tests
         run: npm run test:integration
-
       - name: Remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"

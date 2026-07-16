@@ -50,6 +50,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `instruments.yieldToMaturity` | `read` | `websocket` | `yieldToMaturity` |  |
 | `trading.priceForOrder` | `read` | `websocket` | `priceForOrderV2` |  |
 | `trading.availableSize` | `read` | `websocket` | `availableSize` |  |
+| `trading.homeOrderDestination` | `read` | `websocket` | `homeInstrumentExchange` |  |
 | `trading.orderDestinations` | `read` | `rest` | `GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE` |  |
 | `trading.trades` | `read` | `rest` | `GET /web-trading-gateway/api/customer/v1/trades` |  |
 | `trading.dailyPnl` | `read` | `rest` | `POST /web-trading-gateway/api/customer/v1/pnl/daily` |  |

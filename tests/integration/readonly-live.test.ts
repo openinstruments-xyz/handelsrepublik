@@ -6,7 +6,6 @@ import {
   FileSessionStore,
   schemaRegistry,
   TradeRepublicClient,
-  TradeRepublicHttpError,
 } from '../../src/index.js';
 import type { AssetSearchType } from '../../src/index.js';
 
@@ -17,6 +16,12 @@ const testExchangeId = process.env.TR_INTEGRATION_EXCHANGE ?? 'LSX';
 const testQuery = process.env.TR_INTEGRATION_QUERY ?? 'apple';
 const testAssetType = (process.env.TR_INTEGRATION_TYPE ?? 'stock') as AssetSearchType;
 const testPriceAlarmPrice = Number(process.env.TR_INTEGRATION_PRICE_ALARM_PRICE ?? '1');
+const defaultWatchlistId = '00000000-0000-0000-0000-000000000000';
+const bitcoinAssetId = 'XF000BTC0017';
+const bitcoinExchangeId = 'BHS';
+const appleAssetId = 'US0378331005';
+const appleL2ExchangeId = 'LSX';
+const runGermanMarketHoursTests = isGermanMarketHours();
 
 describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set TR_INTEGRATION=1 to run live Trade Republic integration tests' }, () => {
   it('restores and refreshes an existing real web session', { timeout: 30_000 }, async () => {
@@ -44,6 +49,29 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     assert.ok(client.securitiesAccountNumber ?? client.getSession()?.securitiesAccountNumber, 'expected securities account number to be auto-resolved');
   });
 
+  it('exercises read-only convenience methods used by the demos', { timeout: 60_000 }, async () => {
+    const { client } = await createLiveClient();
+    await client.auth.refreshSession();
+    const secAccNo = client.securitiesAccountNumber ?? client.getSession()?.securitiesAccountNumber;
+    assert.ok(secAccNo, 'expected securities account number to be available');
+
+    const [session, boards, mutualFundOrders, privateMarketOrders, markToMarket, portfolio] = await Promise.all([
+      client.account.session(),
+      client.boards.list(),
+      client.orders.mutualFunds(),
+      client.orders.privateMarkets(),
+      client.portfolio.markToMarketValue(),
+      client.portfolio.positionsForAccount(secAccNo, { timeoutMs: 15_000 }),
+    ]);
+
+    assertObject(session, 'account.session');
+    assert.ok(Array.isArray(boards), 'boards.list should return an array');
+    assert.ok(Array.isArray(mutualFundOrders), 'orders.mutualFunds should return an array');
+    assert.ok(Array.isArray(privateMarketOrders), 'orders.privateMarkets should return an array');
+    assertObject(markToMarket, 'portfolio.markToMarketValue');
+    assertObject(portfolio, 'portfolio.positionsForAccount');
+  });
+
   it('reads market discovery, search, candles, and current price data', { timeout: 60_000 }, async () => {
     const { client } = await createLiveClient();
 
@@ -69,14 +97,14 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     const calls = [
       { name: 'account.personalDetails', run: () => client.account.personalDetails() },
       { name: 'account.relationships', run: () => client.account.relationships() },
-      { name: 'account.cardsHome', run: () => client.account.cardsHome(), optional: true },
+      { name: 'account.cardsHome', run: () => client.account.cardsHome() },
       { name: 'documents.documents', run: () => client.documents.documents() },
       { name: 'payments.paymentMethods', run: () => client.payments.paymentMethods() },
-      { name: 'payments.iban', run: () => client.payments.iban(), optional: true },
-      { name: 'payments.interestDetails', run: () => client.payments.interestDetails(), optional: true },
+      { name: 'payments.iban', run: () => client.payments.iban() },
+      { name: 'payments.interestDetails', run: () => client.payments.interestDetails() },
       { name: 'tax.taxInformation', run: () => client.tax.taxInformation() },
       { name: 'tax.exemptionOrder', run: () => client.tax.exemptionOrder() },
-      { name: 'tax.taxResidencies', run: () => client.tax.taxResidencies(), optional: true },
+      { name: 'tax.taxResidencies', run: () => client.tax.taxResidencies() },
       { name: 'tax.taxResidencyCountries', run: () => client.tax.taxResidencyCountries() },
       { name: 'discovery.exchangeDetails', run: () => client.discovery.exchangeDetails() },
       { name: 'discovery.watchlists', run: () => client.discovery.watchlists() },
@@ -85,16 +113,8 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
       { name: 'discovery.userPreferences', run: () => client.discovery.userPreferences() },
     ];
     for (const call of calls) {
-      await t.test(call.name, async (endpointTest) => {
-        try {
-          await call.run();
-        } catch (error) {
-          if (call.optional && isOptionalStatus(call.name, error)) {
-            endpointTest.skip(`endpoint unavailable for this account: ${formatError(error)}`);
-            return;
-          }
-          throw error;
-        }
+      await t.test(call.name, async () => {
+        await call.run();
       });
     }
   });
@@ -102,15 +122,39 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
   it('receives at least one read-only websocket resource message', { timeout: 30_000 }, async () => {
     const { client } = await createLiveClient();
     const subscription = client.raw.subscribeResource({ type: 'availableCash' });
-    const iterator = subscription[Symbol.asyncIterator]();
     try {
-      const result = await Promise.race([
-        iterator.next(),
-        delay(15_000).then(() => ({ timedOut: true as const })),
-      ]);
-      assert.ok(!('timedOut' in result), 'timed out waiting for availableCash websocket payload');
-      assert.equal(result.done, false);
-      assert.ok(result.value !== undefined && result.value !== null, 'expected websocket resource payload');
+      const value = await nextStreamValue(subscription, 'availableCash websocket payload');
+      assert.ok(value !== undefined && value !== null, 'expected websocket resource payload');
+    } finally {
+      subscription.close();
+    }
+  });
+
+  it('streams BTC ticker updates', { timeout: 30_000 }, async () => {
+    const { client } = await createLiveClient();
+    const subscription = client.market.liveFeed(bitcoinAssetId, {
+      exchangeId: bitcoinExchangeId,
+    });
+    try {
+      const event = await nextStreamValue(subscription, 'BTC ticker');
+      assertObject(event, 'BTC ticker event');
+      assert.notEqual(event.raw, undefined, 'BTC ticker event should contain its raw payload');
+    } finally {
+      subscription.close();
+    }
+  });
+
+  it('streams AAPL L2 market data on LSX during German market hours', {
+    timeout: 30_000,
+    skip: runGermanMarketHoursTests ? false : 'runs only from 07:00 until 23:00 Europe/Berlin',
+  }, async () => {
+    const { client } = await createLiveClient();
+    const subscription = client.market.l2OrderBook(appleAssetId, appleL2ExchangeId, {
+      depth: 5,
+    });
+    try {
+      const orderBook = await nextStreamValue(subscription, 'AAPL/LSX L2 order book');
+      assert.ok(orderBook.bids.length + orderBook.asks.length > 0, 'expected at least one AAPL/LSX L2 level');
     } finally {
       subscription.close();
     }
@@ -162,15 +206,11 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     assert.ok(instrumentId, 'expected at least one test instrument that is not already in the watchlist');
 
     await t.test('renames the cloud watchlist when the account supports rename', async (renameTest) => {
-      try {
-        await client.discovery.renameWatchlist(watchlistId, firstStringByKey(watchlists, 'name', 'title') ?? '');
-      } catch (error) {
-        if (isOptionalStatus('discovery.watchlists.rename', error)) {
-          renameTest.skip(`cloud watchlist cannot be renamed for this account: ${formatError(error)}`);
-          return;
-        }
-        throw error;
+      if (watchlistId === defaultWatchlistId) {
+        renameTest.skip('the built-in default watchlist supports item changes but cannot be renamed');
+        return;
       }
+      await client.discovery.renameWatchlist(watchlistId, firstStringByKey(watchlists, 'name', 'title') ?? '');
     });
 
     await t.test('adds and removes a disposable watchlist item', async () => {
@@ -198,18 +238,13 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
       const before = await client.discovery.watchlists();
       const sourceWatchlistId = firstStringByKey(before, 'id', 'watchlistId');
       assert.ok(sourceWatchlistId, 'expected an existing watchlist to clone');
+      if (sourceWatchlistId === defaultWatchlistId) {
+        t.skip('the account only exposes the built-in default watchlist, which cannot be cloned');
+        return;
+      }
       const existingIds = new Set(allStringsByKey(before, 'id', 'watchlistId'));
 
-      let created: unknown;
-      try {
-        created = await client.discovery.cloneWatchlist(sourceWatchlistId);
-      } catch (error) {
-        if (isOptionalStatus('discovery.watchlists.clone', error)) {
-          t.skip(`cloud watchlist cannot be cloned for this account: ${formatError(error)}`);
-          return;
-        }
-        throw error;
-      }
+      const created = await client.discovery.cloneWatchlist(sourceWatchlistId);
       watchlistId = allStringsByKey(created, 'id', 'watchlistId').find((id) => !existingIds.has(id));
       for (let attempt = 0; !watchlistId && attempt < 10; attempt += 1) {
         await delay(500);
@@ -256,20 +291,35 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function formatError(error: unknown): string {
-  if (error instanceof TradeRepublicHttpError) return `${error.name} (status ${error.status}): ${error.message}`;
-  if (error instanceof Error) return `${error.name}: ${error.message}`;
+async function nextStreamValue<T>(
+  subscription: AsyncIterable<T>,
+  label: string,
+  timeoutMs = 15_000,
+): Promise<T> {
+  const iterator = subscription[Symbol.asyncIterator]();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
+    const result = await Promise.race([
+      iterator.next(),
+      new Promise<{ timedOut: true }>((resolve) => {
+        timeout = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+      }),
+    ]);
+    assert.ok(!('timedOut' in result), `timed out waiting for ${label}`);
+    assert.equal(result.done, false, `${label} stream ended before yielding data`);
+    return result.value;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
-function isOptionalStatus(schemaName: string, error: unknown): boolean {
-  if (!(error instanceof TradeRepublicHttpError)) return false;
-  const optionalStatuses = schemaRegistry.find((entry) => entry.name === schemaName)?.live?.optionalStatuses ?? [];
-  return optionalStatuses.includes(error.status);
+function isGermanMarketHours(now = new Date()): boolean {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Berlin',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).format(now));
+  return hour >= 7 && hour < 23;
 }
 
 function firstStringByKey(value: unknown, ...keys: string[]): string | undefined {

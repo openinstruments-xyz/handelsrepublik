@@ -1,18 +1,7 @@
 import type { ResourceClient } from './resource.js';
 import { candlesSpec } from './market-specs.js';
-import type { Candle, CandleDownloadOptions, CandleTimeframe } from './types.js';
-
-const TIMEFRAME_MS: Record<CandleTimeframe, number> = {
-  '1m': 60_000,
-  '5m': 5 * 60_000,
-  '15m': 15 * 60_000,
-  '30m': 30 * 60_000,
-  '1h': 60 * 60_000,
-  '4h': 4 * 60 * 60_000,
-  '1d': 24 * 60 * 60_000,
-  '1w': 7 * 24 * 60 * 60_000,
-  '1M': 31 * 24 * 60 * 60_000,
-};
+import { candleResolutionMs } from './candle-resolutions.js';
+import type { Candle, CandleDownloadOptions } from './types.js';
 
 export class CandleQuery {
   constructor(
@@ -31,8 +20,9 @@ export class CandleQuery {
       yield await this.fetch();
       return;
     }
+    if (!this.options.from) throw new TypeError('from is required when to is provided for paged candle downloads.');
 
-    const stepMs = TIMEFRAME_MS[this.options.timeframe] * maxCandlesPerRequest;
+    const stepMs = candleResolutionMs(this.options.timeframe) * maxCandlesPerRequest;
     let cursor = asDate(this.options.from);
     while (cursor < to) {
       const next = new Date(Math.min(cursor.getTime() + stepMs, to.getTime()));

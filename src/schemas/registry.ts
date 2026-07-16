@@ -188,6 +188,7 @@ export const schemaRegistry = [
   entry('instruments.yieldToMaturity', 'Yield to maturity', 'websocket', 'read', 'yieldToMaturity', jsonValue),
   entry('trading.priceForOrder', 'Price for order quote', 'websocket', 'read', 'priceForOrderV2', jsonValue),
   entry('trading.availableSize', 'Available size', 'websocket', 'read', 'availableSize', jsonValue),
+  entry('trading.homeOrderDestination', 'Home order destination and capabilities', 'websocket', 'read', 'homeInstrumentExchange', jsonValue),
   entry('trading.orderDestinations', 'Order destinations', 'rest', 'read', 'GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE', orderDestinationsResponseSchema),
   entry('trading.trades', 'Trades', 'rest', 'read', 'GET /web-trading-gateway/api/customer/v1/trades', normalizedArrayWrappers),
   entry('trading.dailyPnl', 'Daily PnL', 'rest', 'read', 'POST /web-trading-gateway/api/customer/v1/pnl/daily', jsonValue),

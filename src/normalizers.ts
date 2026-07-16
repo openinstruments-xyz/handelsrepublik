@@ -4,6 +4,7 @@ import type {
   Board,
   BoardWidget,
   Candle,
+  CandleSeries,
   CashSummary,
   Derivative,
   ExchangeDetails,
@@ -17,6 +18,8 @@ import type {
   MarketSubscription,
   Order,
   OrderDestination,
+  OrderPriceOptions,
+  OrderPriceQuote,
   Portfolio,
   PortfolioChart,
   PortfolioPosition,
@@ -39,6 +42,7 @@ export function arrayPayload(value: unknown): unknown[] {
     'results',
     'orders',
     'positions',
+    'aggregates',
     'assets',
     'derivatives',
     'subscriptions',
@@ -83,7 +87,16 @@ export function normalizeAsset(value: unknown): Asset {
       instrument.shortName,
       instrument.title,
     ),
-    type: optionalString(record.type, record.instrumentType, record.assetType, instrument.type, instrument.instrumentType, instrument.assetType),
+    type: optionalString(
+      record.typeId,
+      record.type,
+      record.instrumentType,
+      record.assetType,
+      instrument.typeId,
+      instrument.type,
+      instrument.instrumentType,
+      instrument.assetType,
+    ),
     exchangeIds: uniqueStrings(
       arrayOfStrings(record.exchangeIds, record.exchanges, record.tradingVenues),
       arrayOfStrings(instrument.exchangeIds, instrument.exchanges, instrument.tradingVenues),
@@ -372,9 +385,38 @@ export function normalizeInstrumentNewsItem(value: unknown): InstrumentNewsItem 
 
 export function normalizeOrderDestination(value: unknown): OrderDestination {
   const record = asRecord(value);
+  const exchange = asRecord(record.exchange);
   return {
     id: stringValue(record.id, record.exchangeId, record.destinationId, record.venue),
-    name: optionalString(record.name, record.title, record.exchangeName),
+    name: optionalString(record.name, record.title, record.exchangeName, exchange.name),
+    type: optionalString(record.type),
+    orderModes: optionalStringArray(record.orderModes),
+    orderExpiries: optionalStringArray(record.orderExpiries),
+    listingId: optionalString(record.listingId),
+    currencyId: optionalString(record.currencyId, asRecord(record.currency).id),
+    open: optionalBoolean(record.open),
+    openTimeOffsetMillis: optionalNumber(record.openTimeOffsetMillis),
+    closeTimeOffsetMillis: optionalNumber(record.closeTimeOffsetMillis),
+    timeZoneId: optionalString(record.timeZoneId, exchange.timeZoneId),
+    ...('maintenanceWindow' in record ? { maintenanceWindow: record.maintenanceWindow } : {}),
+    ongoingOutage: optionalBoolean(record.ongoingOutage),
+    priority: optionalNumber(record.priority),
+    tickSizes: optionalNumberMatrix(record.tickSizes),
+    raw: value,
+  };
+}
+
+export function normalizeOrderPriceQuote(value: unknown, options: OrderPriceOptions, instrumentId: string): OrderPriceQuote {
+  const record = asRecord(value);
+  return {
+    instrumentId,
+    exchangeId: options.exchangeId,
+    side: options.side.toLowerCase() as OrderPriceQuote['side'],
+    price: optionalNumber(record.price),
+    bid: optionalNumber(record.bidPrice, record.bid),
+    ask: optionalNumber(record.askPrice, record.ask),
+    unit: optionalString(record.unit, record.currency),
+    time: normalizeTimestamp(optionalString(record.time, record.timestamp) ?? optionalNumber(record.time, record.timestamp)),
     raw: value,
   };
 }
@@ -442,8 +484,9 @@ function normalizeCashItem(value: unknown): Omit<CashSummary, 'raw'> {
 
 export function normalizeCandle(value: unknown): Candle {
   if (Array.isArray(value)) {
+    const time = normalizeTimestamp(optionalString(value[0]) ?? optionalNumber(value[0])) ?? String(value[0]);
     return {
-      time: String(value[0]),
+      time,
       open: Number(value[1]),
       high: Number(value[2]),
       low: Number(value[3]),
@@ -453,13 +496,28 @@ export function normalizeCandle(value: unknown): Candle {
     };
   }
   const record = asRecord(value);
+  const time = normalizeTimestamp(optionalString(record.time, record.timestamp, record.date)
+    ?? optionalNumber(record.time, record.timestamp, record.date))
+    ?? stringValue(record.time, record.timestamp, record.date);
   return {
-    time: stringValue(record.time, record.timestamp, record.date),
+    time,
     open: numberValue(record.open),
     high: numberValue(record.high),
     low: numberValue(record.low),
     close: numberValue(record.close),
     volume: optionalNumber(record.volume),
+    raw: value,
+  };
+}
+
+export function normalizeCandleSeries(value: unknown): CandleSeries {
+  const record = asRecord(value);
+  return {
+    resolutionMs: numberValue(record.resolution),
+    expectedClosingTime: normalizeTimestamp(optionalString(record.expectedClosingTime) ?? optionalNumber(record.expectedClosingTime)),
+    lastAggregateEndTime: normalizeTimestamp(optionalString(record.lastAggregateEndTime) ?? optionalNumber(record.lastAggregateEndTime)),
+    unit: optionalString(record.unit, record.currency),
+    candles: arrayPayload(value).map(normalizeCandle),
     raw: value,
   };
 }
@@ -590,6 +648,26 @@ function optionalNumber(...values: unknown[]): number | undefined {
     }
   }
   return undefined;
+}
+
+function optionalBoolean(...values: unknown[]): boolean | undefined {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+  }
+  return undefined;
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function optionalNumberMatrix(value: unknown): number[][] | null | undefined {
+  if (value === null) return null;
+  if (!Array.isArray(value)) return undefined;
+  return value.map((row) => Array.isArray(row)
+    ? row.map(Number).filter(Number.isFinite)
+    : [Number(row)].filter(Number.isFinite));
 }
 
 function arrayOfStrings(...values: unknown[]): string[] | undefined {

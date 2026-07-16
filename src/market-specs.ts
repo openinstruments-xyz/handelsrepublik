@@ -1,7 +1,10 @@
 import type { QuerySpec, StreamSpec } from './resource.js';
+import { candleResolutionMs, candleResolutionsForInstrumentType } from './candle-resolutions.js';
 import {
   arrayPayload,
+  normalizeAsset,
   normalizeCandle,
+  normalizeCandleSeries,
   normalizeL2OrderBook,
   normalizeL2Venues,
   normalizeLiveFeedEvent,
@@ -11,6 +14,8 @@ import {
 import type {
   Candle,
   CandleDownloadOptions,
+  CandleSeries,
+  CandleTimeframe,
   L2OrderBook,
   L2OrderBookOptions,
   L2Venue,
@@ -34,17 +39,20 @@ export const marketSubscriptionsSpec: QuerySpec<MarketSubscriptionsOptions, Mark
 
 export const candlesSpec: QuerySpec<CandleDownloadOptions, Candle[]> = {
   schemaName: 'market.candles',
-  resource: (params) => ({
-    type: 'aggregateHistoryLightV2',
-    isin: params.assetId,
-    exchangeId: params.exchangeId,
-    resolution: params.timeframe,
-    from: toIso(params.from),
-    until: params.to ? toIso(params.to) : undefined,
-    range: params.limit ? String(params.limit) : undefined,
-    unit: 'EUR',
-  }),
+  resource: candleResource,
   normalize: (raw) => arrayPayload(raw).map(normalizeCandle),
+};
+
+export const candleSeriesSpec: QuerySpec<CandleDownloadOptions, CandleSeries> = {
+  schemaName: 'market.candles',
+  resource: candleResource,
+  normalize: normalizeCandleSeries,
+};
+
+export const availableCandleResolutionsSpec: QuerySpec<{ assetId: string }, CandleTimeframe[]> = {
+  schemaName: 'assets.get',
+  resource: (params) => ({ type: 'instrument', id: params.assetId }),
+  normalize: (raw) => candleResolutionsForInstrumentType(normalizeAsset(raw).type),
 };
 
 export const availableL2BooksSpec: QuerySpec<{ assetId: string }, L2Venue[]> = {
@@ -82,6 +90,19 @@ export const l2OrderBookSpec: StreamSpec<L2OrderBookOptions, L2OrderBook> = {
   }),
   normalize: (raw) => normalizeL2OrderBook(raw),
 };
+
+function candleResource(params: CandleDownloadOptions): Record<string, unknown> {
+  return {
+    type: 'aggregateHistoryLightV2',
+    isin: params.assetId,
+    exchangeId: params.exchangeId,
+    resolution: candleResolutionMs(params.timeframe),
+    range: params.range,
+    from: params.from ? toIso(params.from) : undefined,
+    until: params.to ? toIso(params.to) : undefined,
+    unit: params.unit?.trim() || 'EUR',
+  };
+}
 
 function toIso(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;

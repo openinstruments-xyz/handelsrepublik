@@ -1,6 +1,13 @@
 import { describe, expect, it } from './test-compat.js';
 import { HttpClient } from '../src/http.js';
-import type { Session } from '../src/types.js';
+import type { Session, TradeRepublicDeviceInfo } from '../src/types.js';
+
+const deviceInfo: TradeRepublicDeviceInfo = {
+  stableDeviceId: 'test-fingerprint',
+  browser: 'Chrome',
+  preferredLanguages: ['de-DE', 'de'],
+  numberOfCores: 8,
+};
 
 describe('HttpClient headers', () => {
   it('derives x-xsrf-token from XSRF-TOKEN cookie', () => {
@@ -16,6 +23,7 @@ describe('HttpClient headers', () => {
       userAgent: 'test-agent',
       fetch,
       getSession: () => session,
+      getDeviceInfo: () => deviceInfo,
     });
 
     const headers = client.headers();
@@ -33,6 +41,7 @@ describe('HttpClient headers', () => {
       },
       fetch,
       getSession: () => undefined,
+      getDeviceInfo: () => deviceInfo,
     });
 
     const headers = client.headers();
@@ -62,6 +71,7 @@ describe('HttpClient headers', () => {
       userAgent: 'test-agent',
       fetch,
       getSession: () => session,
+      getDeviceInfo: () => deviceInfo,
     });
 
     const headers = client.headers();
@@ -81,6 +91,7 @@ describe('HttpClient headers', () => {
       defaultHeaders: { 'x-tr-app-version': 'user' },
       fetch,
       getSession: () => ({ webContext: { headers: { 'x-tr-app-version': 'browser' } } }),
+      getDeviceInfo: () => deviceInfo,
     });
 
     expect(client.headers()['x-tr-app-version']).toBe('user');
@@ -93,9 +104,24 @@ describe('HttpClient headers', () => {
       userAgent: 'test-agent',
       fetch,
       getSession: () => undefined,
+      getDeviceInfo: () => deviceInfo,
     });
 
     expect(client.headers()['content-type']).toBeUndefined();
     expect(client.headers({}, true)['content-type']).toBe('application/json');
+  });
+
+  it('encodes the session device information as x-tr-device-info', () => {
+    const client = new HttpClient({
+      apiBaseUrl: 'https://api.traderepublic.com',
+      locale: 'de',
+      userAgent: 'test-agent',
+      fetch,
+      getSession: () => ({ deviceInfo }),
+      getDeviceInfo: () => deviceInfo,
+    });
+
+    const decoded = JSON.parse(Buffer.from(client.headers()['x-tr-device-info']!, 'base64').toString('utf8'));
+    expect(decoded).toEqual(deviceInfo);
   });
 });

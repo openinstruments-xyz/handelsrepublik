@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { cpus, totalmem } from 'node:os';
 import { describe, expect, it } from './test-compat.js';
 import { MapperRequestError, TradeRepublicClient } from '../src/index.js';
 import { FakeSocket } from './fake-socket.js';
-import type { WebSocketLike } from '../src/types.js';
+import type { TradeRepublicDeviceInfo, WebSocketLike } from '../src/types.js';
+
+const TEST_DEVICE_INFO: TradeRepublicDeviceInfo = {
+  stableDeviceId: 'test-fingerprint',
+  browser: 'Chrome',
+  preferredLanguages: ['de-DE', 'de'],
+  numberOfCores: 8,
+};
 
 describe('TradeRepublicClient', () => {
+  it('rejects legacy sessions without device information', () => {
+    assert.throws(() => TradeRepublicClient.create({
+      session: {
+        sessionToken: 'legacy-session',
+      },
+    }), /must contain deviceInfo/);
+  });
+
   it('creates a QR challenge through the v2 login endpoint', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
@@ -27,12 +43,51 @@ describe('TradeRepublicClient', () => {
     const headers = calls[0]?.init.headers as Record<string, string>;
     expect(headers['x-tr-app-version']).toBe('15.101.0');
     expect(headers['x-tr-platform']).toBe('web-pro');
+    assert.match(headers['user-agent']!, /Firefox\/152\.0$/);
     const deviceInfo = JSON.parse(Buffer.from(headers['x-tr-device-info']!, 'base64').toString('utf8')) as Record<string, unknown>;
     expect(deviceInfo).toMatchObject({
-      browser: 'Chrome',
+      browser: 'Firefox',
       os: 'Windows',
     });
-    assert.equal(typeof deviceInfo.stableDeviceId, 'string');
+    assert.match(String(deviceInfo.stableDeviceId), /^[0-9a-f]{128}$/);
+    assert.equal(deviceInfo.numberOfCores, cpus().length);
+    assert.equal(deviceInfo.deviceMemory, Math.max(1, Math.round(totalmem() / 1024 ** 3)));
+  });
+
+  it('accepts spoofed device values and randomizes unspecified fingerprints per client', async () => {
+    const firstCalls: Array<{ url: string; init: RequestInit }> = [];
+    const secondCalls: Array<{ url: string; init: RequestInit }> = [];
+    const first = TradeRepublicClient.create({
+      deviceInfo: {
+        stableDeviceId: 'spoofed-fingerprint',
+        browser: 'Custom Browser',
+        preferredLanguages: ['de-AT', 'de', 'en'],
+        numberOfCores: 24,
+        deviceMemory: 64,
+      },
+      fetch: mockFetch(firstCalls, { id: 'first' }),
+    });
+    const second = TradeRepublicClient.create({
+      fetch: mockFetch(secondCalls, { id: 'second' }),
+    });
+
+    await first.auth.createInstantLogin();
+    await second.auth.createInstantLogin();
+
+    const firstHeaders = firstCalls[0]?.init.headers as Record<string, string>;
+    const secondHeaders = secondCalls[0]?.init.headers as Record<string, string>;
+    const firstDevice = JSON.parse(Buffer.from(firstHeaders['x-tr-device-info']!, 'base64').toString('utf8'));
+    const secondDevice = JSON.parse(Buffer.from(secondHeaders['x-tr-device-info']!, 'base64').toString('utf8'));
+
+    expect(firstDevice).toMatchObject({
+      stableDeviceId: 'spoofed-fingerprint',
+      browser: 'Custom Browser',
+      preferredLanguages: ['de-AT', 'de', 'en'],
+      numberOfCores: 24,
+      deviceMemory: 64,
+    });
+    assert.match(secondDevice.stableDeviceId, /^[0-9a-f]{128}$/);
+    assert.notEqual(firstDevice.stableDeviceId, secondDevice.stableDeviceId);
   });
 
   it('allows callers to override the SDK Trade Republic headers', async () => {
@@ -47,7 +102,9 @@ describe('TradeRepublicClient', () => {
         headers: {
           'x-tr-app-version': 'captured-version',
           'x-tr-platform': 'captured-platform',
-          'x-tr-device-info': 'captured-device',
+          'x-tr-device-info': Buffer.from(JSON.stringify({
+            stableDeviceId: 'captured-fingerprint',
+          })).toString('base64'),
         },
       },
       fetch: mockFetch(calls, { id: 'challenge-1' }),
@@ -234,6 +291,7 @@ describe('TradeRepublicClient', () => {
     const saved: unknown[] = [];
     const client = TradeRepublicClient.create({
       session: {
+        deviceInfo: TEST_DEVICE_INFO,
         cookies: {
           tr_claims: 'old-claims',
           tr_session: 'old-session',
@@ -276,6 +334,7 @@ describe('TradeRepublicClient', () => {
   it('initializes the public securities account number from an existing session', () => {
     const client = TradeRepublicClient.create({
       session: {
+        deviceInfo: TEST_DEVICE_INFO,
         securitiesAccountNumber: '0000000000',
       },
     });
@@ -287,6 +346,12 @@ describe('TradeRepublicClient', () => {
   it('attaches web context per client and preserves it when saving sessions', async () => {
     const saved: unknown[] = [];
     const first = TradeRepublicClient.create({
+      deviceInfo: {
+        stableDeviceId: 'captured-fingerprint',
+        browser: 'Firefox',
+        preferredLanguages: ['de-DE', 'de'],
+        numberOfCores: 8,
+      },
       sessionStore: {
         async load() {
           return undefined;
@@ -308,6 +373,11 @@ describe('TradeRepublicClient', () => {
     await first.auth.saveSession();
 
     expect(first.getSession()).toMatchObject({
+      deviceInfo: {
+        stableDeviceId: 'captured-fingerprint',
+        preferredLanguages: ['de-DE', 'de'],
+        numberOfCores: 8,
+      },
       webContext: {
         awsWafToken: 'waf-token',
         cookies: {
@@ -318,6 +388,7 @@ describe('TradeRepublicClient', () => {
     expect(second.getSession()).toBeUndefined();
     expect(saved).toEqual([
       expect.objectContaining({
+        deviceInfo: expect.objectContaining({ stableDeviceId: 'captured-fingerprint' }),
         webContext: expect.objectContaining({ awsWafToken: 'waf-token' }),
       }),
     ]);
@@ -427,6 +498,7 @@ describe('TradeRepublicClient', () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
       session: {
+        deviceInfo: TEST_DEVICE_INFO,
         securitiesAccountNumber: '0000000002',
       },
       websocketFactory: () => {
@@ -456,6 +528,7 @@ describe('TradeRepublicClient', () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
       session: {
+        deviceInfo: TEST_DEVICE_INFO,
         cookies: {
           tr_session: 'restored-session',
         },
@@ -519,7 +592,7 @@ describe('TradeRepublicClient', () => {
         });
         return socket;
       },
-      session: { securitiesAccountNumber: '0000000001' },
+      session: { deviceInfo: TEST_DEVICE_INFO, securitiesAccountNumber: '0000000001' },
     });
 
     await expect(client.orders.executed()).resolves.toEqual([
@@ -591,6 +664,7 @@ describe('TradeRepublicClient', () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
       session: {
+        deviceInfo: TEST_DEVICE_INFO,
         cookies: {
           tr_session: 'restored-session',
         },
@@ -1256,7 +1330,7 @@ describe('TradeRepublicClient', () => {
     await expect(client.trading.availableSize('US1')).resolves.toEqual({ size: 2 });
 
     expect(parseSubPayload(sockets[2]?.sent[1])).toEqual({ type: 'etfComposition', id: 'US1', after: 'cursor' });
-    expect(parseSubPayload(sockets[7]?.sent[1])).toEqual({ type: 'priceForOrderV2', unit: 'EUR', isin: 'US1', exchangeId: 'LSX', side: 'BUY' });
+    expect(parseSubPayload(sockets[7]?.sent[1])).toEqual({ type: 'priceForOrderV2', unit: 'EUR', isin: 'US1', exchangeId: 'LSX', side: 'buy' });
   });
 
   it('exposes REST-backed discovery, account, docs, tax, payment, and trading APIs', async () => {

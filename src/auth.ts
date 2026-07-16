@@ -186,7 +186,8 @@ export class AuthApi {
 
   async restoreSession(): Promise<Session | undefined> {
     const session = await this.sessionStore?.load();
-    if (session) this.setSession(session);
+    if (!session?.deviceInfo) return undefined;
+    this.setSession(session);
     return session;
   }
 
@@ -196,8 +197,10 @@ export class AuthApi {
   }
 
   async refreshSession(options: { signal?: AbortSignal; debug?: boolean } = {}): Promise<Session> {
-    const session = this.getSession() ?? await this.sessionStore?.load();
+    const currentSession = this.getSession();
+    const session = currentSession ?? await this.sessionStore?.load();
     if (!session) throw new Error('No Trade Republic session is available to refresh.');
+    if (!currentSession) assertStoredSessionDeviceInfo(session);
     const refreshedSession = await this.completeWebSession(session, options);
     const finalizedSession = await this.finalizeSession(refreshedSession);
     debugLog(options.debug, 'refresh:session', summarizeSession(finalizedSession));
@@ -346,6 +349,12 @@ function extractSession(raw: unknown): Session | undefined {
   };
 }
 
+function assertStoredSessionDeviceInfo(session: Session): void {
+  if (!session.deviceInfo) {
+    throw new TypeError('Stored Trade Republic sessions must contain deviceInfo. Create a new session.');
+  }
+}
+
 function mergeSessions(...sessions: Array<Session | undefined>): Session {
   const result: Session = {};
   for (const session of sessions) {
@@ -353,6 +362,7 @@ function mergeSessions(...sessions: Array<Session | undefined>): Session {
     result.accessToken = session.accessToken ?? result.accessToken;
     result.refreshToken = session.refreshToken ?? result.refreshToken;
     result.sessionToken = session.sessionToken ?? result.sessionToken;
+    result.deviceInfo = session.deviceInfo ?? result.deviceInfo;
     result.webContext = mergeTradeRepublicWebContexts(result.webContext, session.webContext);
     result.expiresAt = session.expiresAt ?? result.expiresAt;
     result.accountId = session.accountId ?? result.accountId;

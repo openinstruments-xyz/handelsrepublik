@@ -1,47 +1,82 @@
 # handelsrepublik
 
-Unofficial TypeScript SDK for the Trade Republic web API.
+[![quality](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml)
+[![unit tests](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml)
+[![live-integration](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
 
-This package is not affiliated with Trade Republic. It is based on observed web
-app traffic and can break when Trade Republic changes private endpoints,
-cookies, headers, mapper resource names, or response payloads.
+## Overview
 
-Treat sessions, cookies, QR challenges, account payloads, documents, tax data, order data, and raw mapper
-responses as private secrets.
+`handelsrepublik` is an unofficial, ESM-only TypeScript SDK for the private Trade
+Republic web API. It gives applications one client for authentication, account
+and portfolio data, market data, documents, and explicitly invoked brokerage
+operations across Trade Republic's REST and mapper-websocket transports.
+
+The SDK is designed to keep broker outcomes separate from transport outcomes.
+Read subscriptions can reconnect automatically, while order submissions and
+other mutations are never replayed automatically. If a mutation may have crossed
+the network boundary without a definitive broker response, the SDK reports
+`outcomeUnknown`. The application must reconcile that result instead of treating
+the request as safely retryable.
+
+The package provides:
+
+- QR-code web login, session persistence, and refresh helpers.
+- Typed domain namespaces for account, portfolio, orders, trading, market data,
+  timeline, instruments, discovery, documents, tax, and payments.
+- Shared mapper-websocket subscriptions with observable disconnect and reconnect
+  events.
+- Configurable validation of covered raw responses before normalization.
+- Order previews plus explicit order submission and cancellation methods.
+- Raw REST and mapper escape hatches for private resources without a typed SDK
+  method.
+
+### Support and risk
+
+This project is not affiliated with or supported by Trade Republic. It is based
+on observed web-application traffic and can break when Trade Republic changes
+private endpoints, authentication requirements, headers, mapper resources, or
+response payloads.
+
+Some SDK methods can place or cancel real orders. Applications are responsible
+for user confirmation, reconciliation, regulatory obligations, and deciding how
+to store account and order data. Do not use live mutations in unattended tests.
+
+Treat sessions, cookies, WAF tokens, QR challenges, account payloads, documents,
+tax data, order data, and raw mapper responses as secrets.
 
 Trade Republic market data may be subject to contractual restrictions. Check
 the applicable market data terms before reusing or redistributing retrieved
 data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 (PDF)](https://assets.traderepublic.com/assets/files/CA_DE-de.pdf).
 
-## Features
+## Installation
 
-- QR-code web login with session persistence.
-- Automatic web-session refresh helpers.
-- REST and mapper-websocket transport behind one SDK client.
-- Typed convenience namespaces for portfolio, orders, market data, timeline,
-  instruments, price alarms, discovery, account, documents, tax, and payments.
-- Configurable Zod validation of covered raw Trade Republic responses before SDK
-  normalization.
-- Demo Node REPL for interactive local exploration.
-- Raw escape hatches for unmapped private API resources.
-- Fee previews plus explicitly invoked brokerage order submission and cancellation.
-
-## Install
+Install the package directly from GitHub:
 
 ```bash
 npm install github:VIEWVIEWVIEW/handelsrepublik
 ```
 
-This package is ESM-only.
+The package is ESM-only and includes its compiled `dist` output. Consumers do
+not need to build TypeScript during installation.
 
-To connect to TR you will need a WAF token. This project can capture the WAF token for you via Playwright. Unless you provide that functionality yourself, please install playwright like this:
+Trade Republic may require an AWS WAF browser challenge before login. The SDK
+can collect the matching WAF token, XSRF token, cookies, and browser headers from
+Playwright, which is an optional consumer dependency:
+
 ```bash
 npm install playwright
 npx playwright install chromium
 ```
 
+You can omit Playwright if your application supplies a valid
+`TradeRepublicWebContext` through another mechanism.
+
 ## Quick Start
+
+This example captures the browser context, restores and refreshes an existing
+session when available, otherwise performs QR login, and finally makes a
+read-only request:
 
 ```ts
 import { chromium } from 'playwright';
@@ -51,62 +86,91 @@ import {
   TradeRepublicClient,
 } from 'handelsrepublik';
 
-// Trade Republic can require an AWS WAF browser challenge before QR login.
-// A real Playwright browser lets that challenge complete and gives the SDK the
-// matching WAF token, XSRF token, and cookies for later HTTP requests.
-const browser = await chromium.launch({ headless: false });
-const webContext = await collectTradeRepublicWebContext(browser);
-await browser.close();
+const webContext = await (async () => {
+  const browser = await chromium.launch({ headless: false });
+  try {
+    return await collectTradeRepublicWebContext(browser);
+  } finally {
+    await browser.close();
+  }
+})();
 
 const tr = TradeRepublicClient.create({
-  // Reused automatically for QR login, refresh, and normal SDK calls.
   webContext,
-  // Contains cookies, WAF context, mapper tokens, and account metadata.
   sessionStore: new FileSessionStore('.tr-session.json'),
-  // rawSchemaValidation options:
-  // - true or 'throw': validate covered raw payloads and throw on drift.
-  // - 'passthrough': validate and report drift, but continue with the payload.
-  // - false: skip covered raw response validation entirely.
+
+  // Choose schema behavior during setup. Passthrough is useful while working
+  // with a private API because it reports drift without immediately stopping.
   rawSchemaValidation: 'passthrough',
-  onRawSchemaValidationFailure: ({ schemaName, error }) => {
+  onRawSchemaValidationFailure({ schemaName, error }) {
     console.warn(`Trade Republic schema drift in ${schemaName}`, error);
   },
 });
 
-const challenge = await tr.auth.createInstantLogin({
-  deviceName: 'local sdk',
-});
+try {
+  const restored = await tr.auth.restoreSession();
 
-console.log(challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode);
+  if (restored) {
+    // Refreshes the web session and saves the updated session automatically.
+    await tr.auth.refreshSession();
+  } else {
+    const challenge = await tr.auth.createInstantLogin({
+      deviceName: 'local sdk',
+    });
 
-// Approve the QR/deep link in the Trade Republic app, then polling completes
-// the web session and saves the refreshed cookies/tokens.
-const session = await tr.auth.pollInstantLogin(challenge);
-console.log(session.securitiesAccountNumber);
+    console.log(
+      challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
+    );
 
-// Later, restore the saved session, refresh it, and save the updated cookies.
-await tr.auth.restoreSession();
-const refreshed = await tr.auth.refreshSession();
-// Persists the refreshed cookies/tokens back into the configured SessionStore.
-await tr.auth.saveSession(refreshed);
+    // Approve the challenge in the Trade Republic app. Successful login is
+    // persisted automatically through the configured SessionStore.
+    await tr.auth.pollInstantLogin(challenge);
+  }
+
+  console.log(await tr.portfolio.cash());
+} finally {
+  tr.close();
+}
 ```
 
-The client saves cookies, WAF context, mapper tokens, and the securities account
-number in the configured `SessionStore`. Treat that file as a secret.
+Choose `rawSchemaValidation` deliberately:
 
-`FileSessionStore` is only the built-in local option. For a server process or a
-multi-user app, implement `SessionStore` yourself and persist the JSON session
-wherever you keep user state. A Redis-backed store only needs to load, save, and
-clear one session value under a per-user key:
+| Value | Behavior |
+| --- | --- |
+| `true` or `'throw'` | Validate covered raw responses and throw on drift. This is the default. |
+| `'passthrough'` | Validate, invoke `onRawSchemaValidationFailure`, and continue with the original payload. |
+| `false` | Skip covered raw-response validation entirely. |
+
+`'passthrough'` helps applications remain observable while Trade Republic's
+private API changes. It does not make an incompatible response safe; downstream
+normalization can still fail if the payload changes substantially.
+
+## Sessions and multiple accounts
+
+`FileSessionStore` is intended for local use. Its file contains authentication
+material and the structured Trade Republic device profile, including the
+`stableDeviceId`, languages, processor count, and device memory. The client
+derives `x-tr-device-info` from `session.deviceInfo`. The file is not encrypted.
+Do not commit or share it.
+
+For a server or multi-user application, implement `SessionStore` using the
+application's existing persistence layer. One stored JSON value per user is
+enough:
 
 ```ts
-import { TradeRepublicClient, type Session, type SessionStore } from 'handelsrepublik';
+import {
+  TradeRepublicClient,
+  type Session,
+  type SessionStore,
+} from 'handelsrepublik';
 
 type RedisLike = {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<unknown>;
   del(key: string): Promise<unknown>;
 };
+
+declare const redis: RedisLike;
 
 class RedisSessionStore implements SessionStore {
   constructor(
@@ -120,8 +184,6 @@ class RedisSessionStore implements SessionStore {
   }
 
   async save(session: Session): Promise<void> {
-    // Store this under a per-user key, for example:
-    // handelsrepublik:sessions:<user-id>
     await this.redis.set(this.key, JSON.stringify(session));
   }
 
@@ -131,487 +193,371 @@ class RedisSessionStore implements SessionStore {
 }
 
 const tr = TradeRepublicClient.create({
-  sessionStore: new RedisSessionStore(redis, 'handelsrepublik:sessions:alice'),
+  sessionStore: new RedisSessionStore(
+    redis,
+    'handelsrepublik:sessions:alice',
+  ),
+  rawSchemaValidation: 'passthrough',
 });
 ```
 
-The SDK sends the currently observed Trade Republic web headers
-`x-tr-app-version`, `x-tr-platform`, and `x-tr-device-info` by default. You can
-override any of them when Trade Republic changes the web client or when you
-need a custom device profile:
+Use one `TradeRepublicClient`, one session store, and one WAF/browser context per
+Trade Republic account. Do not share a client between users. Login and refresh
+save finalized sessions automatically; `auth.saveSession()` is available when
+the application explicitly needs to persist the client's current session.
+
+Cookie expiry does not necessarily mean the complete account session expired.
+For example, `tr_claims` can expire while `tr_session` remains usable. Restore
+the stored session, call `auth.refreshSession()`, and fall back to a new login
+only when Trade Republic rejects the session.
+
+## Connection lifecycle
+
+Mapper reads share one websocket by default. Replayable read subscriptions
+reconnect after an unexpected outage. Applications can observe loss and recovery
+to update their UI or start an application-owned refetch:
 
 ```ts
-const tr = TradeRepublicClient.create({
-  defaultHeaders: {
-    'x-tr-app-version': '15.101.0',
-    'x-tr-platform': 'web-pro',
-    'x-tr-device-info': 'your-base64-device-info',
-  },
-});
-```
+import { TradeRepublicClient } from 'handelsrepublik';
 
-`rawSchemaValidation` is configurable and you probably should choose a mode
-explicitly. The default is strict and throws on covered payload drift.
-`'passthrough'` still validates and reports drift, but lets methods return the
-original payload to the SDK so local tools keep working while the private API
-changes. Use `false` only when you want to skip raw response validation
-entirely.
-
-## Restore and Refresh
-
-```ts
-await tr.auth.restoreSession();
-
-const refreshed = await tr.auth.refreshSession();
-await tr.auth.saveSession(refreshed);
-```
-
-The current refresh implementation calls the Trade Republic web session endpoint
-and saves the updated session/cookies. Cookie expiry is not the same as full
-account-session expiry. For example, `tr_claims` can expire while `tr_session`
-still works.
-
-## Client Overview
-
-Most users should start with the typed namespaces and only use `raw` when a
-Trade Republic resource is not mapped yet.
-
-- `tr.auth`: login, restore, refresh, save, clear.
-- `tr.account`: account/session and account profile REST calls.
-- `tr.portfolio`: portfolio, cash, savings plans, portfolio chart.
-- `tr.orders`: web-trading order lists and order update stream.
-- `tr.assets`: search and instrument lookup.
-- `tr.derivatives`: derivative search and detail lookup.
-- `tr.market`: candles, live quotes, L2 order book, market subscriptions.
-- `tr.timeline`: timeline activity, actions, and detail.
-- `tr.priceAlarms`: price alarm reads and notifications.
-- `tr.instruments`: news, ETF/fund/crypto details, composition, yield.
-- `tr.trading`: price-for-order, available size, destinations, trades, daily PnL.
-- `tr.discovery`: exchanges, instrument status, watchlists, screeners, preferences.
-- `tr.documents`: document list.
-- `tr.tax`: tax information, exemption order, residencies.
-- `tr.payments`: payment methods, IBAN, interest details.
-- `tr.raw`: escape hatch for unmapped REST and mapper/websocket resources.
-- `tr.web`: debugging escape hatch for arbitrary REST/mapper calls.
-
-Mapper subscriptions are multiplexed over one websocket per client while they
-are active. Replayable read subscriptions reconnect after an unexpected close,
-and the connection refreshes its headers when the client session changes.
-Observe connection loss and recovery without taking control of the transport:
-
-```ts
 const tr = TradeRepublicClient.create({
   websocketReconnectDelayMs: 250,
   websocketHandshakeTimeoutMs: 10_000,
+
   onWebSocketDisconnect(event) {
-    showConnectionBanner(`Disconnected at ${event.disconnectedAt}; reconnecting...`);
+    console.warn(`Disconnected at ${event.disconnectedAt}; reconnecting...`);
   },
+
   onWebSocketReconnect(event) {
-    hideConnectionBanner();
     console.log(`Reconnected after ${event.downtimeMs} ms`);
-    // Optional: start application-owned refetching here.
+    // Optionally refetch application state here.
   },
 });
 ```
 
-The callbacks are observational: they do not delay or control reconnection, and
-callback failures are isolated from the transport. They fire only for an
-unexpected outage and the subsequent successful mapper handshake. Call
-`tr.close()` when disposing a long-lived client.
+These callbacks are observational:
 
-Initial connection failures and stalled handshakes fail pending requests
-instead of waiting indefinitely. A reconnect attempt that fails is retried
-while the outage remains active.
+- They do not delay, approve, or control reconnection.
+- Callback failures are isolated from the transport.
+- Disconnect fires once when an unexpected outage begins; reconnect fires once
+  after a later mapper handshake succeeds.
+- Expected closes, including `tr.close()`, do not emit an outage pair.
+- A failed reconnect is retried while the outage remains active.
 
-For protocol troubleshooting, the previous connection-per-subscription behavior
-remains available with `websocketMode: 'isolated'`.
+Initial connection failures and stalled handshakes reject pending requests. The
+legacy connection-per-subscription behavior remains available for protocol
+troubleshooting with `websocketMode: 'isolated'`.
 
-### Asset Search Types
+Reconnecting the transport does not reconcile or replay a mutation that may
+already have reached the broker.
 
-Trade Republic's internal `neonSearch` terminology differs from the labels
-shown in its UI: ETFs use the mapper type `fund`, while mutual funds use
-`mutualFund`. The SDK accepts the clearer `etf` alias and translates it to
-`fund` before sending the request:
+## Trading safely
 
-```ts
-const etfs = await tr.assets.search('msci', { type: 'etf' });
-// Sent to Trade Republic as type: 'fund'.
-
-const mutualFunds = await tr.assets.search('income', { type: 'mutualFund' });
-// Sent to Trade Republic as type: 'mutualFund'.
-```
-
-When using `tr.raw` directly, use Trade Republic's internal `fund` value for
-ETFs instead of the SDK alias.
-
-## Schema Validation
-
-Covered first-class SDK methods validate the raw Trade Republic payload with
-Zod before normalization. This is intentional: if Trade Republic adds an
-unknown field to a strict variant or changes a payload shape, the SDK throws
-`TradeRepublicSchemaError` with the schema name, Zod issues, and a compact raw
-summary. That makes API drift visible while debugging instead of silently
-normalizing the wrong shape.
-
-If Trade Republic changes a payload before this package is updated, configure
-validation per client:
+Order submission and cancellation are real financial mutations. Obtain a fresh
+quote and fee preview, show the exact order to the user, and require a separate
+user confirmation before calling `submit()`.
 
 ```ts
-// Default: validate and throw TradeRepublicSchemaError on mismatch.
-const strict = TradeRepublicClient.create({
-  rawSchemaValidation: true,
+const instrumentId = 'US0378331005';
+
+const destinations = await tr.trading.orderDestinations(instrumentId, {
+  productContext: 'stock',
 });
+const exchangeId = destinations[0]?.id;
+if (!exchangeId) throw new Error('No order destination is available.');
+if (!destinations[0]?.orderModes?.includes('market')) {
+  throw new Error('The selected venue does not support market orders.');
+}
 
-// Validate with Zod, report mismatches, but continue with the raw payload.
-const passthrough = TradeRepublicClient.create({
-  rawSchemaValidation: 'passthrough',
-  onRawSchemaValidationFailure: ({ schemaName, error }) => {
-    console.warn(`Schema validation failed for ${schemaName}`, error);
-  },
+const quote = await tr.trading.priceForOrder({
+  instrumentId,
+  exchangeId,
+  side: 'buy',
 });
+const lastClientPrice = quote.ask ?? quote.price;
+if (lastClientPrice === undefined) {
+  throw new Error('No current price is available.');
+}
 
-// Skip raw schema validation entirely.
-const disabled = TradeRepublicClient.create({
-  rawSchemaValidation: false,
-});
-```
-
-With `rawSchemaValidation: 'passthrough'`, first-class SDK methods still run
-Zod validation but continue with the original payload on mismatch instead of
-throwing. With `rawSchemaValidation: false`, they skip the Zod raw response
-check entirely. Both modes are useful for local debugging during API drift, but
-they can also hide incompatible response changes and make normalized output less
-trustworthy.
-
-The schema registry lives in `src/schemas/registry.ts` and records transport,
-risk class, request metadata, request schema, response schema, known variants,
-and live-test metadata. `SCHEMAS.md` is generated output, not the source of
-truth. Regenerate it with:
-
-```bash
-npm run schemas:doc
-```
-
-That command runs `scripts/generate-schema-catalog.ts`, which imports
-`schemaCatalogMarkdown()` from `src/schemas/registry.ts` and writes the result
-to `SCHEMAS.md`.
-
-See [SCHEMAS.md](./SCHEMAS.md) for the generated list. `blockedMutation`
-entries are deliberately documented so tests can assert that high-risk flows are
-not executed against a live account.
-
-## How The API Works
-
-Trade Republic's web app uses both normal REST endpoints and websocket-backed
-resources. The SDK hides that split behind typed methods where possible:
-
-```ts
-const account = await tr.account.current();
-const cash = await tr.portfolio.cash();
-const candles = await tr.market.candles({
-  assetId: 'US0378331005',
-  exchangeId: 'LSX',
-  timeframe: '1h',
-  from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-});
-```
-
-Trade Republic internally calls part of its websocket-backed routing layer
-`MAPPER`; that word shows up in some error payloads. In this README, a mapper
-resource means a websocket request identified by a `type` value such as
-`availableCash`, `ticker`, or `aggregateHistoryLightV2`.
-
-You usually do not need to care whether a high-level SDK method uses REST or
-mapper/websocket internally. Use `raw` only as an escape hatch while debugging
-or adding support for a resource that does not have a first-class method yet.
-
-## Demo REPL
-
-Start:
-
-```bash
-npm i
-npm run demo:repl
-```
-
-The REPL builds the SDK, restores `demo/.demo-session.json` when present, prints
-`help()`, and exposes `client` plus convenience functions.
-
-For the widget-based TUI demo, run `npm run demo:tui`.
-
-Common commands:
-
-```js
-await loginQr()
-session()
-await refresh()
-await cash()
-await portfolio()
-await orders()
-await timeline()
-await priceAlarms()
-await news()
-await candles()
-const sub = quotes()
-sub.close()
-```
-
-The REPL accepts optional web context from `demo/.demo-config.json` or
-environment variables:
-
-```bash
-TR_AWS_WAF_TOKEN=...
-TR_XSRF_TOKEN=...
-TR_COOKIE=...
-TR_APP_VERSION=...
-TR_PLATFORM=...
-TR_DEVICE_INFO=...
-TR_ACCEPT_LANGUAGE=...
-TR_SESSION_FILE=...
-TR_CONFIG_FILE=...
-TR_WEBSOCKET_MODE=shared              # shared (default) or isolated
-TR_WEBSOCKET_RECONNECT_MS=250
-TR_RAW_SCHEMA_VALIDATION=passthrough  # passthrough (default), strict, or false
-```
-
-Both interactive demos use the shared mapper connection by default, reconnect
-active streams after session refreshes, report schema drift without immediately
-terminating the UI, and close the SDK client on exit.
-
-The demo tooling still accepts copied context through `demo/.demo-config.json`
-or the `TR_AWS_WAF_TOKEN`, `TR_XSRF_TOKEN`, and `TR_COOKIE` environment
-variables. Run `authContext()` inside the REPL to inspect loaded context.
-
-## Portfolio and Account
-
-```ts
-const account = await tr.account.current();
-const profile = await tr.account.personalDetails();
-
-const cash = await tr.portfolio.cash();
-const portfolio = await tr.portfolio.current({ timeoutMs: 60_000 });
-const savingsPlans = await tr.portfolio.savingsPlans();
-const privateMarkets = await tr.portfolio.privateMarketsPositions();
-const chart = await tr.portfolio.portfolioChart(undefined, '1y', {
-  currency: 'EUR',
-});
-```
-
-Methods that need a securities account number resolve it automatically from
-`accountPairs` unless you pass one explicitly.
-
-## Orders and Trading Support
-
-```ts
-const all = await tr.orders.all({ limit: 100 });
-const open = await tr.orders.open();
-const closed = await tr.orders.closed();
-const mutualFunds = await tr.orders.mutualFunds();
-const privateMarkets = await tr.orders.privateMarkets();
-
-const destinations = await tr.trading.orderDestinations('US0378331005', {
-  jurisdiction: 'DE',
-  side: 'BUY',
-});
-
-const quote = await tr.market.quote('US0378331005', 'LSX');
-
-const available = await tr.trading.availableSize('US0378331005');
-const trades = await tr.trading.trades({ page: 1 });
-const pnl = await tr.trading.dailyPnl([{ instrumentId: 'US0378331005' }]);
-```
-
-Order submission is a high-risk operation. Always obtain a fresh price and fee
-preview, show the exact order to the user, and require a separate confirmation
-before calling `submit()`:
-
-```ts
 const preview = await tr.orders.preview({
-  instrumentId: 'US0378331005',
-  exchangeId: destinations[0]!.id,
+  instrumentId,
+  exchangeId,
   side: 'buy',
   mode: 'market',
   amount: 25,
-  lastClientPrice: 202.15,
+  lastClientPrice,
 });
 
-console.log(preview.totalFees, preview.estimatedTotal, preview.order);
+console.log({
+  fees: preview.fees,
+  totalFees: preview.totalFees,
+  estimatedTotal: preview.estimatedTotal,
+  order: preview.order,
+});
 
-// This sends a real order. Do not call it as part of an unattended test.
-const submitted = await tr.orders.submit(preview.order);
-console.log(submitted.status, submitted.orderId);
+// This sends a real order. Call it only after explicit user confirmation.
+const result = await tr.orders.submit(preview.order);
 
-if (submitted.status === 'outcomeUnknown') {
-  // The mutation may have reached the broker. Never retry it blindly.
-  console.error(submitted.clientProcessId, submitted.connectionLoss);
+switch (result.status) {
+  case 'succeeded':
+    console.log('Broker accepted the order', result.orderId);
+    break;
+  case 'failed':
+    console.error('Broker rejected the order', result.error);
+    break;
+  case 'outcomeUnknown':
+    console.error('Do not resubmit automatically', {
+      clientProcessId: result.clientProcessId,
+      reason: result.outcomeReason,
+      connectionLoss: result.connectionLoss,
+    });
+    break;
 }
-
-// Cancellation is also a live mutation.
-if (submitted.orderId) await tr.orders.cancel(submitted.orderId);
 ```
 
-Use `size` instead of `amount` for an asset-quantity order. Limit orders require
+Use `size` instead of `amount` for a quantity order. Limit orders require
 `mode: 'limit'` and `limit`; stop-market orders require `mode: 'stopMarket'` and
-`stop`. Amount orders derive and round the asset size to the selected venue's
-step size; pass `sizeStep` only when the instrument response does not expose
-enough metadata for automatic detection. `submit()` follows the mapper stream
-through `received`, `waiting`, and `confirmationNeeded` until Trade Republic
-returns `succeeded` or `failed`.
+`stop`. Amount orders derive the venue's size step where possible. Pass
+`sizeStep` explicitly when the instrument payload does not expose enough
+metadata.
 
-Order submission and cancellation wait through intermediate mapper updates and
-are never replayed after they have been sent. Their return types are
-discriminated unions with the terminal statuses `succeeded`, `failed`, and
-`outcomeUnknown`. If a socket drop, timeout, session refresh, explicit client
-close, or send failure occurs after transmission, the method returns
-`outcomeUnknown` with its `clientProcessId`, `outcomeReason`, updates, and any
-connection-loss context. If the SDK can prove that transmission never happened,
-it throws `MapperRequestError` with `deliveryState: 'notSent'`; that failure is
-safe from duplicate broker mutation risk.
-The SDK reconnects the transport but does not automatically refetch or reconcile
-the order. After `onWebSocketReconnect`, the application may inspect
-`orders.all()`, `orders.open()`, `orders.closed()`, order updates, or trades and
-update its own UI or persistence.
-
-Order updates are a stream:
+Order validity can be expressed through broker-facing presets:
 
 ```ts
-const updates = tr.orders.orderUpdates(tr.securitiesAccountNumber!);
-
-for await (const update of updates) {
-  console.log(update);
-}
-
-updates.close();
+await tr.orders.prepare({
+  instrumentId,
+  exchangeId,
+  side: 'sell',
+  mode: 'stopMarket',
+  size: 3,
+  stop: 0.8,
+  validity: 'month',
+});
 ```
 
-## Market Data
+`day` maps to `gfd`, `month` and `year` map to dated `gtd` expiries 30
+and 365 days from the reference date, and `goodTillCancelled` maps to `gtc`.
+Protocol-shaped `expiry` remains available when the exact broker expiry is
+already known. Do not provide both fields, and inspect the destination's
+`orderModes` and `orderExpiries` first.
+
+See
+[`docs/brokerage-orders-and-candles.md`](docs/brokerage-orders-and-candles.md)
+for captured limit, stop-market, fee-preview, cancellation, venue, suitability,
+and candle contracts.
+
+### Submission outcomes
+
+| Status | Meaning | Application action |
+| --- | --- | --- |
+| `succeeded` | The broker accepted or created the order. This does not mean it was filled. | Track the order and later execution lifecycle. |
+| `failed` | The broker returned a definitive failure. | Show the rejection and require a new user decision before another submission. |
+| `outcomeUnknown` | The mutation was sent, but disconnect, timeout, session refresh, client close, or another transport termination prevented a definitive result. | Never retry blindly. Reconcile broker state first. |
+
+Sent mutations are non-replayable. If the connection drops, the SDK reconnects
+for future work and replayable reads but does not send the mutation again.
+
+Only a thrown `MapperRequestError` with `deliveryState: 'notSent'` proves that
+the mapper transport did not accept the mutation bytes. Do not infer a safe
+retry from an arbitrary exception. High-level sent transport failures are
+normally returned as `outcomeUnknown` together with the order's
+`clientProcessId`, observed updates, reason, and connection-loss context.
+
+Cancellation follows the same delivery-aware contract:
+
+```ts
+const cancellation = await tr.orders.cancel('broker-order-id');
+if (cancellation.status === 'outcomeUnknown') {
+  // Refetch the order before attempting another cancellation.
+  console.error(cancellation.outcomeReason);
+}
+```
+
+### Reconciliation after an unknown outcome
+
+After reconnect, the application can inspect current and historical broker data:
+
+```ts
+const [allOrders, openOrders, closedOrders, trades] = await Promise.all([
+  tr.orders.all({ limit: 100 }),
+  tr.orders.open(),
+  tr.orders.closed(),
+  tr.trading.trades({ page: 1 }),
+]);
+```
+
+The SDK intentionally does not choose a matching or reconciliation policy for
+the application. The normalized `Order` currently does not guarantee a
+`clientProcessId`, and identical orders can coexist. Instrument, side, size, and
+time similarity alone are therefore not definitive proof that an unknown
+submission succeeded.
+
+### `confirmationNeeded`
+
+`confirmationNeeded` is an observed Trade Republic mapper status, but its exact
+live payload and continuation contract have not been captured and verified in
+this repository. Trade Republic documents that first-time trading in certain
+complex ETFs, derivatives, and bonds can require a product-knowledge assessment,
+and that insufficient knowledge or experience can produce a warning that must
+be acknowledged before continuing: [How can I place an
+order?](https://support.traderepublic.com/en-sk/775-How-can-I-place-an-order).
+
+The observed web client sends warning identifiers in `warningsShown`, so a
+product-suitability warning is the strongest known candidate for this status.
+That relationship remains an inference, not a verified protocol contract.
+
+The current SDK records `confirmationNeeded` in the submission's `updates` and
+continues waiting for `succeeded` or `failed`. If no definitive update arrives,
+the call can eventually return `outcomeUnknown`. The SDK does not currently
+expose a suitability questionnaire, a typed `actionRequired` result, or a public
+order-confirmation method. Do not fabricate warning identifiers or assume that
+a legacy `confirmOrder` resource is the correct continuation.
+
+## Durability and order journals
+
+The package does not currently export an `OrderJournal` class, accept an
+`orderJournal` client option, provide a built-in file journal, or perform restart
+recovery. Trading remains fully available without a journal, but the SDK cannot
+recover application intent after the process exits.
+
+Applications that require durability can implement a write-ahead journal around
+the current API:
+
+1. Call `orders.prepare()` to obtain a stable `clientProcessId` and normalized
+   `PreparedOrder`.
+2. Commit an `intentRecorded` event to durable storage before calling
+   `orders.submit(preparedOrder)`.
+3. If the intent write fails, do not submit the order.
+4. Append the returned `succeeded`, `failed`, or `outcomeUnknown` result without
+   modifying the original intent event.
+5. If result persistence fails, preserve the result for operational recovery;
+   do not turn a known broker result into an automatic resubmission.
+6. On restart, find intents without a terminal event and reconcile them against
+   broker orders, updates, and trades.
+
+A database-backed event table should contain at least:
+
+| Column | Purpose |
+| --- | --- |
+| `event_id` | Globally unique event identifier used for idempotent appends. |
+| `client_process_id` | Correlates every local event for one submission intent. |
+| `event_type` | For example `intentRecorded`, `succeeded`, `failed`, `outcomeUnknown`, or `reconciled`. |
+| `occurred_at` | Application timestamp used for ordering and operations. |
+| `payload` | The prepared order, SDK result, error summary, or reconciliation evidence as JSON. |
+
+Use an append-only table, commit the intent transaction before network
+submission, enforce unique event IDs, and define ordering and concurrency
+semantics for multiple workers. A file-only implementation needs equivalent
+durability, locking, atomic append, corruption handling, and privacy guarantees.
+
+This is an application-owned pattern, not a currently implemented SDK contract.
+The README will document a subclassable SDK journal and complete file/database
+examples only after that class, its client option, and recovery semantics exist
+in the public package. The current design discussion is recorded in
+[`docs/adr/0001-optional-order-journal-durability.md`](docs/adr/0001-optional-order-journal-durability.md).
+
+## API namespaces
+
+Prefer the domain namespaces and use `raw` or `web` only when a private resource
+does not yet have a first-class SDK method.
+
+| Namespace | Representative operations |
+| --- | --- |
+| `tr.auth` | Create and poll login challenges; restore, refresh, save, and clear sessions. |
+| `tr.account` | Current account, web session, settings, personal details, relationships, and cards. |
+| `tr.boards` | List and load trading boards. |
+| `tr.assets` | Search, list, and load stocks, ETFs, funds, crypto, bonds, and other instruments. |
+| `tr.derivatives` | Search derivatives, list products for an underlying, and load details. |
+| `tr.portfolio` | Portfolio, cash, mark-to-market value, savings plans, private-market positions, and chart data. |
+| `tr.orders` | List, filter, preview, prepare, submit, cancel, and stream order updates. |
+| `tr.trading` | Order prices, available size, destinations, trades, and daily PnL. |
+| `tr.market` | Quotes, candles, live feeds, subscriptions, and L2 order books. |
+| `tr.timeline` | Timeline entries, actions, and details. |
+| `tr.priceAlarms` | List, create, and cancel price alarms. |
+| `tr.instruments` | News and ETF, fund, crypto, composition, and yield details. |
+| `tr.discovery` | Exchanges, schedules, instrument status, watchlists, screeners, and preferences. |
+| `tr.documents` | Account documents. |
+| `tr.tax` | Tax information, exemption orders, and tax residencies. |
+| `tr.payments` | Payment methods, IBAN, and interest details. |
+| `tr.raw` | Low-level REST and mapper access using the SDK transport. |
+| `tr.web` | Debugging-oriented REST and mapper convenience methods. |
+
+Methods that need a securities account number resolve it from the active session
+or account profile unless the method accepts and receives an explicit value.
+
+Normalized results keep their original private-API payload in `raw`:
+
+```ts
+const position = (await tr.portfolio.current()).positions[0];
+console.log(position?.id, position?.value, position?.raw);
+```
+
+Some account-specific or unstable methods intentionally return `unknown`. Use
+the corresponding `rawX` method when you need the untouched response.
+
+## Market data and streams
 
 ```ts
 const candles = await tr.market.candles({
   assetId: 'US0378331005',
   exchangeId: 'LSX',
-  timeframe: '1h',
-  from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+  timeframe: '10m',
+  range: '5d',
 });
 
-const fullRange = await tr.market.candleQuery({
+const series = await tr.market.candleSeries({
   assetId: 'US0378331005',
   exchangeId: 'LSX',
-  timeframe: '1h',
-  from: '2026-06-01T00:00:00.000Z',
-  to: '2026-07-01T00:00:00.000Z',
-}).download({ maxCandlesPerRequest: 500 });
-```
+  timeframe: '1d',
+  range: '6m',
+});
 
-Live quotes:
-
-```ts
-const live = tr.market.subscribeLiveFeed({
+// Fetches this instrument's metadata and mirrors Trade Republic's chart
+// capability rule for its type (stock, derivative, crypto, bond, ...).
+const availableResolutions = await tr.market.availableCandleResolutions({
   assetId: 'US0378331005',
+});
+
+console.log(series.resolutionMs, availableResolutions, candles);
+
+const feed = tr.market.liveFeed('US0378331005', {
   exchangeId: 'LSX',
 });
 
-for await (const quote of live) {
-  console.log(quote);
+try {
+  for await (const event of feed) {
+    console.log(event.type, event.raw);
+  }
+} finally {
+  feed.close();
 }
-
-live.close();
 ```
 
-L2 order book:
+Order updates are also a stream:
 
 ```ts
-const venues = await tr.market.availableL2Books('US0378331005');
+const secAccNo = tr.securitiesAccountNumber;
+if (!secAccNo) throw new Error('No securities account number is available.');
 
-const book = tr.market.subscribeL2OrderBook({
-  assetId: 'US0378331005',
-  exchangeId: venues[0].exchangeId,
-  depth: 10,
-  throttleMs: 250,
-});
-
-for await (const snapshot of book) {
-  console.log(snapshot.bids, snapshot.asks);
+const updates = tr.orders.orderUpdates(secAccNo);
+try {
+  for await (const update of updates) {
+    console.log(update);
+  }
+} finally {
+  updates.close();
 }
-
-book.close();
 ```
 
-## Timeline and Price Alarms
+## Raw APIs and schema drift
 
-```ts
-const items = await tr.timeline.list();
-const nextPage = await tr.timeline.list({ after: 'cursor-or-id' });
-const actions = await tr.timeline.actions();
-const detail = await tr.timeline.detail(items[0].id);
-
-const alarms = await tr.priceAlarms.list();
-const notifications = await tr.priceAlarms.notifications();
-```
-
-## Instruments
-
-```ts
-const news = await tr.instruments.news('US0378331005');
-const etf = await tr.instruments.etfDetails('ETF_ISIN_OR_ID');
-const etfComposition = await tr.instruments.etfComposition('ETF_ISIN_OR_ID');
-const fund = await tr.instruments.fundDetails('FUND_ISIN_OR_ID');
-const fundComposition = await tr.instruments.fundComposition('FUND_ISIN_OR_ID');
-const crypto = await tr.instruments.cryptoDetails('CRYPTO_ID');
-const ytm = await tr.instruments.yieldToMaturity('BOND_ISIN_OR_ID');
-```
-
-## Discovery, Documents, Tax, and Payments
-
-```ts
-const exchanges = await tr.discovery.exchangeDetails();
-const schedule = await tr.discovery.exchangeSchedule('LSX');
-const status = await tr.discovery.instrumentStatus('US0378331005', 'LSX');
-const watchlists = await tr.discovery.watchlists();
-const screeners = await tr.discovery.screeners();
-const screenerOptions = await tr.discovery.screenerOptions();
-const preferences = await tr.discovery.userPreferences();
-
-const documents = await tr.documents.documents();
-
-const taxInfo = await tr.tax.taxInformation();
-const exemptionOrder = await tr.tax.exemptionOrder();
-const residencies = await tr.tax.taxResidencies();
-const countries = await tr.tax.taxResidencyCountries();
-
-const methods = await tr.payments.paymentMethods();
-const iban = await tr.payments.iban();
-const interest = await tr.payments.interestDetails();
-```
-
-## Raw Escape Hatches
-
-Use high-level namespaces first. The `raw` and `web` APIs are escape hatches for
-debugging, local inspection, and mapping newly discovered Trade Republic
-resources. They are not the recommended surface for normal application code.
-
-Unmapped mapper one-shot:
+Raw mapper query:
 
 ```ts
 const availableCash = await tr.raw.query({ type: 'availableCash' });
 ```
 
-Known SDK mutations (`simpleCreateOrder`, `cancelOrder`, `createPriceAlarm`, and
-`cancelPriceAlarm`) are centrally classified as non-replayable. When calling a
-new or otherwise unknown mutation through `raw` or `web`, declare it explicitly:
-
-```ts
-const result = await tr.raw.query(
-  { type: 'newBrokerMutation', parameters: { /* ... */ } },
-  { operation: 'mutation' },
-);
-```
-
-This prevents replay after a disconnect. If such a raw mutation fails after it
-was sent, `MapperRequestError` exposes `deliveryState: 'sent'` and
-`outcomeUnknown: true`; reconcile it before considering another attempt.
-
-Unmapped mapper stream:
+Raw mapper stream:
 
 ```ts
 const ticker = tr.raw.subscribe('tickerV3', {
@@ -620,95 +566,76 @@ const ticker = tr.raw.subscribe('tickerV3', {
   unit: 'EUR',
 });
 
-for await (const event of ticker) {
-  console.log(event);
+try {
+  for await (const event of ticker) {
+    console.log(event);
+  }
+} finally {
+  ticker.close();
 }
-
-ticker.close();
 ```
 
-REST:
+Raw REST and debugging APIs:
 
 ```ts
 const account = await tr.raw.request({
   path: '/api/v2/auth/account',
 });
 
-const custom = await tr.web.request('GET', '/api/v2/auth/account');
-const mapper = await tr.web.query({ type: 'availableCash' });
-```
-
-## Types and Normalization
-
-Stable convenience methods return typed shells and keep the original payload in
-`raw`. Private API payloads can change, so do not assume that normalized fields
-are exhaustive.
-
-Example:
-
-```ts
-const alarm = (await tr.priceAlarms.list())[0];
-
-console.log(alarm.id);
-console.log(alarm.raw);
-```
-
-When an API surface is still unstable or account-specific, methods may return
-`unknown` directly. Prefer raw variants such as `rawList`, `rawDetails`, or
-`rawX` when you need the untouched response.
-
-## Session Notes
-
-The Trade Republic web session can involve several independent values:
-
-- `tr_session` can keep the web session alive.
-- `tr_claims` can be a short-lived claims snapshot and may expire before the
-  whole session stops working.
-- `XSRF-TOKEN` is used for HTTP request protection.
-- `sessionToken` is used for mapper/websocket subscriptions.
-- `webContext` stores WAF/browser headers and cookies used by HTTP requests.
-
-Do not treat one cookie expiry as definitive proof that the full session is
-dead. The safest local pattern is to call `refreshSession()` periodically and
-fall back to a new QR login when the server rejects the session.
-
-### Multiple Users
-
-The SDK is single-user per `TradeRepublicClient`. To work with multiple
-accounts, create one client, one session store, and one WAF context per user.
-Do not share one client instance between users.
-
-```ts
-const users = [
-  {
-    id: 'alice',
-    client: TradeRepublicClient.create({
-      sessionStore: new FileSessionStore('.sessions/alice.json'),
-      webContext: aliceWebContext,
-    }),
-  },
-  {
-    id: 'bob',
-    client: TradeRepublicClient.create({
-      sessionStore: new FileSessionStore('.sessions/bob.json'),
-      webContext: bobWebContext,
-    }),
-  },
-];
-
-await Promise.allSettled(
-  users.map((user) => user.client.auth.refreshSession()),
+const detailed = await tr.web.requestDetailed(
+  'GET',
+  '/api/v2/auth/account',
 );
 ```
 
-This keeps refresh and session persistence independent per user without adding a
-global queue, pool, or scheduler abstraction to the SDK.
-
-## Endpoint Overrides
-
-Some older SDK surfaces support endpoint overrides:
+Known SDK mutations are centrally classified as non-replayable. When exploring
+a new mutation through `raw` or `web`, classify it explicitly:
 
 ```ts
+const result = await tr.raw.query(
+  {
+    type: 'newBrokerMutation',
+    parameters: { /* observed parameters */ },
+  },
+  { operation: 'mutation' },
+);
+```
+
+This prevents replay after a disconnect. It does not make an unknown private
+mutation safe. Validate its broker semantics, response states, and recovery path
+before exposing it to application users.
+
+Covered raw responses are validated against the schemas in
+`src/schemas/registry.ts`; the generated catalog is in [`SCHEMAS.md`](SCHEMAS.md).
+Private payloads can still contain undocumented fields or change without notice.
+
+## Advanced client configuration
+
+The client generates one device profile per new client and persists it with the
+session. The fingerprint is random, while CPU count, memory, operating system,
+OS release, and timezone come from the Node runtime. Browser defaults use the
+current Firefox profile. Override any device value directly when needed:
+
+```js
+import { TradeRepublicClient } from 'handelsrepublik';
+
+const tr = TradeRepublicClient.create({
+  deviceInfo: {
+    stableDeviceId: 'your-fingerprint',
+    browser: 'Firefox',
+    browserVersion: '152.0.6',
+    preferredLanguages: ['de-DE', 'de', 'en-US', 'en'],
+    numberOfCores: 8,
+    deviceMemory: 16,
+  },
+});
+```
+
+Older SDK surfaces also support endpoint overrides:
+
+```ts
+import { TradeRepublicClient } from 'handelsrepublik';
+
 const tr = TradeRepublicClient.create({
   endpoints: {
     'orders.all': '/web-trading-gateway/api/customer/v1/orders',
@@ -716,137 +643,92 @@ const tr = TradeRepublicClient.create({
 });
 ```
 
-Newer web-app features are currently implemented directly from observed REST
-paths or mapper resource names.
+## Demo applications
 
-## Web Bundle Reference
-
-The repository keeps web-bundle inspection tooling in:
-
-```text
-references/traderepublic-web/
-```
-
-Run from this package:
+The repository includes an interactive Node REPL and a terminal UI:
 
 ```bash
-npm run reference:download
+npm install
+npm run demo:repl
+npm run demo:tui
 ```
 
-Use that reference when mapping new Trade Republic web-app functionality.
+The demos store local authentication state under `demo/`. Do not commit the
+session or configuration files they create.
 
-## Security and Privacy
+## Security and privacy
 
-- Do not commit `demo/.demo-session.json`, `.demo-config.json`, cookies, QR
-  challenge payloads, raw account data, downloaded documents, or MITM captures.
-- Keep session files local to your machine.
-- This SDK is not a broker compliance layer. Validate every trading-related
-  operation carefully before using it outside local debugging.
+- Keep session stores, WAF data, cookies, QR payloads, downloaded documents,
+  account responses, and captures outside version control.
+- Redact secrets before logging errors or raw payloads.
+- Use separate encrypted storage and access control for each account.
+- Call `tr.close()` when disposing a long-lived client.
+- Never place, cancel, or repeat an order from an unattended test.
+- Treat `outcomeUnknown` as a business state requiring investigation.
+- Do not use this SDK as a broker compliance or suitability layer.
 
-## Verification
-
-```bash
-npm run typecheck
-npm run test
-npm run build
-```
-
-## Local Development
-
-From this package directory:
+## Development and verification
 
 ```bash
 npm install
 npm run typecheck
-npm run test
+npm test
 npm run build
 ```
 
-The internal SDK is a modular monolith. `ClientRuntime` owns shared transport,
-schema-validation, and securities-account resolution dependencies. Straightforward
-REST and mapper calls are declared in `src/operation-specs.ts` and executed by
-`OperationClient`; domain-facing adapters live under `src/domains/`. Stateful
-flows such as authentication, order preparation, and order confirmation remain
-explicit workflows instead of generated operation wrappers. `MapperConnection`
-multiplexes concurrently active resource subscriptions.
+Keep `dist` committed because GitHub consumers install the compiled package
+without running the TypeScript build.
 
-Unit tests use mocked HTTP and websocket transports. Read-only live integration
-tests are opt-in and reuse a real saved login session from the demo REPL:
+The SDK is a modular monolith. `ClientRuntime` owns shared transport,
+schema-validation, and securities-account resolution dependencies. Declarative
+REST and mapper calls live in `src/operation-specs.ts` and run through
+`OperationClient`; domain adapters live under `src/domains/`. Authentication,
+order preparation, submission, and cancellation remain explicit workflows.
+`MapperConnection` owns multiplexing and reconnect behavior.
 
-```bash
-npm run dev
-# log in once with loginQr(...)
+Unit tests use mocked HTTP and websocket transports. Live integration tests are
+opt-in, reuse a saved demo session, and must remain free of order submissions,
+order cancellations, money movement, document acceptance, and account-security
+mutations:
 
-TR_INTEGRATION=1 npm run test:integration
-```
-
-By default the integration tests read `demo/.demo-session.json`. Override the
-session or market-data target when needed:
-
-```bash
-TR_INTEGRATION=1 \
-TR_SESSION_FILE=./demo/.demo-session.json \
-TR_INTEGRATION_ISIN=US0378331005 \
-TR_INTEGRATION_EXCHANGE=LSX \
-TR_INTEGRATION_QUERY=apple \
-TR_INTEGRATION_TYPE=stock \
+```powershell
+$env:TR_INTEGRATION = '1'
+$env:TR_SESSION_FILE = './demo/.demo-session.json'
 npm run test:integration
 ```
 
-The integration suite calls read/query/subscription flows and low-risk
-developer-safe mutations only: session restore and refresh, account/portfolio
-reads, search, candles, current price lookup, documents/tax/payment discovery
-reads, read-only websocket payloads, and disposable low-risk price-alert and
-watchlist mutation probes with cleanup when the current API shape accepts them.
-Feature-gated or unavailable low-risk mutation shapes are reported as
-diagnostics; auth failures and schema failures still fail. The suite does not
-place/change/cancel orders, move money, accept documents, or mutate account
-identity, tax, PIN, login, or security settings. Those high-risk mutation paths
-stay mocked-only.
+The live suite may use disposable low-risk price-alarm and watchlist mutations
+with cleanup. High-risk trading paths remain mocked-only.
 
-### GitHub Actions
+GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on every
+push and when the workflows are started manually. A separate account integration
+workflow has no push or pull-request trigger. It runs `npm run test:integration`
+only on `main`, only for the repository owner, and only after its unit-test gate
+passes. It runs at 08:15 and 20:15 Europe/Berlin each day to refresh the account
+session, and the repository owner can also start it manually. Those times keep
+the scheduled AAPL/LSX L2 test inside 07:00-23:00 German time even when GitHub
+starts the workflow up to an hour late.
 
-`.github/workflows/test.yml` runs unit tests, typechecking, and the package build
-on every push and once per day at 02:15 UTC. Pushes to `main` and the daily run
-additionally execute the live integration suite against the protected
-`trade-republic-tests` GitHub Environment. Live tests are kept off other
-branches because the environment contains a real account session; this also
-limits which pushed workflow definitions can access it.
+The live suite fails on endpoint errors, but skips the unsupported rename and
+clone operations for Trade Republic's built-in default watchlist. It never
+submits, changes, cancels, or intentionally fails an order. Its only writes are
+disposable low-risk price-alarm and watchlist probes with cleanup.
 
-Create the Environment once under **Settings -> Environments**, restrict its
-deployment branches to `main`, and add these Environment secrets:
-
-- `TR_SESSION_JSON`: the complete contents of `demo/.demo-session.json` after a
-  successful local demo login.
-- `TR_SECRET_ROTATION_TOKEN`: a fine-grained personal access token scoped only
-  to this repository with **Environments: Read and write** permission.
-
-The separate rotation token is required because the workflow's normal
-`GITHUB_TOKEN` cannot update Actions Environment secrets. The live job writes
-`TR_SESSION_JSON` to an ephemeral runner file, refreshes it through the SDK,
-updates the Environment secret with the refreshed JSON, runs the non-order
-integration tests, and deletes the runner file. Neither secret value is printed
-or uploaded as an artifact.
-
-With an authenticated GitHub CLI, the initial secrets can be seeded from
-PowerShell without copying the session into the repository:
+When the GitHub Environment session expires, renew it from a maintainer machine:
 
 ```powershell
-Get-Content -Raw demo/.demo-session.json |
-  gh secret set TR_SESSION_JSON --env trade-republic-tests --repo VIEWVIEWVIEW/handelsrepublik
-
-$env:TR_SECRET_ROTATION_TOKEN |
-  gh secret set TR_SECRET_ROTATION_TOKEN --env trade-republic-tests --repo VIEWVIEWVIEW/handelsrepublik
+npm run ci:reauth
 ```
 
-The rotation token cannot rotate itself and should be replaced manually before
-it expires. If the Trade Republic account session becomes fully invalid, log in
-locally again and reseed `TR_SESSION_JSON` with the first command.
+The command verifies the local GitHub CLI login, opens a browser briefly to
+collect the matching Trade Republic web/WAF context, renders a QR code in the
+terminal, and waits for approval in the Trade Republic app. Short-lived QR
+challenges are replaced automatically until approval or the overall timeout. It
+then updates the `TR_SESSION_JSON` secret in the protected
+`trade-republic-tests` Environment, dispatches `live-integration.yml` on `main`, and watches
+the new workflow run. The new session is held in memory and is not written to
+the repository.
 
-Start the demo REPL:
-
-```bash
-npm run dev
-```
-
-`npm run dev` builds the SDK and starts the Node REPL demo.
+Use `npm run ci:reauth -- --no-watch` to return after dispatching, or
+`npm run ci:reauth -- --help` to see repository, Environment, workflow, branch,
+timeout, and diagnostic overrides.

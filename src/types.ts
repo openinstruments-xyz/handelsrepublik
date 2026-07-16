@@ -55,7 +55,8 @@ export interface TradeRepublicClientOptions {
   websocketUrl?: string | undefined;
   locale?: string | undefined;
   userAgent?: string | undefined;
-  defaultHeaders?: Record<string, string> | undefined;
+  deviceInfo?: Partial<TradeRepublicDeviceInfo> | undefined;
+  defaultHeaders?: TradeRepublicDefaultHeaders | undefined;
   webContext?: TradeRepublicWebContext | undefined;
   session?: Session | undefined;
   sessionStore?: SessionStore | undefined;
@@ -100,6 +101,7 @@ export interface Session {
   accessToken?: string | undefined;
   refreshToken?: string | undefined;
   sessionToken?: string | undefined;
+  deviceInfo?: TradeRepublicDeviceInfo | undefined;
   webContext?: TradeRepublicWebContext | undefined;
   cookies?: Record<string, string> | undefined;
   expiresAt?: string | undefined;
@@ -107,6 +109,39 @@ export interface Session {
   deviceId?: string | undefined;
   securitiesAccountNumber?: string | undefined;
   metadata?: Record<string, unknown> | undefined;
+}
+
+export interface TradeRepublicDeviceInfo {
+  stableDeviceId: string | null;
+  model?: string | undefined;
+  browser?: string | undefined;
+  browserVersion?: string | undefined;
+  os?: string | undefined;
+  osVersion?: string | undefined;
+  timezone?: string | undefined;
+  timezoneOffset?: number | undefined;
+  screen?: string | undefined;
+  preferredLanguages?: string[] | undefined;
+  numberOfCores?: number | undefined;
+  deviceMemory?: number | undefined;
+}
+
+export interface TradeRepublicDefaultHeaders {
+  accept?: string | undefined;
+  'accept-language'?: string | undefined;
+  authorization?: string | undefined;
+  cookie?: string | undefined;
+  'content-type'?: string | undefined;
+  origin?: string | undefined;
+  referer?: string | undefined;
+  'user-agent'?: string | undefined;
+  'x-aws-waf-token'?: string | undefined;
+  'x-tr-app-version'?: string | undefined;
+  'x-tr-device-info'?: string | undefined;
+  'x-tr-platform'?: string | undefined;
+  'x-tr-session'?: string | undefined;
+  'x-xsrf-token'?: string | undefined;
+  [headerName: string]: string | undefined;
 }
 
 export interface SessionStore {
@@ -214,6 +249,15 @@ export type OrderExpiry =
   | { type: 'eom'; value?: never }
   | { type: 'gtd'; value: string };
 
+export type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
+
+export type OrderValidity =
+  | OrderValidityPreset
+  | {
+      type: OrderValidityPreset;
+      referenceDate?: string | Date | undefined;
+    };
+
 export interface CreateOrderOptions {
   instrumentId: string;
   exchangeId: string;
@@ -225,6 +269,7 @@ export interface CreateOrderOptions {
   limit?: number | undefined;
   stop?: number | undefined;
   expiry?: OrderExpiry | undefined;
+  validity?: OrderValidity | undefined;
   settlementCurrency?: string | undefined;
   tradingCurrency?: string | undefined;
   sellFractions?: boolean | undefined;
@@ -430,6 +475,39 @@ export interface InstrumentNewsItem {
 export interface OrderDestination {
   id: string;
   name?: string | undefined;
+  type?: string | undefined;
+  orderModes?: string[] | undefined;
+  orderExpiries?: string[] | undefined;
+  listingId?: string | undefined;
+  currencyId?: string | undefined;
+  open?: boolean | undefined;
+  openTimeOffsetMillis?: number | undefined;
+  closeTimeOffsetMillis?: number | undefined;
+  timeZoneId?: string | undefined;
+  maintenanceWindow?: unknown;
+  ongoingOutage?: boolean | undefined;
+  priority?: number | undefined;
+  tickSizes?: number[][] | null | undefined;
+  raw: unknown;
+}
+
+export interface OrderPriceOptions {
+  instrumentId?: string | undefined;
+  isin?: string | undefined;
+  exchangeId: string;
+  side: OrderSide | 'BUY' | 'SELL';
+  unit?: string | undefined;
+}
+
+export interface OrderPriceQuote {
+  instrumentId: string;
+  exchangeId: string;
+  side: OrderSide;
+  price?: number | undefined;
+  bid?: number | undefined;
+  ask?: number | undefined;
+  unit?: string | undefined;
+  time?: string | undefined;
   raw: unknown;
 }
 
@@ -464,14 +542,22 @@ export interface InstrumentStatus {
 
 export type CandleTimeframe =
   | '1m'
+  | '3m'
   | '5m'
+  | '10m'
   | '15m'
+  | '20m'
   | '30m'
+  | '45m'
   | '1h'
+  | '2h'
   | '4h'
   | '1d'
   | '1w'
   | '1M';
+
+export type CandleResolution = CandleTimeframe | number;
+export type CandleRange = '1d' | '5d' | '1m' | '3m' | '6m' | '1y' | string;
 
 export interface Candle {
   time: string;
@@ -486,11 +572,26 @@ export interface Candle {
 export interface CandleDownloadOptions {
   assetId: string;
   exchangeId: string;
-  timeframe: CandleTimeframe;
-  from: string | Date;
+  timeframe: CandleResolution;
+  range?: CandleRange | undefined;
+  from?: string | Date | undefined;
   to?: string | Date | undefined;
+  unit?: string | undefined;
   limit?: number | undefined;
   cursor?: string | undefined;
+}
+
+export interface CandleSeries {
+  resolutionMs: number;
+  expectedClosingTime?: string | undefined;
+  lastAggregateEndTime?: string | undefined;
+  unit?: string | undefined;
+  candles: Candle[];
+  raw: unknown;
+}
+
+export interface AvailableCandleResolutionsOptions {
+  assetId: string;
 }
 
 export interface MarketSubscriptionsOptions {

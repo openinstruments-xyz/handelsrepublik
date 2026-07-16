@@ -1,5 +1,6 @@
 import { AuthApi } from './auth.js';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { CandleQuery } from './candles.js';
 import { ClientRuntime, firstStringByKey } from './client-runtime.js';
 import { EndpointResolver } from './endpoints.js';
@@ -12,6 +13,8 @@ import { OperationClient } from './operations.js';
 import { TradeRepublicProtocolError } from './errors.js';
 import {
   availableL2BooksSpec,
+  availableCandleResolutionsSpec,
+  candleSeriesSpec,
   candlesSpec,
   l2OrderBookSpec,
   liveFeedSpec,
@@ -27,6 +30,7 @@ import {
   normalizeInstrumentNewsItem,
   normalizeOrder,
   normalizeOrderDestination,
+  normalizeOrderPriceQuote,
   normalizePortfolio,
   normalizePortfolioChart,
   normalizePriceAlarm,
@@ -44,8 +48,10 @@ import type {
   Asset,
   AssetDetail,
   AssetSearchType,
+  AvailableCandleResolutionsOptions,
   Candle,
   CandleDownloadOptions,
+  CandleSeries,
   CandleTimeframe,
   CashSummary,
   Derivative,
@@ -64,6 +70,8 @@ import type {
   OrderCancellation,
   CreateOrderOptions,
   OrderFeeItem,
+  OrderPriceOptions,
+  OrderPriceQuote,
   OrderPreview,
   OrderSubmission,
   PreparedOrder,
@@ -81,6 +89,7 @@ import type {
   TimelineItem,
   Trade,
   TradeRepublicClientOptions,
+  TradeRepublicDeviceInfo,
   TradeRepublicWebContext,
   RawSchemaValidator,
   RawSchemaValidationFailure,
@@ -89,13 +98,18 @@ import type {
 
 const DEFAULT_API_BASE_URL = 'https://api.traderepublic.com';
 const DEFAULT_WEBSOCKET_URL = 'wss://api.traderepublic.com';
-const DEFAULT_LOCALE = 'en';
-const DEFAULT_USER_AGENT = 'handelsrepublik/0.1.0';
+const DEFAULT_LOCALE = 'de-DE';
+const FIREFOX_VERSION = '152.0.6';
 const DEFAULT_TR_HEADERS = {
   'x-tr-app-version': '15.101.0',
   'x-tr-platform': 'web-pro',
-  'x-tr-device-info': 'eyJzdGFibGVEZXZpY2VJZCI6IjFlMTEyMjA3ZmNlZDhhZTNhZDRlY2ZiNGNiYjlmZTIyZDhkYjI1NDk5YmUwMzk4OGU2ODlmOTVmMmVlYTBlYTg4NWJhOTI2NmU2YWIwMTE5ZmRjZGQ1MDI2NGIzMDgyZWZmZDgxZGViZmEwYmQ1YTMzNjdmN2QwNzljMDZjMDcwIiwiYnJvd3NlciI6IkNocm9tZSIsImJyb3dzZXJWZXJzaW9uIjoiMTUwLjAuMC4wIiwib3MiOiJXaW5kb3dzIiwib3NWZXJzaW9uIjoiMTAiLCJ0aW1lem9uZSI6IkV1cm9wZS9CZXJsaW4iLCJ0aW1lem9uZU9mZnNldCI6LTEyMCwic2NyZWVuIjoiMTI4MHg3MjB4MjQiLCJwcmVmZXJyZWRMYW5ndWFnZXMiOlsiZW4tVVMiLCJlbiJdLCJudW1iZXJPZkNvcmVzIjoxMiwiZGV2aWNlTWVtb3J5IjozMn0=',
 } as const;
+const PLAUSIBLE_SCREENS = ['1920x1080x24', '2560x1440x24', '1536x864x24', '1366x768x24', '1920x1200x24'];
+const GERMAN_LANGUAGE_PROFILES = [
+  ['de-DE', 'de', 'en-US', 'en'],
+  ['de-DE', 'de', 'en-GB', 'en'],
+  ['de-DE', 'de'],
+];
 
 export class TradeRepublicClient {
   readonly auth: AuthApi;
@@ -120,6 +134,7 @@ export class TradeRepublicClient {
   securitiesAccountNumber: string | undefined;
 
   private session: Session | undefined;
+  private deviceInfo: TradeRepublicDeviceInfo;
   private readonly http: HttpClient;
   private readonly endpoints: EndpointResolver;
   private readonly resources: ResourceClient;
@@ -128,18 +143,23 @@ export class TradeRepublicClient {
   private readonly validateRaw: RawSchemaValidator;
 
   constructor(options: TradeRepublicClientOptions = {}) {
-    this.session = withWebContext(options.session, options.webContext);
+    if (options.session && !options.session.deviceInfo) {
+      throw new TypeError('Trade Republic sessions must contain deviceInfo.');
+    }
+    this.deviceInfo = createDeviceInfo(options.session?.deviceInfo ?? options.deviceInfo);
+    this.session = withClientContext(options.session, options.webContext, this.deviceInfo);
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
     this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
     this.endpoints = new EndpointResolver(options.endpoints);
     this.http = new HttpClient({
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
       locale: options.locale ?? DEFAULT_LOCALE,
-      userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+      userAgent: options.userAgent ?? firefoxUserAgent(),
       sdkHeaders: DEFAULT_TR_HEADERS,
       defaultHeaders: options.defaultHeaders,
       fetch: options.fetch ?? fetch,
       getSession: () => this.session,
+      getDeviceInfo: () => this.deviceInfo,
     });
 
     this.auth = new AuthApi(this.http, this.endpoints, () => this.session, (session) => {
@@ -195,10 +215,14 @@ export class TradeRepublicClient {
 
   setSession(session: Session): void {
     const shouldPreserveWebContext = Object.keys(session).length > 0 && !session.webContext;
-    const nextSession = shouldPreserveWebContext && this.session?.webContext
-      ? { ...session, webContext: this.session.webContext }
+    const withDeviceInfo = Object.keys(session).length > 0
+      ? { ...session, deviceInfo: structuredClone(session.deviceInfo ?? this.deviceInfo) }
       : session;
+    const nextSession = shouldPreserveWebContext && this.session?.webContext
+      ? { ...withDeviceInfo, webContext: this.session.webContext }
+      : withDeviceInfo;
     this.session = structuredClone(nextSession);
+    if (session.deviceInfo) this.deviceInfo = structuredClone(session.deviceInfo);
     this.raw?.refreshSession();
     if (session.securitiesAccountNumber) this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
     else if (Object.keys(session).length === 0) this.securitiesAccountNumber = undefined;
@@ -207,6 +231,7 @@ export class TradeRepublicClient {
   useWebContext(webContext: TradeRepublicWebContext): Session {
     const session = {
       ...(this.session ?? {}),
+      deviceInfo: structuredClone(this.deviceInfo),
       webContext: mergeTradeRepublicWebContexts(this.session?.webContext, normalizeTradeRepublicWebContext(webContext)),
     };
     this.setSession(session);
@@ -224,15 +249,19 @@ export class TradeRepublicClient {
   }
 
   private async captureSecuritiesAccountNumber(session: Session): Promise<Session> {
+    const sessionWithDeviceInfo = {
+      ...session,
+      deviceInfo: structuredClone(session.deviceInfo ?? this.deviceInfo),
+    };
     if (session.securitiesAccountNumber) {
       this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
-      return session;
+      return sessionWithDeviceInfo;
     }
     try {
       const accountNumber = await this.runtime.resolveSecuritiesAccountNumber(5_000);
-      return { ...session, securitiesAccountNumber: accountNumber };
+      return { ...sessionWithDeviceInfo, securitiesAccountNumber: accountNumber };
     } catch {
-      return session;
+      return sessionWithDeviceInfo;
     }
   }
 
@@ -244,12 +273,73 @@ export class TradeRepublicClient {
   }
 }
 
-function withWebContext(session: Session | undefined, webContext: TradeRepublicWebContext | undefined): Session | undefined {
-  if (!webContext) return session ? structuredClone(session) : undefined;
+function withClientContext(
+  session: Session | undefined,
+  webContext: TradeRepublicWebContext | undefined,
+  deviceInfo: TradeRepublicDeviceInfo,
+): Session | undefined {
+  if (!session && !webContext) return undefined;
   return {
     ...(session ? structuredClone(session) : {}),
-    webContext: mergeTradeRepublicWebContexts(session?.webContext, webContext),
+    deviceInfo: structuredClone(deviceInfo),
+    ...(webContext ? { webContext: mergeTradeRepublicWebContexts(session?.webContext, webContext) } : {}),
   };
+}
+
+function createDeviceInfo(overrides: Partial<TradeRepublicDeviceInfo> | undefined): TradeRepublicDeviceInfo {
+  const runtime = runtimeDeviceInfo();
+  return {
+    ...runtime,
+    ...definedProperties(overrides),
+    preferredLanguages: overrides?.preferredLanguages
+      ? [...overrides.preferredLanguages]
+      : runtime.preferredLanguages,
+  };
+}
+
+function runtimeDeviceInfo(): TradeRepublicDeviceInfo {
+  const nodePlatform = platform();
+  return {
+    stableDeviceId: randomBytes(64).toString('hex'),
+    browser: 'Firefox',
+    browserVersion: FIREFOX_VERSION,
+    os: operatingSystemName(nodePlatform),
+    osVersion: release(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezoneOffset: new Date().getTimezoneOffset(),
+    screen: randomItem(PLAUSIBLE_SCREENS),
+    preferredLanguages: [...randomItem(GERMAN_LANGUAGE_PROFILES)],
+    numberOfCores: cpus().length,
+    deviceMemory: Math.max(1, Math.round(totalmem() / 1024 ** 3)),
+  };
+}
+
+function operatingSystemName(nodePlatform: NodeJS.Platform): string {
+  if (nodePlatform === 'win32') return 'Windows';
+  if (nodePlatform === 'darwin') return 'Mac OS';
+  if (nodePlatform === 'linux') return 'Linux';
+  return nodePlatform;
+}
+
+function firefoxUserAgent(): string {
+  const majorVersion = FIREFOX_VERSION.split('.')[0];
+  const nodePlatform = platform();
+  const system = nodePlatform === 'win32'
+    ? `Windows NT 10.0; Win64; ${arch() === 'arm64' ? 'ARM64' : 'x64'}`
+    : nodePlatform === 'darwin'
+      ? 'Macintosh; Intel Mac OS X 10.15'
+      : `X11; Linux ${arch() === 'arm64' ? 'aarch64' : 'x86_64'}`;
+  return `Mozilla/5.0 (${system}; rv:${majorVersion}.0) Gecko/20100101 Firefox/${majorVersion}.0`;
+}
+
+function randomItem<T>(values: readonly T[]): T {
+  return values[randomInt(values.length)]!;
+}
+
+function definedProperties<T extends object>(value: Partial<T> | undefined): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value ?? {}).filter(([, property]) => property !== undefined),
+  ) as Partial<T>;
 }
 
 export class AssetsApi {
@@ -625,7 +715,7 @@ function normalizeCreateOrderOptions(options: CreateOrderOptions): { parameters:
   if (options.mode === 'market' && (options.limit !== undefined || options.stop !== undefined)) {
     throw new TypeError('Market orders must not include limit or stop prices.');
   }
-  const expiry = normalizeOrderExpiry(options.expiry);
+  const expiry = normalizeOrderValidity(options.validity, options.expiry);
   const parameters: Record<string, unknown> = {
     instrumentId,
     exchangeId,
@@ -656,6 +746,36 @@ function normalizeOrderExpiry(expiry: CreateOrderOptions['expiry']): Record<stri
     throw new TypeError('A gtd expiry requires value in YYYY-MM-DD format.');
   }
   return { type: expiry.type, value: expiry.value };
+}
+
+function normalizeOrderValidity(
+  validity: CreateOrderOptions['validity'],
+  expiry: CreateOrderOptions['expiry'],
+): Record<string, string> {
+  if (validity !== undefined && expiry !== undefined) {
+    throw new TypeError('Provide either validity or expiry, not both.');
+  }
+  if (validity === undefined) return normalizeOrderExpiry(expiry);
+  const preset = typeof validity === 'string' ? validity : validity.type;
+  if (preset === 'day') return { type: 'gfd' };
+  if (preset === 'goodTillCancelled') return { type: 'gtc' };
+  if (preset !== 'month' && preset !== 'year') {
+    throw new TypeError('validity must be "day", "month", "year", or "goodTillCancelled".');
+  }
+  const referenceDate = typeof validity === 'string' ? new Date() : parseValidityReferenceDate(validity.referenceDate);
+  referenceDate.setUTCDate(referenceDate.getUTCDate() + (preset === 'month' ? 30 : 365));
+  return { type: 'gtd', value: referenceDate.toISOString().slice(0, 10) };
+}
+
+function parseValidityReferenceDate(value: string | Date | undefined): Date {
+  if (value === undefined) return new Date();
+  const date = value instanceof Date
+    ? new Date(value.getTime())
+    : /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T00:00:00Z`)
+      : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError('validity.referenceDate must be a valid date.');
+  return date;
 }
 
 function normalizeOrderFees(raw: unknown): OrderFeeItem[] {
@@ -961,6 +1081,14 @@ export class MarketApi {
     return this.resources.query(candlesSpec, options);
   }
 
+  candleSeries(options: CandleDownloadOptions): Promise<CandleSeries> {
+    return this.resources.query(candleSeriesSpec, options);
+  }
+
+  availableCandleResolutions(options: AvailableCandleResolutionsOptions): Promise<CandleTimeframe[]> {
+    return this.resources.query(availableCandleResolutionsSpec, options);
+  }
+
   quote(assetId: string, exchangeId: string): Promise<MarketQuote> {
     return this.resources.query(quoteSpec, { assetId, exchangeId });
   }
@@ -1138,8 +1266,28 @@ export class TradingApi {
     this.validateRaw = runtime.validateRaw;
   }
 
-  priceForOrder(options: { isin: string; exchangeId: string; side: string; unit?: string }, queryOptions: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated(this.validateRaw, 'trading.priceForOrder', this.raw.query({ type: 'priceForOrderV2', unit: 'EUR', ...options }, pickTimeoutOptions(queryOptions)));
+  async priceForOrder(options: OrderPriceOptions, queryOptions: { timeoutMs?: number } = {}): Promise<OrderPriceQuote> {
+    const instrumentId = requiredString(options.instrumentId ?? options.isin, 'instrumentId');
+    const exchangeId = requiredString(options.exchangeId, 'exchangeId');
+    const side = options.side.toLowerCase();
+    if (side !== 'buy' && side !== 'sell') throw new TypeError('side must be "buy" or "sell".');
+    const normalized = { ...options, exchangeId, side: side as 'buy' | 'sell' };
+    const raw = await this.rawPriceForOrder(normalized, queryOptions);
+    return normalizeOrderPriceQuote(raw, normalized, instrumentId);
+  }
+
+  rawPriceForOrder(options: OrderPriceOptions, queryOptions: { timeoutMs?: number } = {}): Promise<unknown> {
+    const instrumentId = requiredString(options.instrumentId ?? options.isin, 'instrumentId');
+    const exchangeId = requiredString(options.exchangeId, 'exchangeId');
+    const side = options.side.toLowerCase();
+    if (side !== 'buy' && side !== 'sell') throw new TypeError('side must be "buy" or "sell".');
+    return validated(this.validateRaw, 'trading.priceForOrder', this.raw.query({
+      type: 'priceForOrderV2',
+      unit: options.unit?.trim() || 'EUR',
+      isin: instrumentId,
+      exchangeId,
+      side,
+    }, pickTimeoutOptions(queryOptions)));
   }
 
   async availableSize(instrumentId: string, secAccNo?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
@@ -1149,6 +1297,17 @@ export class TradingApi {
 
   async orderDestinations(isin: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<OrderDestination[]> {
     return arrayPayload(await this.rawOrderDestinations(isin, query)).map(normalizeOrderDestination);
+  }
+
+  async homeOrderDestination(instrumentId: string, options: { timeoutMs?: number } = {}): Promise<OrderDestination> {
+    return normalizeOrderDestination(await this.rawHomeOrderDestination(instrumentId, options));
+  }
+
+  rawHomeOrderDestination(instrumentId: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
+    return validated(this.validateRaw, 'trading.homeOrderDestination', this.raw.query({
+      type: 'homeInstrumentExchange',
+      id: requiredString(instrumentId, 'instrumentId'),
+    }, pickTimeoutOptions(options)));
   }
 
   rawOrderDestinations(isin: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {

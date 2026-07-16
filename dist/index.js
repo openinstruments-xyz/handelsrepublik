@@ -46,6 +46,7 @@ function arrayPayload(value) {
     "results",
     "orders",
     "positions",
+    "aggregates",
     "assets",
     "derivatives",
     "subscriptions",
@@ -89,7 +90,16 @@ function normalizeAsset(value) {
       instrument.shortName,
       instrument.title
     ),
-    type: optionalString(record.type, record.instrumentType, record.assetType, instrument.type, instrument.instrumentType, instrument.assetType),
+    type: optionalString(
+      record.typeId,
+      record.type,
+      record.instrumentType,
+      record.assetType,
+      instrument.typeId,
+      instrument.type,
+      instrument.instrumentType,
+      instrument.assetType
+    ),
     exchangeIds: uniqueStrings(
       arrayOfStrings(record.exchangeIds, record.exchanges, record.tradingVenues),
       arrayOfStrings(instrument.exchangeIds, instrument.exchanges, instrument.tradingVenues)
@@ -346,9 +356,37 @@ function normalizeInstrumentNewsItem(value) {
 }
 function normalizeOrderDestination(value) {
   const record = asRecord(value);
+  const exchange = asRecord(record.exchange);
   return {
     id: stringValue(record.id, record.exchangeId, record.destinationId, record.venue),
-    name: optionalString(record.name, record.title, record.exchangeName),
+    name: optionalString(record.name, record.title, record.exchangeName, exchange.name),
+    type: optionalString(record.type),
+    orderModes: optionalStringArray(record.orderModes),
+    orderExpiries: optionalStringArray(record.orderExpiries),
+    listingId: optionalString(record.listingId),
+    currencyId: optionalString(record.currencyId, asRecord(record.currency).id),
+    open: optionalBoolean(record.open),
+    openTimeOffsetMillis: optionalNumber(record.openTimeOffsetMillis),
+    closeTimeOffsetMillis: optionalNumber(record.closeTimeOffsetMillis),
+    timeZoneId: optionalString(record.timeZoneId, exchange.timeZoneId),
+    ..."maintenanceWindow" in record ? { maintenanceWindow: record.maintenanceWindow } : {},
+    ongoingOutage: optionalBoolean(record.ongoingOutage),
+    priority: optionalNumber(record.priority),
+    tickSizes: optionalNumberMatrix(record.tickSizes),
+    raw: value
+  };
+}
+function normalizeOrderPriceQuote(value, options, instrumentId) {
+  const record = asRecord(value);
+  return {
+    instrumentId,
+    exchangeId: options.exchangeId,
+    side: options.side.toLowerCase(),
+    price: optionalNumber(record.price),
+    bid: optionalNumber(record.bidPrice, record.bid),
+    ask: optionalNumber(record.askPrice, record.ask),
+    unit: optionalString(record.unit, record.currency),
+    time: normalizeTimestamp(optionalString(record.time, record.timestamp) ?? optionalNumber(record.time, record.timestamp)),
     raw: value
   };
 }
@@ -402,8 +440,9 @@ function normalizeCashItem(value) {
 }
 function normalizeCandle(value) {
   if (Array.isArray(value)) {
+    const time2 = normalizeTimestamp(optionalString(value[0]) ?? optionalNumber(value[0])) ?? String(value[0]);
     return {
-      time: String(value[0]),
+      time: time2,
       open: Number(value[1]),
       high: Number(value[2]),
       low: Number(value[3]),
@@ -413,13 +452,25 @@ function normalizeCandle(value) {
     };
   }
   const record = asRecord(value);
+  const time = normalizeTimestamp(optionalString(record.time, record.timestamp, record.date) ?? optionalNumber(record.time, record.timestamp, record.date)) ?? stringValue(record.time, record.timestamp, record.date);
   return {
-    time: stringValue(record.time, record.timestamp, record.date),
+    time,
     open: numberValue(record.open),
     high: numberValue(record.high),
     low: numberValue(record.low),
     close: numberValue(record.close),
     volume: optionalNumber(record.volume),
+    raw: value
+  };
+}
+function normalizeCandleSeries(value) {
+  const record = asRecord(value);
+  return {
+    resolutionMs: numberValue(record.resolution),
+    expectedClosingTime: normalizeTimestamp(optionalString(record.expectedClosingTime) ?? optionalNumber(record.expectedClosingTime)),
+    lastAggregateEndTime: normalizeTimestamp(optionalString(record.lastAggregateEndTime) ?? optionalNumber(record.lastAggregateEndTime)),
+    unit: optionalString(record.unit, record.currency),
+    candles: arrayPayload(value).map(normalizeCandle),
     raw: value
   };
 }
@@ -537,6 +588,21 @@ function optionalNumber(...values) {
     }
   }
   return void 0;
+}
+function optionalBoolean(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") return value;
+  }
+  return void 0;
+}
+function optionalStringArray(value) {
+  if (!Array.isArray(value)) return void 0;
+  return value.filter((item) => typeof item === "string");
+}
+function optionalNumberMatrix(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value)) return void 0;
+  return value.map((row) => Array.isArray(row) ? row.map(Number).filter(Number.isFinite) : [Number(row)].filter(Number.isFinite));
 }
 function arrayOfStrings(...values) {
   for (const value of values) {
@@ -1005,7 +1071,8 @@ var AuthApi = class {
   }
   async restoreSession() {
     const session = await this.sessionStore?.load();
-    if (session) this.setSession(session);
+    if (!session?.deviceInfo) return void 0;
+    this.setSession(session);
     return session;
   }
   async saveSession(session = this.getSession()) {
@@ -1013,8 +1080,10 @@ var AuthApi = class {
     await this.sessionStore?.save(session);
   }
   async refreshSession(options = {}) {
-    const session = this.getSession() ?? await this.sessionStore?.load();
+    const currentSession = this.getSession();
+    const session = currentSession ?? await this.sessionStore?.load();
     if (!session) throw new Error("No Trade Republic session is available to refresh.");
+    if (!currentSession) assertStoredSessionDeviceInfo(session);
     const refreshedSession = await this.completeWebSession(session, options);
     const finalizedSession = await this.finalizeSession(refreshedSession);
     debugLog(options.debug, "refresh:session", summarizeSession(finalizedSession));
@@ -1155,6 +1224,11 @@ function extractSession(raw) {
     metadata: { source: "instant-login" }
   };
 }
+function assertStoredSessionDeviceInfo(session) {
+  if (!session.deviceInfo) {
+    throw new TypeError("Stored Trade Republic sessions must contain deviceInfo. Create a new session.");
+  }
+}
 function mergeSessions(...sessions) {
   const result = {};
   for (const session of sessions) {
@@ -1162,6 +1236,7 @@ function mergeSessions(...sessions) {
     result.accessToken = session.accessToken ?? result.accessToken;
     result.refreshToken = session.refreshToken ?? result.refreshToken;
     result.sessionToken = session.sessionToken ?? result.sessionToken;
+    result.deviceInfo = session.deviceInfo ?? result.deviceInfo;
     result.webContext = mergeTradeRepublicWebContexts(result.webContext, session.webContext);
     result.expiresAt = session.expiresAt ?? result.expiresAt;
     result.accountId = session.accountId ?? result.accountId;
@@ -1261,7 +1336,68 @@ function parseSetCookie(value) {
 }
 
 // src/traderepublic-client.ts
-import { randomUUID } from "crypto";
+import { randomBytes, randomInt, randomUUID } from "crypto";
+import { arch, cpus, platform, release, totalmem } from "os";
+
+// src/candle-resolutions.ts
+var CANDLE_TIMEFRAME_MS = {
+  "1m": 6e4,
+  "3m": 3 * 6e4,
+  "5m": 5 * 6e4,
+  "10m": 10 * 6e4,
+  "15m": 15 * 6e4,
+  "20m": 20 * 6e4,
+  "30m": 30 * 6e4,
+  "45m": 45 * 6e4,
+  "1h": 60 * 6e4,
+  "2h": 2 * 60 * 6e4,
+  "4h": 4 * 60 * 6e4,
+  "1d": 24 * 60 * 6e4,
+  "1w": 7 * 24 * 60 * 6e4,
+  "1M": 30 * 24 * 60 * 6e4
+};
+var STANDARD_CANDLE_RESOLUTIONS = [
+  "1m",
+  "3m",
+  "5m",
+  "10m",
+  "15m",
+  "20m",
+  "30m",
+  "45m",
+  "1h",
+  "2h",
+  "4h",
+  "1d",
+  "1w",
+  "1M"
+];
+var DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS = [
+  "10m",
+  "1h",
+  "4h",
+  "1d",
+  "1w"
+];
+var BOND_CANDLE_RESOLUTIONS = [
+  "1d",
+  "1w"
+];
+function candleResolutionsForInstrumentType(instrumentType) {
+  const normalized = instrumentType?.trim().toLowerCase();
+  if (normalized === "derivative" || normalized === "crypto") {
+    return [...DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS];
+  }
+  if (normalized === "bond") return [...BOND_CANDLE_RESOLUTIONS];
+  return [...STANDARD_CANDLE_RESOLUTIONS];
+}
+function candleResolutionMs(resolution) {
+  const milliseconds = typeof resolution === "number" ? resolution : CANDLE_TIMEFRAME_MS[resolution];
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0 || !Number.isInteger(milliseconds)) {
+    throw new TypeError("Candle resolution must be a positive integer number of milliseconds.");
+  }
+  return milliseconds;
+}
 
 // src/market-specs.ts
 var marketSubscriptionsSpec = {
@@ -1276,17 +1412,18 @@ var marketSubscriptionsSpec = {
 };
 var candlesSpec = {
   schemaName: "market.candles",
-  resource: (params) => ({
-    type: "aggregateHistoryLightV2",
-    isin: params.assetId,
-    exchangeId: params.exchangeId,
-    resolution: params.timeframe,
-    from: toIso(params.from),
-    until: params.to ? toIso(params.to) : void 0,
-    range: params.limit ? String(params.limit) : void 0,
-    unit: "EUR"
-  }),
+  resource: candleResource,
   normalize: (raw) => arrayPayload(raw).map(normalizeCandle)
+};
+var candleSeriesSpec = {
+  schemaName: "market.candles",
+  resource: candleResource,
+  normalize: normalizeCandleSeries
+};
+var availableCandleResolutionsSpec = {
+  schemaName: "assets.get",
+  resource: (params) => ({ type: "instrument", id: params.assetId }),
+  normalize: (raw) => candleResolutionsForInstrumentType(normalizeAsset(raw).type)
 };
 var availableL2BooksSpec = {
   schemaName: "market.availableL2Books",
@@ -1320,22 +1457,23 @@ var l2OrderBookSpec = {
   }),
   normalize: (raw) => normalizeL2OrderBook(raw)
 };
+function candleResource(params) {
+  return {
+    type: "aggregateHistoryLightV2",
+    isin: params.assetId,
+    exchangeId: params.exchangeId,
+    resolution: candleResolutionMs(params.timeframe),
+    range: params.range,
+    from: params.from ? toIso(params.from) : void 0,
+    until: params.to ? toIso(params.to) : void 0,
+    unit: params.unit?.trim() || "EUR"
+  };
+}
 function toIso(value) {
   return value instanceof Date ? value.toISOString() : value;
 }
 
 // src/candles.ts
-var TIMEFRAME_MS = {
-  "1m": 6e4,
-  "5m": 5 * 6e4,
-  "15m": 15 * 6e4,
-  "30m": 30 * 6e4,
-  "1h": 60 * 6e4,
-  "4h": 4 * 60 * 6e4,
-  "1d": 24 * 60 * 6e4,
-  "1w": 7 * 24 * 60 * 6e4,
-  "1M": 31 * 24 * 60 * 6e4
-};
 var CandleQuery = class {
   constructor(resources, options) {
     this.resources = resources;
@@ -1353,7 +1491,8 @@ var CandleQuery = class {
       yield await this.fetch();
       return;
     }
-    const stepMs = TIMEFRAME_MS[this.options.timeframe] * maxCandlesPerRequest;
+    if (!this.options.from) throw new TypeError("from is required when to is provided for paged candle downloads.");
+    const stepMs = candleResolutionMs(this.options.timeframe) * maxCandlesPerRequest;
     let cursor = asDate(this.options.from);
     while (cursor < to) {
       const next = new Date(Math.min(cursor.getTime() + stepMs, to.getTime()));
@@ -1541,6 +1680,7 @@ var schemaRegistry = [
   entry("instruments.yieldToMaturity", "Yield to maturity", "websocket", "read", "yieldToMaturity", jsonValue),
   entry("trading.priceForOrder", "Price for order quote", "websocket", "read", "priceForOrderV2", jsonValue),
   entry("trading.availableSize", "Available size", "websocket", "read", "availableSize", jsonValue),
+  entry("trading.homeOrderDestination", "Home order destination and capabilities", "websocket", "read", "homeInstrumentExchange", jsonValue),
   entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", orderDestinationsResponseSchema),
   entry("trading.trades", "Trades", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades", normalizedArrayWrappers),
   entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", jsonValue),
@@ -2173,6 +2313,7 @@ var HttpClient = class {
       "user-agent": this.options.userAgent,
       ...normalizeHeaderRecord(webContext?.headers),
       ...normalizeHeaderRecord(this.options.sdkHeaders),
+      "x-tr-device-info": encodeDeviceInfo(this.options.getDeviceInfo()),
       ...normalizeHeaderRecord(this.options.defaultHeaders),
       ...extra
     };
@@ -2191,10 +2332,15 @@ var HttpClient = class {
     return headers;
   }
 };
+function encodeDeviceInfo(deviceInfo) {
+  return Buffer.from(JSON.stringify(deviceInfo), "utf8").toString("base64");
+}
 function normalizeHeaderRecord(headers) {
-  return Object.fromEntries(
-    Object.entries(headers ?? {}).filter(([, value]) => typeof value === "string" && value.length > 0)
-  );
+  const normalized = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (typeof value === "string" && value.length > 0) normalized[name] = value;
+  }
+  return normalized;
 }
 function hasHeader(headers, name) {
   const lowerName = name.toLowerCase();
@@ -2756,13 +2902,18 @@ function delay2(ms) {
 // src/traderepublic-client.ts
 var DEFAULT_API_BASE_URL = "https://api.traderepublic.com";
 var DEFAULT_WEBSOCKET_URL = "wss://api.traderepublic.com";
-var DEFAULT_LOCALE = "en";
-var DEFAULT_USER_AGENT = "handelsrepublik/0.1.0";
+var DEFAULT_LOCALE = "de-DE";
+var FIREFOX_VERSION = "152.0.6";
 var DEFAULT_TR_HEADERS = {
   "x-tr-app-version": "15.101.0",
-  "x-tr-platform": "web-pro",
-  "x-tr-device-info": "eyJzdGFibGVEZXZpY2VJZCI6IjFlMTEyMjA3ZmNlZDhhZTNhZDRlY2ZiNGNiYjlmZTIyZDhkYjI1NDk5YmUwMzk4OGU2ODlmOTVmMmVlYTBlYTg4NWJhOTI2NmU2YWIwMTE5ZmRjZGQ1MDI2NGIzMDgyZWZmZDgxZGViZmEwYmQ1YTMzNjdmN2QwNzljMDZjMDcwIiwiYnJvd3NlciI6IkNocm9tZSIsImJyb3dzZXJWZXJzaW9uIjoiMTUwLjAuMC4wIiwib3MiOiJXaW5kb3dzIiwib3NWZXJzaW9uIjoiMTAiLCJ0aW1lem9uZSI6IkV1cm9wZS9CZXJsaW4iLCJ0aW1lem9uZU9mZnNldCI6LTEyMCwic2NyZWVuIjoiMTI4MHg3MjB4MjQiLCJwcmVmZXJyZWRMYW5ndWFnZXMiOlsiZW4tVVMiLCJlbiJdLCJudW1iZXJPZkNvcmVzIjoxMiwiZGV2aWNlTWVtb3J5IjozMn0="
+  "x-tr-platform": "web-pro"
 };
+var PLAUSIBLE_SCREENS = ["1920x1080x24", "2560x1440x24", "1536x864x24", "1366x768x24", "1920x1200x24"];
+var GERMAN_LANGUAGE_PROFILES = [
+  ["de-DE", "de", "en-US", "en"],
+  ["de-DE", "de", "en-GB", "en"],
+  ["de-DE", "de"]
+];
 var TradeRepublicClient = class _TradeRepublicClient {
   auth;
   raw;
@@ -2784,6 +2935,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   web;
   securitiesAccountNumber;
   session;
+  deviceInfo;
   http;
   endpoints;
   resources;
@@ -2791,18 +2943,23 @@ var TradeRepublicClient = class _TradeRepublicClient {
   runtime;
   validateRaw;
   constructor(options = {}) {
-    this.session = withWebContext(options.session, options.webContext);
+    if (options.session && !options.session.deviceInfo) {
+      throw new TypeError("Trade Republic sessions must contain deviceInfo.");
+    }
+    this.deviceInfo = createDeviceInfo(options.session?.deviceInfo ?? options.deviceInfo);
+    this.session = withClientContext(options.session, options.webContext, this.deviceInfo);
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
     this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
     this.endpoints = new EndpointResolver(options.endpoints);
     this.http = new HttpClient({
       apiBaseUrl: options.apiBaseUrl ?? DEFAULT_API_BASE_URL,
       locale: options.locale ?? DEFAULT_LOCALE,
-      userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+      userAgent: options.userAgent ?? firefoxUserAgent(),
       sdkHeaders: DEFAULT_TR_HEADERS,
       defaultHeaders: options.defaultHeaders,
       fetch: options.fetch ?? fetch,
-      getSession: () => this.session
+      getSession: () => this.session,
+      getDeviceInfo: () => this.deviceInfo
     });
     this.auth = new AuthApi(this.http, this.endpoints, () => this.session, (session) => {
       this.setSession(session);
@@ -2854,8 +3011,10 @@ var TradeRepublicClient = class _TradeRepublicClient {
   }
   setSession(session) {
     const shouldPreserveWebContext = Object.keys(session).length > 0 && !session.webContext;
-    const nextSession = shouldPreserveWebContext && this.session?.webContext ? { ...session, webContext: this.session.webContext } : session;
+    const withDeviceInfo = Object.keys(session).length > 0 ? { ...session, deviceInfo: structuredClone(session.deviceInfo ?? this.deviceInfo) } : session;
+    const nextSession = shouldPreserveWebContext && this.session?.webContext ? { ...withDeviceInfo, webContext: this.session.webContext } : withDeviceInfo;
     this.session = structuredClone(nextSession);
+    if (session.deviceInfo) this.deviceInfo = structuredClone(session.deviceInfo);
     this.raw?.refreshSession();
     if (session.securitiesAccountNumber) this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
     else if (Object.keys(session).length === 0) this.securitiesAccountNumber = void 0;
@@ -2863,6 +3022,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   useWebContext(webContext) {
     const session = {
       ...this.session ?? {},
+      deviceInfo: structuredClone(this.deviceInfo),
       webContext: mergeTradeRepublicWebContexts(this.session?.webContext, normalizeTradeRepublicWebContext(webContext))
     };
     this.setSession(session);
@@ -2877,15 +3037,19 @@ var TradeRepublicClient = class _TradeRepublicClient {
     if (this.session) this.session.securitiesAccountNumber = value;
   }
   async captureSecuritiesAccountNumber(session) {
+    const sessionWithDeviceInfo = {
+      ...session,
+      deviceInfo: structuredClone(session.deviceInfo ?? this.deviceInfo)
+    };
     if (session.securitiesAccountNumber) {
       this.setSecuritiesAccountNumber(session.securitiesAccountNumber);
-      return session;
+      return sessionWithDeviceInfo;
     }
     try {
       const accountNumber = await this.runtime.resolveSecuritiesAccountNumber(5e3);
-      return { ...session, securitiesAccountNumber: accountNumber };
+      return { ...sessionWithDeviceInfo, securitiesAccountNumber: accountNumber };
     } catch {
-      return session;
+      return sessionWithDeviceInfo;
     }
   }
   async resolveSecuritiesAccountNumberFromRest() {
@@ -2895,12 +3059,57 @@ var TradeRepublicClient = class _TradeRepublicClient {
     return accountNumber;
   }
 };
-function withWebContext(session, webContext) {
-  if (!webContext) return session ? structuredClone(session) : void 0;
+function withClientContext(session, webContext, deviceInfo) {
+  if (!session && !webContext) return void 0;
   return {
     ...session ? structuredClone(session) : {},
-    webContext: mergeTradeRepublicWebContexts(session?.webContext, webContext)
+    deviceInfo: structuredClone(deviceInfo),
+    ...webContext ? { webContext: mergeTradeRepublicWebContexts(session?.webContext, webContext) } : {}
   };
+}
+function createDeviceInfo(overrides) {
+  const runtime = runtimeDeviceInfo();
+  return {
+    ...runtime,
+    ...definedProperties(overrides),
+    preferredLanguages: overrides?.preferredLanguages ? [...overrides.preferredLanguages] : runtime.preferredLanguages
+  };
+}
+function runtimeDeviceInfo() {
+  const nodePlatform = platform();
+  return {
+    stableDeviceId: randomBytes(64).toString("hex"),
+    browser: "Firefox",
+    browserVersion: FIREFOX_VERSION,
+    os: operatingSystemName(nodePlatform),
+    osVersion: release(),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezoneOffset: (/* @__PURE__ */ new Date()).getTimezoneOffset(),
+    screen: randomItem(PLAUSIBLE_SCREENS),
+    preferredLanguages: [...randomItem(GERMAN_LANGUAGE_PROFILES)],
+    numberOfCores: cpus().length,
+    deviceMemory: Math.max(1, Math.round(totalmem() / 1024 ** 3))
+  };
+}
+function operatingSystemName(nodePlatform) {
+  if (nodePlatform === "win32") return "Windows";
+  if (nodePlatform === "darwin") return "Mac OS";
+  if (nodePlatform === "linux") return "Linux";
+  return nodePlatform;
+}
+function firefoxUserAgent() {
+  const majorVersion = FIREFOX_VERSION.split(".")[0];
+  const nodePlatform = platform();
+  const system = nodePlatform === "win32" ? `Windows NT 10.0; Win64; ${arch() === "arm64" ? "ARM64" : "x64"}` : nodePlatform === "darwin" ? "Macintosh; Intel Mac OS X 10.15" : `X11; Linux ${arch() === "arm64" ? "aarch64" : "x86_64"}`;
+  return `Mozilla/5.0 (${system}; rv:${majorVersion}.0) Gecko/20100101 Firefox/${majorVersion}.0`;
+}
+function randomItem(values) {
+  return values[randomInt(values.length)];
+}
+function definedProperties(value) {
+  return Object.fromEntries(
+    Object.entries(value ?? {}).filter(([, property]) => property !== void 0)
+  );
 }
 var AssetsApi = class {
   constructor(raw, validateRaw) {
@@ -3244,7 +3453,7 @@ function normalizeCreateOrderOptions(options) {
   if (options.mode === "market" && (options.limit !== void 0 || options.stop !== void 0)) {
     throw new TypeError("Market orders must not include limit or stop prices.");
   }
-  const expiry = normalizeOrderExpiry(options.expiry);
+  const expiry = normalizeOrderValidity(options.validity, options.expiry);
   const parameters = {
     instrumentId,
     exchangeId,
@@ -3274,6 +3483,27 @@ function normalizeOrderExpiry(expiry) {
     throw new TypeError("A gtd expiry requires value in YYYY-MM-DD format.");
   }
   return { type: expiry.type, value: expiry.value };
+}
+function normalizeOrderValidity(validity, expiry) {
+  if (validity !== void 0 && expiry !== void 0) {
+    throw new TypeError("Provide either validity or expiry, not both.");
+  }
+  if (validity === void 0) return normalizeOrderExpiry(expiry);
+  const preset = typeof validity === "string" ? validity : validity.type;
+  if (preset === "day") return { type: "gfd" };
+  if (preset === "goodTillCancelled") return { type: "gtc" };
+  if (preset !== "month" && preset !== "year") {
+    throw new TypeError('validity must be "day", "month", "year", or "goodTillCancelled".');
+  }
+  const referenceDate = typeof validity === "string" ? /* @__PURE__ */ new Date() : parseValidityReferenceDate(validity.referenceDate);
+  referenceDate.setUTCDate(referenceDate.getUTCDate() + (preset === "month" ? 30 : 365));
+  return { type: "gtd", value: referenceDate.toISOString().slice(0, 10) };
+}
+function parseValidityReferenceDate(value) {
+  if (value === void 0) return /* @__PURE__ */ new Date();
+  const date = value instanceof Date ? new Date(value.getTime()) : /^\d{4}-\d{2}-\d{2}$/.test(value) ? /* @__PURE__ */ new Date(`${value}T00:00:00Z`) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError("validity.referenceDate must be a valid date.");
+  return date;
 }
 function normalizeOrderFees(raw) {
   const value = firstValueAtPaths(raw, ["fees"], ["data.fees"], ["result.fees"]);
@@ -3530,6 +3760,12 @@ var MarketApi = class {
   candles(options) {
     return this.resources.query(candlesSpec, options);
   }
+  candleSeries(options) {
+    return this.resources.query(candleSeriesSpec, options);
+  }
+  availableCandleResolutions(options) {
+    return this.resources.query(availableCandleResolutionsSpec, options);
+  }
   quote(assetId, exchangeId) {
     return this.resources.query(quoteSpec, { assetId, exchangeId });
   }
@@ -3675,8 +3911,27 @@ var TradingApi = class {
   http;
   raw;
   validateRaw;
-  priceForOrder(options, queryOptions = {}) {
-    return validated(this.validateRaw, "trading.priceForOrder", this.raw.query({ type: "priceForOrderV2", unit: "EUR", ...options }, pickTimeoutOptions(queryOptions)));
+  async priceForOrder(options, queryOptions = {}) {
+    const instrumentId = requiredString(options.instrumentId ?? options.isin, "instrumentId");
+    const exchangeId = requiredString(options.exchangeId, "exchangeId");
+    const side = options.side.toLowerCase();
+    if (side !== "buy" && side !== "sell") throw new TypeError('side must be "buy" or "sell".');
+    const normalized = { ...options, exchangeId, side };
+    const raw = await this.rawPriceForOrder(normalized, queryOptions);
+    return normalizeOrderPriceQuote(raw, normalized, instrumentId);
+  }
+  rawPriceForOrder(options, queryOptions = {}) {
+    const instrumentId = requiredString(options.instrumentId ?? options.isin, "instrumentId");
+    const exchangeId = requiredString(options.exchangeId, "exchangeId");
+    const side = options.side.toLowerCase();
+    if (side !== "buy" && side !== "sell") throw new TypeError('side must be "buy" or "sell".');
+    return validated(this.validateRaw, "trading.priceForOrder", this.raw.query({
+      type: "priceForOrderV2",
+      unit: options.unit?.trim() || "EUR",
+      isin: instrumentId,
+      exchangeId,
+      side
+    }, pickTimeoutOptions(queryOptions)));
   }
   async availableSize(instrumentId, secAccNo, options = {}) {
     const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
@@ -3684,6 +3939,15 @@ var TradingApi = class {
   }
   async orderDestinations(isin, query = {}) {
     return arrayPayload(await this.rawOrderDestinations(isin, query)).map(normalizeOrderDestination);
+  }
+  async homeOrderDestination(instrumentId, options = {}) {
+    return normalizeOrderDestination(await this.rawHomeOrderDestination(instrumentId, options));
+  }
+  rawHomeOrderDestination(instrumentId, options = {}) {
+    return validated(this.validateRaw, "trading.homeOrderDestination", this.raw.query({
+      type: "homeInstrumentExchange",
+      id: requiredString(instrumentId, "instrumentId")
+    }, pickTimeoutOptions(options)));
   }
   rawOrderDestinations(isin, query = {}) {
     return validated(this.validateRaw, "trading.orderDestinations", this.http.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, void 0, {
@@ -3917,16 +4181,22 @@ var FileSessionStore = class {
   }
 };
 export {
+  BOND_CANDLE_RESOLUTIONS,
+  CANDLE_TIMEFRAME_MS,
   CandleQuery,
+  DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS,
   FileSessionStore,
   MapperConnectionLostError,
   MapperRequestError,
   MemorySessionStore,
+  STANDARD_CANDLE_RESOLUTIONS,
   TradeRepublicClient,
   TradeRepublicError,
   TradeRepublicHttpError,
   TradeRepublicProtocolError,
   TradeRepublicSchemaError,
+  candleResolutionMs,
+  candleResolutionsForInstrumentType,
   classifyMapperOperation,
   collectTradeRepublicWebContext,
   redactSession,

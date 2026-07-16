@@ -26,7 +26,8 @@ interface TradeRepublicClientOptions {
     websocketUrl?: string | undefined;
     locale?: string | undefined;
     userAgent?: string | undefined;
-    defaultHeaders?: Record<string, string> | undefined;
+    deviceInfo?: Partial<TradeRepublicDeviceInfo> | undefined;
+    defaultHeaders?: TradeRepublicDefaultHeaders | undefined;
     webContext?: TradeRepublicWebContext | undefined;
     session?: Session | undefined;
     sessionStore?: SessionStore | undefined;
@@ -62,6 +63,7 @@ interface Session {
     accessToken?: string | undefined;
     refreshToken?: string | undefined;
     sessionToken?: string | undefined;
+    deviceInfo?: TradeRepublicDeviceInfo | undefined;
     webContext?: TradeRepublicWebContext | undefined;
     cookies?: Record<string, string> | undefined;
     expiresAt?: string | undefined;
@@ -69,6 +71,37 @@ interface Session {
     deviceId?: string | undefined;
     securitiesAccountNumber?: string | undefined;
     metadata?: Record<string, unknown> | undefined;
+}
+interface TradeRepublicDeviceInfo {
+    stableDeviceId: string | null;
+    model?: string | undefined;
+    browser?: string | undefined;
+    browserVersion?: string | undefined;
+    os?: string | undefined;
+    osVersion?: string | undefined;
+    timezone?: string | undefined;
+    timezoneOffset?: number | undefined;
+    screen?: string | undefined;
+    preferredLanguages?: string[] | undefined;
+    numberOfCores?: number | undefined;
+    deviceMemory?: number | undefined;
+}
+interface TradeRepublicDefaultHeaders {
+    accept?: string | undefined;
+    'accept-language'?: string | undefined;
+    authorization?: string | undefined;
+    cookie?: string | undefined;
+    'content-type'?: string | undefined;
+    origin?: string | undefined;
+    referer?: string | undefined;
+    'user-agent'?: string | undefined;
+    'x-aws-waf-token'?: string | undefined;
+    'x-tr-app-version'?: string | undefined;
+    'x-tr-device-info'?: string | undefined;
+    'x-tr-platform'?: string | undefined;
+    'x-tr-session'?: string | undefined;
+    'x-xsrf-token'?: string | undefined;
+    [headerName: string]: string | undefined;
 }
 interface SessionStore {
     load(): Promise<Session | undefined>;
@@ -162,6 +195,11 @@ type OrderExpiry = {
     type: 'gtd';
     value: string;
 };
+type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
+type OrderValidity = OrderValidityPreset | {
+    type: OrderValidityPreset;
+    referenceDate?: string | Date | undefined;
+};
 interface CreateOrderOptions {
     instrumentId: string;
     exchangeId: string;
@@ -173,6 +211,7 @@ interface CreateOrderOptions {
     limit?: number | undefined;
     stop?: number | undefined;
     expiry?: OrderExpiry | undefined;
+    validity?: OrderValidity | undefined;
     settlementCurrency?: string | undefined;
     tradingCurrency?: string | undefined;
     sellFractions?: boolean | undefined;
@@ -349,6 +388,37 @@ interface InstrumentNewsItem {
 interface OrderDestination {
     id: string;
     name?: string | undefined;
+    type?: string | undefined;
+    orderModes?: string[] | undefined;
+    orderExpiries?: string[] | undefined;
+    listingId?: string | undefined;
+    currencyId?: string | undefined;
+    open?: boolean | undefined;
+    openTimeOffsetMillis?: number | undefined;
+    closeTimeOffsetMillis?: number | undefined;
+    timeZoneId?: string | undefined;
+    maintenanceWindow?: unknown;
+    ongoingOutage?: boolean | undefined;
+    priority?: number | undefined;
+    tickSizes?: number[][] | null | undefined;
+    raw: unknown;
+}
+interface OrderPriceOptions {
+    instrumentId?: string | undefined;
+    isin?: string | undefined;
+    exchangeId: string;
+    side: OrderSide | 'BUY' | 'SELL';
+    unit?: string | undefined;
+}
+interface OrderPriceQuote {
+    instrumentId: string;
+    exchangeId: string;
+    side: OrderSide;
+    price?: number | undefined;
+    bid?: number | undefined;
+    ask?: number | undefined;
+    unit?: string | undefined;
+    time?: string | undefined;
     raw: unknown;
 }
 interface Trade {
@@ -376,7 +446,9 @@ interface InstrumentStatus {
     status?: string | undefined;
     raw: unknown;
 }
-type CandleTimeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w' | '1M';
+type CandleTimeframe = '1m' | '3m' | '5m' | '10m' | '15m' | '20m' | '30m' | '45m' | '1h' | '2h' | '4h' | '1d' | '1w' | '1M';
+type CandleResolution = CandleTimeframe | number;
+type CandleRange = '1d' | '5d' | '1m' | '3m' | '6m' | '1y' | string;
 interface Candle {
     time: string;
     open: number;
@@ -389,11 +461,24 @@ interface Candle {
 interface CandleDownloadOptions {
     assetId: string;
     exchangeId: string;
-    timeframe: CandleTimeframe;
-    from: string | Date;
+    timeframe: CandleResolution;
+    range?: CandleRange | undefined;
+    from?: string | Date | undefined;
     to?: string | Date | undefined;
+    unit?: string | undefined;
     limit?: number | undefined;
     cursor?: string | undefined;
+}
+interface CandleSeries {
+    resolutionMs: number;
+    expectedClosingTime?: string | undefined;
+    lastAggregateEndTime?: string | undefined;
+    unit?: string | undefined;
+    candles: Candle[];
+    raw: unknown;
+}
+interface AvailableCandleResolutionsOptions {
+    assetId: string;
 }
 interface MarketSubscriptionsOptions {
     assetId?: string | undefined;
@@ -474,9 +559,10 @@ interface HttpClientOptions {
     locale: string;
     userAgent: string;
     sdkHeaders?: Record<string, string> | undefined;
-    defaultHeaders?: Record<string, string> | undefined;
+    defaultHeaders?: TradeRepublicDefaultHeaders | undefined;
     fetch: typeof fetch;
     getSession: () => Session | undefined;
+    getDeviceInfo: () => TradeRepublicDeviceInfo;
 }
 declare class HttpClient {
     private readonly options;
@@ -819,6 +905,7 @@ declare class TradeRepublicClient {
     readonly web: WebApi;
     securitiesAccountNumber: string | undefined;
     private session;
+    private deviceInfo;
     private readonly http;
     private readonly endpoints;
     private readonly resources;
@@ -929,6 +1016,8 @@ declare class MarketApi {
     subscriptions(options?: MarketSubscriptionsOptions): Promise<MarketSubscription[]>;
     candleQuery(options: CandleDownloadOptions): CandleQuery;
     candles(options: CandleDownloadOptions): Promise<Candle[]>;
+    candleSeries(options: CandleDownloadOptions): Promise<CandleSeries>;
+    availableCandleResolutions(options: AvailableCandleResolutionsOptions): Promise<CandleTimeframe[]>;
     quote(assetId: string, exchangeId: string): Promise<MarketQuote>;
     downloadCandles(options: CandleDownloadOptions, paging?: {
         maxCandlesPerRequest?: number;
@@ -1048,18 +1137,22 @@ declare class TradingApi {
     private readonly raw;
     private readonly validateRaw;
     constructor(runtime: ClientRuntime);
-    priceForOrder(options: {
-        isin: string;
-        exchangeId: string;
-        side: string;
-        unit?: string;
-    }, queryOptions?: {
+    priceForOrder(options: OrderPriceOptions, queryOptions?: {
+        timeoutMs?: number;
+    }): Promise<OrderPriceQuote>;
+    rawPriceForOrder(options: OrderPriceOptions, queryOptions?: {
         timeoutMs?: number;
     }): Promise<unknown>;
     availableSize(instrumentId: string, secAccNo?: string, options?: {
         timeoutMs?: number;
     }): Promise<unknown>;
     orderDestinations(isin: string, query?: Record<string, string | number | boolean | undefined>): Promise<OrderDestination[]>;
+    homeOrderDestination(instrumentId: string, options?: {
+        timeoutMs?: number;
+    }): Promise<OrderDestination>;
+    rawHomeOrderDestination(instrumentId: string, options?: {
+        timeoutMs?: number;
+    }): Promise<unknown>;
     rawOrderDestinations(isin: string, query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
     trades(query?: Record<string, string | number | boolean | undefined>): Promise<Trade[]>;
     rawTrades(query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
@@ -1158,6 +1251,13 @@ declare class FileSessionStore implements SessionStore {
     clear(): Promise<void>;
 }
 
+declare const CANDLE_TIMEFRAME_MS: Record<CandleTimeframe, number>;
+declare const STANDARD_CANDLE_RESOLUTIONS: readonly CandleTimeframe[];
+declare const DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS: readonly CandleTimeframe[];
+declare const BOND_CANDLE_RESOLUTIONS: readonly CandleTimeframe[];
+declare function candleResolutionsForInstrumentType(instrumentType: string | undefined): CandleTimeframe[];
+declare function candleResolutionMs(resolution: CandleResolution): number;
+
 interface TradeRepublicBrowserLike {
     newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
 }
@@ -1217,8 +1317,8 @@ interface TradeRepublicSchemaEntry {
         sample?: 'once' | 'stream' | 'cleanup' | undefined;
     } | undefined;
 }
-declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
+declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type AssetSearchType, type Candle, type CandleDownloadOptions, CandleQuery, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

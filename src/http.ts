@@ -1,14 +1,21 @@
 import { TradeRepublicHttpError } from './errors.js';
-import type { HttpMethod, RequestOptions, Session } from './types.js';
+import type {
+  HttpMethod,
+  RequestOptions,
+  Session,
+  TradeRepublicDefaultHeaders,
+  TradeRepublicDeviceInfo,
+} from './types.js';
 
 export interface HttpClientOptions {
   apiBaseUrl: string;
   locale: string;
   userAgent: string;
   sdkHeaders?: Record<string, string> | undefined;
-  defaultHeaders?: Record<string, string> | undefined;
+  defaultHeaders?: TradeRepublicDefaultHeaders | undefined;
   fetch: typeof fetch;
   getSession: () => Session | undefined;
+  getDeviceInfo: () => TradeRepublicDeviceInfo;
 }
 
 export class HttpClient {
@@ -80,6 +87,7 @@ export class HttpClient {
       'user-agent': this.options.userAgent,
       ...normalizeHeaderRecord(webContext?.headers),
       ...normalizeHeaderRecord(this.options.sdkHeaders),
+      'x-tr-device-info': encodeDeviceInfo(this.options.getDeviceInfo()),
       ...normalizeHeaderRecord(this.options.defaultHeaders),
       ...extra,
     };
@@ -99,10 +107,16 @@ export class HttpClient {
   }
 }
 
-function normalizeHeaderRecord(headers: Record<string, string> | undefined): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(headers ?? {}).filter(([, value]) => typeof value === 'string' && value.length > 0),
-  );
+function encodeDeviceInfo(deviceInfo: TradeRepublicDeviceInfo): string {
+  return Buffer.from(JSON.stringify(deviceInfo), 'utf8').toString('base64');
+}
+
+function normalizeHeaderRecord(headers: Record<string, string | undefined> | undefined): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (typeof value === 'string' && value.length > 0) normalized[name] = value;
+  }
+  return normalized;
 }
 
 function hasHeader(headers: Record<string, string>, name: string): boolean {
