@@ -253,6 +253,15 @@ const orderMutationVariants = [
   'failed: unknownInstrument',
 ];
 
+const orderReplacementVariants = [
+  'succeeded',
+  'failed',
+  'outcomeUnknown',
+  'replacementNotSent',
+  'cancelFailed',
+  'cancelOutcomeUnknown',
+];
+
 export const schemaRegistry = [
   entry('auth.session', 'Auth web session', 'rest', 'read', 'GET /api/v1/auth/web/session', sessionSchema),
   entry('auth.account', 'Auth account', 'rest', 'read', 'GET /api/v2/auth/account', accountSchema),
@@ -272,6 +281,7 @@ export const schemaRegistry = [
   entry('orders.fees', 'Order fee preview', 'websocket', 'read', 'orderFeesV2', jsonValue),
   entry('orders.submit', 'Submit brokerage order', 'websocket', 'highRiskMutation', 'simpleCreateOrder', orderMutationResponseSchema, { variants: orderMutationVariants }),
   entry('orders.cancel', 'Cancel brokerage order', 'websocket', 'highRiskMutation', 'cancelOrder', orderMutationResponseSchema, { variants: orderMutationVariants }),
+  entry('orders.replace', 'Replace brokerage order', 'websocket', 'highRiskMutation', 'cancelOrder -> simpleCreateOrder (non-atomic)', jsonValue, { variants: orderReplacementVariants }),
   entry('portfolio.current', 'Portfolio positions', 'websocket', 'read', 'compactPortfolioByTypeV2', z.union([jsonRecord, normalizedArrayWrappers])),
   entry('portfolio.cash', 'Available cash', 'websocket', 'read', 'availableCash', z.array(availableCashItemSchema)),
   entry('portfolio.markToMarketValue', 'Portfolio status', 'websocket', 'read', 'portfolioStatus', jsonValue),
@@ -325,7 +335,7 @@ export const schemaRegistry = [
   entry('tax.taxResidencyCountries', 'Tax residency countries', 'rest', 'read', 'GET /api/v1/country/taxresidency', jsonValue),
   entry('payments.paymentMethods', 'Payment methods', 'rest', 'read', 'GET /api/v2/payment/methods', jsonValue),
   entry('payments.iban', 'IBAN information', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', ibanRelationshipsSchema),
-  entry('blocked.orderMutations', 'Unsupported legacy order change/confirm resources', 'websocket', 'blockedMutation', 'confirmOrder|changeOrder', jsonValue),
+  entry('blocked.orderConfirmation', 'Unsupported legacy order confirmation resource', 'websocket', 'blockedMutation', 'confirmOrder', jsonValue),
   entry('blocked.bankTransfers', 'Payouts and bank transfers', 'rest', 'blockedMutation', 'POST /api/v1/payout and payment authorization paths', jsonValue),
   entry('blocked.documentAcceptance', 'Document acceptance', 'rest', 'blockedMutation', 'api/v1/documents/group/accept and terms accept paths', jsonValue),
   entry('blocked.accountSecurity', 'Account identity, tax, PIN, login security mutations', 'rest', 'blockedMutation', 'change account/tax/security paths', jsonValue),

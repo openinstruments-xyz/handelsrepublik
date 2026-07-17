@@ -370,6 +370,61 @@ export interface OrderCancellationOutcomeUnknown extends OrderCancellationBase {
 
 export type OrderCancellation = OrderCancellationSucceeded | OrderCancellationFailed | OrderCancellationOutcomeUnknown;
 
+export interface OrderReplacementOptions {
+  cancellationTimeoutMs?: number | undefined;
+  submissionTimeoutMs?: number | undefined;
+}
+
+interface OrderReplacementBase {
+  previousOrderId: string;
+  cancellation: OrderCancellation;
+}
+
+export interface OrderReplacementCancelFailed extends OrderReplacementBase {
+  status: 'cancelFailed';
+  cancellation: OrderCancellationFailed;
+  submission?: never;
+}
+
+export interface OrderReplacementCancelOutcomeUnknown extends OrderReplacementBase {
+  status: 'cancelOutcomeUnknown';
+  cancellation: OrderCancellationOutcomeUnknown;
+  submission?: never;
+}
+
+export interface OrderReplacementNotSent extends OrderReplacementBase {
+  status: 'replacementNotSent';
+  cancellation: OrderCancellationSucceeded;
+  submission?: never;
+  error: unknown;
+}
+
+export interface OrderReplacementSucceeded extends OrderReplacementBase {
+  status: 'succeeded';
+  cancellation: OrderCancellationSucceeded;
+  submission: OrderSubmissionSucceeded;
+}
+
+export interface OrderReplacementFailed extends OrderReplacementBase {
+  status: 'failed';
+  cancellation: OrderCancellationSucceeded;
+  submission: OrderSubmissionFailed;
+}
+
+export interface OrderReplacementOutcomeUnknown extends OrderReplacementBase {
+  status: 'outcomeUnknown';
+  cancellation: OrderCancellationSucceeded;
+  submission: OrderSubmissionOutcomeUnknown;
+}
+
+export type OrderReplacement =
+  | OrderReplacementCancelFailed
+  | OrderReplacementCancelOutcomeUnknown
+  | OrderReplacementNotSent
+  | OrderReplacementSucceeded
+  | OrderReplacementFailed
+  | OrderReplacementOutcomeUnknown;
+
 export interface OrdersListOptions {
   secAccNo?: string | undefined;
   instrumentId?: string | undefined;

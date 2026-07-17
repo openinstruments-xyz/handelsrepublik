@@ -126,8 +126,8 @@ describe('schema registry', () => {
       'priceAlarms.cancel',
       'priceAlarms.create',
     ].sort());
-    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.submit']);
-    assert.ok(blocked.includes('blocked.orderMutations'));
+    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.replace', 'orders.submit']);
+    assert.ok(blocked.includes('blocked.orderConfirmation'));
     assert.ok(blocked.includes('blocked.bankTransfers'));
     assert.ok(blocked.includes('blocked.documentAcceptance'));
     assert.ok(blocked.includes('blocked.accountSecurity'));

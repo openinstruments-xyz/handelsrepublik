@@ -1121,6 +1121,108 @@ describe('TradeRepublicClient', () => {
     expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({ type: 'cancelOrder', orderId: 'order-1' });
   });
 
+  it('replaces an order through the captured cancel-then-create sequence', async () => {
+    const payloads: Record<string, unknown>[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          payloads.push(payload);
+          if (payload.type === 'cancelOrder') {
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'old-order' })}`);
+          }
+          if (payload.type === 'simpleCreateOrder') {
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'new-order' })}`);
+          }
+        });
+        return socket;
+      },
+    });
+
+    const result = await client.orders.replace('old-order', preparedReplacement(), { cancellationTimeoutMs: 100 });
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      previousOrderId: 'old-order',
+      cancellation: { status: 'succeeded' },
+      submission: { status: 'succeeded', orderId: 'new-order' },
+    });
+    expect(payloads).toEqual([
+      { type: 'cancelOrder', orderId: 'old-order' },
+      {
+        type: 'simpleCreateOrder',
+        parameters: expect.objectContaining({ mode: 'limit', limit: 1.51 }),
+        warningsShown: ['appropriatenessTestingAppropriateUser'],
+        clientProcessId: 'replacement-process',
+        secAccNo: '0000000000',
+      },
+    ]);
+  });
+
+  it('never submits a replacement after a definitive cancellation failure', async () => {
+    const payloads: Record<string, unknown>[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          payloads.push(payload);
+          if (payload.type === 'cancelOrder') {
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'failed', error: { code: 'orderNotFound' } })}`);
+          }
+        });
+        return socket;
+      },
+    });
+
+    await expect(client.orders.replace('old-order', preparedReplacement())).resolves.toMatchObject({
+      status: 'cancelFailed',
+      previousOrderId: 'old-order',
+      cancellation: { status: 'failed' },
+    });
+    expect(payloads).toEqual([{ type: 'cancelOrder', orderId: 'old-order' }]);
+  });
+
+  it('never submits a replacement after an ambiguous cancellation', async () => {
+    const payloads: Record<string, unknown>[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => new FakeSocket((payload) => { payloads.push(payload); }),
+    });
+
+    await expect(client.orders.replace('old-order', preparedReplacement(), {
+      cancellationTimeoutMs: 1,
+    })).resolves.toMatchObject({
+      status: 'cancelOutcomeUnknown',
+      previousOrderId: 'old-order',
+      cancellation: { status: 'outcomeUnknown', outcomeReason: 'timeout' },
+    });
+    expect(payloads).toEqual([{ type: 'cancelOrder', orderId: 'old-order' }]);
+    client.close();
+  });
+
+  it('reports when cancellation succeeded but the replacement was definitely not sent', async () => {
+    let connection = 0;
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        connection += 1;
+        if (connection > 1) return new EventEmitterOnlySocket();
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'cancelOrder') {
+            socket.emit('message', `${id} A ${JSON.stringify({ status: 'succeeded', orderId: 'old-order' })}`);
+          }
+        });
+        return socket;
+      },
+    });
+
+    await expect(client.orders.replace('old-order', preparedReplacement(), {
+      submissionTimeoutMs: 1,
+    })).resolves.toMatchObject({
+      status: 'replacementNotSent',
+      previousOrderId: 'old-order',
+      cancellation: { status: 'succeeded' },
+      error: { deliveryState: 'notSent', outcomeUnknown: false },
+    });
+    client.close();
+  });
+
   it('returns outcomeUnknown and never replays cancellation after connection loss', async () => {
     const payloads: Record<string, unknown>[] = [];
     const client = TradeRepublicClient.create({
@@ -1579,6 +1681,18 @@ describe('TradeRepublicClient', () => {
     expect(sockets[0]?.sent[0]).toMatch(/^connect 34 /);
   });
 });
+
+function preparedReplacement() {
+  return {
+    parameters: {
+      instrumentId: 'DE000FC9RTV1', exchangeId: 'SGL', mode: 'limit', size: 2, type: 'buy', limit: 1.51,
+      expiry: { type: 'gfd' }, sellFractions: false, settlementCurrency: 'EUR', tradingCurrency: 'EUR',
+    },
+    clientProcessId: 'replacement-process',
+    secAccNo: '0000000000',
+    warningsShown: ['appropriatenessTestingAppropriateUser'],
+  };
+}
 
 function expectedOperatingSystem(): string {
   const nodePlatform = platform();

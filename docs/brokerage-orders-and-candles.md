@@ -177,6 +177,22 @@ and the observed successful response was `{ status: 'succeeded' }`.
 Submissions and cancellations are non-replayable. A sent mutation that loses
 its definitive response returns `outcomeUnknown`; the SDK does not resend it.
 
+## Non-atomic order replacement
+
+The capture contains no `changeOrder` request. The supported replacement
+workflow therefore composes the two observed mutations in order:
+
+```ts
+await client.orders.replace(existingOrderId, preparedReplacement);
+// cancelOrder succeeds first, then simpleCreateOrder is sent
+```
+
+Replacement parameters are prepared and validated before cancellation. A
+failed or ambiguous cancellation stops the workflow without sending a new
+order. Once cancellation succeeds, creating the replacement can still fail,
+remain ambiguous, or be definitely not sent. This operation is not an atomic
+broker-side amendment and must not be presented as one.
+
 ## Suitability or quiz acknowledgement
 
 The captured derivative orders included:

@@ -78,6 +78,8 @@ import type {
   OrderPriceOptions,
   OrderPriceQuote,
   OrderPreview,
+  OrderReplacement,
+  OrderReplacementOptions,
   OrderSubmission,
   PreparedOrder,
   OrderDestination,
@@ -616,9 +618,12 @@ export class OrdersApi {
     };
   }
 
-  async submit(options: CreateOrderOptions | PreparedOrder): Promise<OrderSubmission> {
+  async submit(
+    options: CreateOrderOptions | PreparedOrder,
+    runtimeOptions: { timeoutMs?: number } = {},
+  ): Promise<OrderSubmission> {
     const order = isPreparedOrder(options) ? options : await this.prepare(options);
-    const timeoutMs = isPreparedOrder(options) ? 120_000 : options.timeoutMs ?? 120_000;
+    const timeoutMs = runtimeOptions.timeoutMs ?? (isPreparedOrder(options) ? 120_000 : options.timeoutMs ?? 120_000);
     const payload = {
       type: 'simpleCreateOrder',
       parameters: order.parameters,
@@ -717,6 +722,41 @@ export class OrdersApi {
       };
     } finally {
       subscription.close();
+    }
+  }
+
+  async replace(
+    orderId: string,
+    replacement: CreateOrderOptions | PreparedOrder,
+    options: OrderReplacementOptions = {},
+  ): Promise<OrderReplacement> {
+    const previousOrderId = requiredString(orderId, 'orderId');
+    const prepared = isPreparedOrder(replacement) ? replacement : await this.prepare(replacement);
+    const submissionTimeoutMs = options.submissionTimeoutMs
+      ?? (isPreparedOrder(replacement) ? undefined : replacement.timeoutMs);
+    const cancellation = await this.cancel(previousOrderId, {
+      ...(options.cancellationTimeoutMs !== undefined ? { timeoutMs: options.cancellationTimeoutMs } : {}),
+    });
+    if (cancellation.status === 'failed') {
+      return { status: 'cancelFailed', previousOrderId, cancellation };
+    }
+    if (cancellation.status === 'outcomeUnknown') {
+      return { status: 'cancelOutcomeUnknown', previousOrderId, cancellation };
+    }
+    try {
+      const submission = await this.submit(prepared, {
+        ...(submissionTimeoutMs !== undefined ? { timeoutMs: submissionTimeoutMs } : {}),
+      });
+      switch (submission.status) {
+        case 'succeeded': return { status: submission.status, previousOrderId, cancellation, submission };
+        case 'failed': return { status: submission.status, previousOrderId, cancellation, submission };
+        case 'outcomeUnknown': return { status: submission.status, previousOrderId, cancellation, submission };
+      }
+    } catch (error) {
+      if (error instanceof MapperRequestError && error.deliveryState === 'notSent') {
+        return { status: 'replacementNotSent', previousOrderId, cancellation, error };
+      }
+      throw error;
     }
   }
 

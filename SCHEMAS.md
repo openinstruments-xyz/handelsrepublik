@@ -22,6 +22,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `orders.fees` | `read` | `websocket` | `orderFeesV2` |  |
 | `orders.submit` | `highRiskMutation` | `websocket` | `simpleCreateOrder` | received, waiting, confirmationNeeded, succeeded, failed: exchangeClosed (observed live), failed: cashMissing, failed: currentQuoteMissing, failed: instrumentSuspended, failed: internalError, failed: invalidSecurityDerivative, failed: invalidSecurityNonDerivative, failed: limitDenied, failed: maxQuantityExceeded, failed: noRefPriceAvailable, failed: noRouteToMarket, failed: orderAlreadyDeleted, failed: orderAlreadyExists, failed: orderNotFound (observed live cancellation), failed: orderRejectedAtExchange, failed: portfolioInactive, failed: quoteMissing, failed: savingsplanSharesMissingToday, failed: sharesMissing, failed: shortPositionNotAllowed, failed: timeoutError, failed: unknownInstrument |
 | `orders.cancel` | `highRiskMutation` | `websocket` | `cancelOrder` | received, waiting, confirmationNeeded, succeeded, failed: exchangeClosed (observed live), failed: cashMissing, failed: currentQuoteMissing, failed: instrumentSuspended, failed: internalError, failed: invalidSecurityDerivative, failed: invalidSecurityNonDerivative, failed: limitDenied, failed: maxQuantityExceeded, failed: noRefPriceAvailable, failed: noRouteToMarket, failed: orderAlreadyDeleted, failed: orderAlreadyExists, failed: orderNotFound (observed live cancellation), failed: orderRejectedAtExchange, failed: portfolioInactive, failed: quoteMissing, failed: savingsplanSharesMissingToday, failed: sharesMissing, failed: shortPositionNotAllowed, failed: timeoutError, failed: unknownInstrument |
+| `orders.replace` | `highRiskMutation` | `websocket` | `cancelOrder -> simpleCreateOrder (non-atomic)` | succeeded, failed, outcomeUnknown, replacementNotSent, cancelFailed, cancelOutcomeUnknown |
 | `portfolio.current` | `read` | `websocket` | `compactPortfolioByTypeV2` |  |
 | `portfolio.cash` | `read` | `websocket` | `availableCash` |  |
 | `portfolio.markToMarketValue` | `read` | `websocket` | `portfolioStatus` |  |
@@ -75,7 +76,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `tax.taxResidencyCountries` | `read` | `rest` | `GET /api/v1/country/taxresidency` |  |
 | `payments.paymentMethods` | `read` | `rest` | `GET /api/v2/payment/methods` |  |
 | `payments.iban` | `read` | `rest` | `GET /api/v1/customer/relationships/detailed` |  |
-| `blocked.orderMutations` | `blockedMutation` | `websocket` | `confirmOrder\|changeOrder` |  |
+| `blocked.orderConfirmation` | `blockedMutation` | `websocket` | `confirmOrder` |  |
 | `blocked.bankTransfers` | `blockedMutation` | `rest` | `POST /api/v1/payout and payment authorization paths` |  |
 | `blocked.documentAcceptance` | `blockedMutation` | `rest` | `api/v1/documents/group/accept and terms accept paths` |  |
 | `blocked.accountSecurity` | `blockedMutation` | `rest` | `change account/tax/security paths` |  |

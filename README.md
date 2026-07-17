@@ -253,9 +253,9 @@ already have reached the broker.
 
 ## Trading safely
 
-Order submission and cancellation are real financial mutations. Obtain a fresh
-quote and fee preview, show the exact order to the user, and require a separate
-user confirmation before calling `submit()`.
+Order submission, cancellation, and replacement are real financial mutations.
+Obtain a fresh quote and fee preview, show the exact order to the user, and
+require a separate user confirmation before calling `submit()`.
 
 ```ts
 const instrumentId = 'US0378331005';
@@ -431,6 +431,35 @@ if (cancellation.status === 'outcomeUnknown') {
 }
 ```
 
+Order replacement uses only the mutation sequence observed in `flows(14)`:
+`cancelOrder`, followed by `simpleCreateOrder` after a definitive successful
+cancellation. It does not send the unobserved legacy `changeOrder` resource and
+is therefore explicitly non-atomic.
+
+```ts
+const replacementPreview = await tr.orders.preview({
+  instrumentId,
+  exchangeId,
+  side: 'buy',
+  mode: 'limit',
+  size: 2,
+  limit: 190,
+});
+
+// Require explicit user confirmation before this call.
+const replacement = await tr.orders.replace(
+  'existing-broker-order-id',
+  replacementPreview.order,
+);
+```
+
+The replacement is prepared before cancellation. If cancellation returns
+`cancelFailed` or `cancelOutcomeUnknown`, no replacement order is sent. After a
+successful cancellation, the result can be `succeeded`, `failed`,
+`outcomeUnknown`, or `replacementNotSent`. A replacement can therefore leave
+the original order canceled without creating a new order; callers must present
+that distinction clearly and reconcile ambiguous outcomes before retrying.
+
 ### Reconciliation after an unknown outcome
 
 After reconnect, the application can inspect current and historical broker data:
@@ -527,7 +556,7 @@ does not yet have a first-class SDK method.
 | `tr.assets` | Search, list, and load stocks, ETFs, funds, crypto, bonds, and other instruments. |
 | `tr.derivatives` | Search derivatives, list knockout, warrant, and factor products for an underlying, and load details. |
 | `tr.portfolio` | Portfolio, cash, mark-to-market value, savings plans, private-market positions, and chart data. |
-| `tr.orders` | List, filter, preview, prepare, submit, cancel, and stream order updates. |
+| `tr.orders` | List, filter, preview, prepare, submit, cancel, replace, and stream order updates. |
 | `tr.trading` | Order prices, available size, destinations, trades, and daily PnL. |
 | `tr.market` | Quotes, candles, live feeds, subscriptions, and L2 order books. |
 | `tr.timeline` | Timeline entries, actions, and details. |

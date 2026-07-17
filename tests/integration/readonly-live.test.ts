@@ -231,12 +231,12 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
   liveIt('classifies high-risk and blocked mutations', () => {
     const blocked = schemaRegistry.filter((entry) => entry.risk === 'blockedMutation').map((entry) => entry.name);
     const highRisk = schemaRegistry.filter((entry) => entry.risk === 'highRiskMutation').map((entry) => entry.name);
-    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.submit']);
+    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.replace', 'orders.submit']);
     assert.deepEqual(blocked.sort(), [
       'blocked.accountSecurity',
       'blocked.bankTransfers',
       'blocked.documentAcceptance',
-      'blocked.orderMutations',
+      'blocked.orderConfirmation',
     ].sort());
   });
 

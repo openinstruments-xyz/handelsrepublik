@@ -1820,6 +1820,14 @@ var orderMutationVariants = [
   "failed: timeoutError",
   "failed: unknownInstrument"
 ];
+var orderReplacementVariants = [
+  "succeeded",
+  "failed",
+  "outcomeUnknown",
+  "replacementNotSent",
+  "cancelFailed",
+  "cancelOutcomeUnknown"
+];
 var schemaRegistry = [
   entry("auth.session", "Auth web session", "rest", "read", "GET /api/v1/auth/web/session", sessionSchema),
   entry("auth.account", "Auth account", "rest", "read", "GET /api/v2/auth/account", accountSchema),
@@ -1839,6 +1847,7 @@ var schemaRegistry = [
   entry("orders.fees", "Order fee preview", "websocket", "read", "orderFeesV2", jsonValue),
   entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", orderMutationResponseSchema, { variants: orderMutationVariants }),
   entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", orderMutationResponseSchema, { variants: orderMutationVariants }),
+  entry("orders.replace", "Replace brokerage order", "websocket", "highRiskMutation", "cancelOrder -> simpleCreateOrder (non-atomic)", jsonValue, { variants: orderReplacementVariants }),
   entry("portfolio.current", "Portfolio positions", "websocket", "read", "compactPortfolioByTypeV2", z.union([jsonRecord, normalizedArrayWrappers])),
   entry("portfolio.cash", "Available cash", "websocket", "read", "availableCash", z.array(availableCashItemSchema)),
   entry("portfolio.markToMarketValue", "Portfolio status", "websocket", "read", "portfolioStatus", jsonValue),
@@ -1892,7 +1901,7 @@ var schemaRegistry = [
   entry("tax.taxResidencyCountries", "Tax residency countries", "rest", "read", "GET /api/v1/country/taxresidency", jsonValue),
   entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
   entry("payments.iban", "IBAN information", "rest", "read", "GET /api/v1/customer/relationships/detailed", ibanRelationshipsSchema),
-  entry("blocked.orderMutations", "Unsupported legacy order change/confirm resources", "websocket", "blockedMutation", "confirmOrder|changeOrder", jsonValue),
+  entry("blocked.orderConfirmation", "Unsupported legacy order confirmation resource", "websocket", "blockedMutation", "confirmOrder", jsonValue),
   entry("blocked.bankTransfers", "Payouts and bank transfers", "rest", "blockedMutation", "POST /api/v1/payout and payment authorization paths", jsonValue),
   entry("blocked.documentAcceptance", "Document acceptance", "rest", "blockedMutation", "api/v1/documents/group/accept and terms accept paths", jsonValue),
   entry("blocked.accountSecurity", "Account identity, tax, PIN, login security mutations", "rest", "blockedMutation", "change account/tax/security paths", jsonValue)
@@ -3875,9 +3884,9 @@ var OrdersApi = class {
       raw
     };
   }
-  async submit(options) {
+  async submit(options, runtimeOptions = {}) {
     const order = isPreparedOrder(options) ? options : await this.prepare(options);
-    const timeoutMs = isPreparedOrder(options) ? 12e4 : options.timeoutMs ?? 12e4;
+    const timeoutMs = runtimeOptions.timeoutMs ?? (isPreparedOrder(options) ? 12e4 : options.timeoutMs ?? 12e4);
     const payload = {
       type: "simpleCreateOrder",
       parameters: order.parameters,
@@ -3975,6 +3984,38 @@ var OrdersApi = class {
       };
     } finally {
       subscription.close();
+    }
+  }
+  async replace(orderId, replacement, options = {}) {
+    const previousOrderId = requiredString(orderId, "orderId");
+    const prepared = isPreparedOrder(replacement) ? replacement : await this.prepare(replacement);
+    const submissionTimeoutMs = options.submissionTimeoutMs ?? (isPreparedOrder(replacement) ? void 0 : replacement.timeoutMs);
+    const cancellation = await this.cancel(previousOrderId, {
+      ...options.cancellationTimeoutMs !== void 0 ? { timeoutMs: options.cancellationTimeoutMs } : {}
+    });
+    if (cancellation.status === "failed") {
+      return { status: "cancelFailed", previousOrderId, cancellation };
+    }
+    if (cancellation.status === "outcomeUnknown") {
+      return { status: "cancelOutcomeUnknown", previousOrderId, cancellation };
+    }
+    try {
+      const submission = await this.submit(prepared, {
+        ...submissionTimeoutMs !== void 0 ? { timeoutMs: submissionTimeoutMs } : {}
+      });
+      switch (submission.status) {
+        case "succeeded":
+          return { status: submission.status, previousOrderId, cancellation, submission };
+        case "failed":
+          return { status: submission.status, previousOrderId, cancellation, submission };
+        case "outcomeUnknown":
+          return { status: submission.status, previousOrderId, cancellation, submission };
+      }
+    } catch (error) {
+      if (error instanceof MapperRequestError && error.deliveryState === "notSent") {
+        return { status: "replacementNotSent", previousOrderId, cancellation, error };
+      }
+      throw error;
     }
   }
   async resolveAmountSizeStep(instrumentId, exchangeId) {
