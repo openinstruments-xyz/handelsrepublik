@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
 import { HttpClient } from '../src/http.js';
 import type { Session, TradeRepublicDeviceInfo } from '../src/types.js';
@@ -80,6 +81,42 @@ describe('HttpClient headers', () => {
     expect(headers['x-xsrf-token']).toBe('xsrf=token');
     expect(headers.cookie).toContain('tr_session=web-session');
     expect(headers.cookie).toContain('tr_claims=claims');
+  });
+
+  it('shares WAF proof while keeping account cookies isolated', () => {
+    const wafContext = {
+      awsWafToken: 'shared-waf-token',
+      xsrfToken: 'anonymous-xsrf%3Dtoken',
+    };
+    const alice = new HttpClient({
+      apiBaseUrl: 'https://api.traderepublic.com',
+      locale: 'en',
+      userAgent: 'test-agent',
+      fetch,
+      getSession: () => ({ cookies: { tr_session: 'alice-session' } }),
+      getDeviceInfo: () => deviceInfo,
+      getWafContext: () => wafContext,
+    });
+    const bob = new HttpClient({
+      apiBaseUrl: 'https://api.traderepublic.com',
+      locale: 'en',
+      userAgent: 'test-agent',
+      fetch,
+      getSession: () => ({ cookies: { tr_session: 'bob-session' } }),
+      getDeviceInfo: () => deviceInfo,
+      getWafContext: () => wafContext,
+    });
+
+    const aliceHeaders = alice.headers();
+    const bobHeaders = bob.headers();
+    expect(aliceHeaders['x-aws-waf-token']).toBe('shared-waf-token');
+    expect(bobHeaders['x-aws-waf-token']).toBe('shared-waf-token');
+    expect(aliceHeaders['x-xsrf-token']).toBe('anonymous-xsrf=token');
+    expect(aliceHeaders.cookie).toContain('aws-waf-token=shared-waf-token');
+    expect(aliceHeaders.cookie).toContain('tr_session=alice-session');
+    assert.doesNotMatch(aliceHeaders.cookie ?? '', /bob-session/);
+    expect(bobHeaders.cookie).toContain('tr_session=bob-session');
+    assert.doesNotMatch(bobHeaders.cookie ?? '', /alice-session/);
   });
 
   it('lets user headers override SDK and captured browser headers', () => {

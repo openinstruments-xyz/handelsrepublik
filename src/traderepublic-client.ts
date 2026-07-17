@@ -47,7 +47,14 @@ import {
 import { defaultWebSocketFactory, RawApi, type RawQueryOptions, type RawSubscriptionOptions } from './raw.js';
 import { ResourceClient, toSubscription, type Subscription } from './resource.js';
 import { validateRawResponse } from './schemas/registry.js';
-import { mergeTradeRepublicWebContexts, normalizeTradeRepublicWebContext } from './waf.js';
+import {
+  collectTradeRepublicWafContext,
+  mergeTradeRepublicWebContexts,
+  normalizeTradeRepublicWafContext,
+  normalizeTradeRepublicWebContext,
+  type CollectTradeRepublicWafContextOptions,
+  type TradeRepublicBrowserLike,
+} from './waf.js';
 import type {
   Asset,
   AssetDetail,
@@ -105,6 +112,7 @@ import type {
   Trade,
   TradeRepublicClientOptions,
   TradeRepublicDeviceInfo,
+  TradeRepublicWafContext,
   TradeRepublicWebContext,
   RawSchemaValidator,
   RawSchemaValidationFailure,
@@ -125,6 +133,24 @@ const GERMAN_LANGUAGE_PROFILES = [
   ['de-DE', 'de', 'en-GB', 'en'],
   ['de-DE', 'de'],
 ];
+
+export interface TradeRepublicBrowserLaunchOptions {
+  headless?: boolean;
+  channel?: string;
+  executablePath?: string;
+  args?: string[];
+}
+
+export type TradeRepublicCollectWafContextOptions = CollectTradeRepublicWafContextOptions & (
+  | {
+    browser: TradeRepublicBrowserLike;
+    browserLaunchOptions?: never;
+  }
+  | {
+    browser?: undefined;
+    browserLaunchOptions?: TradeRepublicBrowserLaunchOptions | undefined;
+  }
+);
 
 export class TradeRepublicClient {
   readonly auth: AuthApi;
@@ -149,6 +175,7 @@ export class TradeRepublicClient {
   securitiesAccountNumber: string | undefined;
 
   private session: Session | undefined;
+  private wafContext: TradeRepublicWafContext | undefined;
   private deviceInfo: TradeRepublicDeviceInfo;
   private readonly http: HttpClient;
   private readonly endpoints: EndpointResolver;
@@ -162,6 +189,9 @@ export class TradeRepublicClient {
       throw new TypeError('Trade Republic sessions must contain deviceInfo.');
     }
     this.deviceInfo = createDeviceInfo(options.session?.deviceInfo ?? options.deviceInfo);
+    this.wafContext = options.wafContext
+      ? normalizeTradeRepublicWafContext(options.wafContext)
+      : undefined;
     this.session = withClientContext(options.session, options.webContext, this.deviceInfo);
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
     this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
@@ -175,6 +205,7 @@ export class TradeRepublicClient {
       fetch: options.fetch ?? fetch,
       getSession: () => this.session,
       getDeviceInfo: () => this.deviceInfo,
+      getWafContext: () => this.wafContext,
     });
 
     this.auth = new AuthApi(this.http, this.endpoints, () => this.session, (session) => {
@@ -220,6 +251,33 @@ export class TradeRepublicClient {
     return new TradeRepublicClient(options);
   }
 
+  static async collectWafContext(
+    options: TradeRepublicCollectWafContextOptions = {},
+  ): Promise<TradeRepublicWafContext> {
+    const { browser, browserLaunchOptions, ...collectionOptions } = options;
+    if (browser) {
+      if (browserLaunchOptions) {
+        throw new TypeError('browserLaunchOptions cannot be used with a caller-owned browser.');
+      }
+      return collectTradeRepublicWafContext(browser, collectionOptions);
+    }
+    let chromium: (typeof import('playwright'))['chromium'];
+    try {
+      ({ chromium } = await import('playwright'));
+    } catch (cause) {
+      throw new Error(
+        'Automatic Trade Republic WAF context collection requires the optional playwright package. Install it with "npm install playwright".',
+        { cause },
+      );
+    }
+    const launchedBrowser = await chromium.launch({ headless: false, ...browserLaunchOptions });
+    try {
+      return await collectTradeRepublicWafContext(launchedBrowser, collectionOptions);
+    } finally {
+      await launchedBrowser.close();
+    }
+  }
+
   getSession(): Session | undefined {
     if (!this.session) return undefined;
     return structuredClone({
@@ -251,6 +309,10 @@ export class TradeRepublicClient {
     };
     this.setSession(session);
     return this.getSession() ?? session;
+  }
+
+  useWafContext(wafContext: TradeRepublicWafContext): void {
+    this.wafContext = normalizeTradeRepublicWafContext(wafContext);
   }
 
   close(): void {

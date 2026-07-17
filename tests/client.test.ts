@@ -123,6 +123,58 @@ describe('TradeRepublicClient', () => {
     expect(headers['x-tr-device-info']).toBe('custom-device');
   });
 
+  it('reuses WAF context across account clients without persisting it in either session', async () => {
+    const wafContext = {
+      awsWafToken: 'shared-waf-token',
+      xsrfToken: 'shared-xsrf',
+    };
+    const savedAliceSessions: unknown[] = [];
+    const savedBobSessions: unknown[] = [];
+    const aliceCalls: Array<{ url: string; init: RequestInit }> = [];
+    const bobCalls: Array<{ url: string; init: RequestInit }> = [];
+    const alice = TradeRepublicClient.create({
+      wafContext,
+      session: {
+        deviceInfo: TEST_DEVICE_INFO,
+        cookies: { tr_session: 'alice-session' },
+      },
+      sessionStore: memorySessionStore(savedAliceSessions),
+      fetch: mockFetch(aliceCalls, { id: 'alice-challenge' }),
+    });
+    const bob = TradeRepublicClient.create({
+      wafContext,
+      session: {
+        deviceInfo: TEST_DEVICE_INFO,
+        cookies: { tr_session: 'bob-session' },
+      },
+      sessionStore: memorySessionStore(savedBobSessions),
+      fetch: mockFetch(bobCalls, { id: 'bob-challenge' }),
+    });
+
+    await alice.auth.createInstantLogin();
+    await bob.auth.createInstantLogin();
+    await alice.auth.saveSession();
+    await bob.auth.saveSession();
+
+    const aliceHeaders = aliceCalls[0]?.init.headers as Record<string, string>;
+    const bobHeaders = bobCalls[0]?.init.headers as Record<string, string>;
+    expect(aliceHeaders['x-aws-waf-token']).toBe('shared-waf-token');
+    expect(bobHeaders['x-aws-waf-token']).toBe('shared-waf-token');
+    expect(aliceHeaders.cookie).toContain('tr_session=alice-session');
+    assert.doesNotMatch(aliceHeaders.cookie ?? '', /bob-session/);
+    expect(bobHeaders.cookie).toContain('tr_session=bob-session');
+    assert.doesNotMatch(bobHeaders.cookie ?? '', /alice-session/);
+    assert.equal('wafContext' in (alice.getSession() ?? {}), false);
+    assert.equal('wafContext' in (bob.getSession() ?? {}), false);
+    assert.equal(JSON.stringify(savedAliceSessions).includes('shared-waf-token'), false);
+    assert.equal(JSON.stringify(savedBobSessions).includes('shared-waf-token'), false);
+
+    alice.useWafContext({ awsWafToken: 'renewed-waf-token' });
+    await alice.auth.createInstantLogin();
+    const renewedHeaders = aliceCalls[1]?.init.headers as Record<string, string>;
+    expect(renewedHeaders['x-aws-waf-token']).toBe('renewed-waf-token');
+  });
+
   it('logs in with phone and PIN through the v2 web login endpoint', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const saved: unknown[] = [];
@@ -1771,6 +1823,18 @@ function mockFetch(calls: Array<{ url: string; init: RequestInit }>, responseBod
     calls.push({ url: String(url), init: init ?? {} });
     return jsonResponse(responseBody);
   }) as typeof fetch;
+}
+
+function memorySessionStore(saved: unknown[]) {
+  return {
+    async load() {
+      return undefined;
+    },
+    async save(session: unknown) {
+      saved.push(structuredClone(session));
+    },
+    async clear() {},
+  };
 }
 
 function mockFetchSequence(calls: Array<{ url: string; init: RequestInit }>, responses: Response[]): typeof fetch {

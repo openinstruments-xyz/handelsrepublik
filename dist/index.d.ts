@@ -28,6 +28,7 @@ interface TradeRepublicClientOptions {
     userAgent?: string | undefined;
     deviceInfo?: Partial<TradeRepublicDeviceInfo> | undefined;
     defaultHeaders?: TradeRepublicDefaultHeaders | undefined;
+    wafContext?: TradeRepublicWafContext | undefined;
     webContext?: TradeRepublicWebContext | undefined;
     session?: Session | undefined;
     sessionStore?: SessionStore | undefined;
@@ -137,6 +138,11 @@ interface TradeRepublicWebContext {
     xsrfToken?: string | undefined;
     capturedAt?: string | undefined;
     metadata?: Record<string, unknown> | undefined;
+}
+interface TradeRepublicWafContext {
+    awsWafToken: string;
+    xsrfToken?: string | undefined;
+    capturedAt?: string | undefined;
 }
 interface InstantLoginChallenge {
     id: string;
@@ -709,6 +715,7 @@ interface HttpClientOptions {
     fetch: typeof fetch;
     getSession: () => Session | undefined;
     getDeviceInfo: () => TradeRepublicDeviceInfo;
+    getWafContext?: (() => TradeRepublicWafContext | undefined) | undefined;
 }
 declare class HttpClient {
     private readonly options;
@@ -1029,6 +1036,64 @@ declare class DiscoveryApi {
     rawUserPreferences(): Promise<unknown>;
 }
 
+interface TradeRepublicBrowserLike {
+    newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
+}
+type TradeRepublicBrowserContextOptions = Record<string, unknown>;
+interface CollectTradeRepublicWebContextOptions {
+    appUrl?: string | undefined;
+    apiUrl?: string | undefined;
+    contextOptions?: TradeRepublicBrowserContextOptions | undefined;
+    timeoutMs?: number | undefined;
+    settleMs?: number | undefined;
+    waitUntil?: string | undefined;
+}
+type CollectTradeRepublicWafContextOptions = CollectTradeRepublicWebContextOptions;
+interface TradeRepublicBrowserContextLike {
+    newPage(): Promise<TradeRepublicPageLike>;
+    cookies(urls?: string | string[]): Promise<TradeRepublicCookieLike[]>;
+    close(): Promise<void> | void;
+    on?(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void;
+}
+interface TradeRepublicPageLike {
+    goto(url: string, options?: {
+        waitUntil?: string;
+        timeout?: number;
+    }): Promise<unknown>;
+    waitForLoadState?(state?: string, options?: {
+        timeout?: number;
+    }): Promise<unknown>;
+    waitForTimeout?(timeout: number): Promise<unknown>;
+    evaluate?<T>(fn: () => T): Promise<T>;
+    on?(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void;
+}
+interface TradeRepublicRequestLike {
+    url(): string;
+    headers(): Record<string, string>;
+}
+interface TradeRepublicCookieLike {
+    name: string;
+    value: string;
+    domain?: string | undefined;
+    path?: string | undefined;
+    expires?: number | undefined;
+}
+declare function collectTradeRepublicWebContext(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWebContextOptions): Promise<TradeRepublicWebContext>;
+declare function collectTradeRepublicWafContext(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWebContextOptions): Promise<TradeRepublicWafContext>;
+
+interface TradeRepublicBrowserLaunchOptions {
+    headless?: boolean;
+    channel?: string;
+    executablePath?: string;
+    args?: string[];
+}
+type TradeRepublicCollectWafContextOptions = CollectTradeRepublicWafContextOptions & ({
+    browser: TradeRepublicBrowserLike;
+    browserLaunchOptions?: never;
+} | {
+    browser?: undefined;
+    browserLaunchOptions?: TradeRepublicBrowserLaunchOptions | undefined;
+});
 declare class TradeRepublicClient {
     readonly auth: AuthApi;
     readonly raw: RawApi;
@@ -1050,6 +1115,7 @@ declare class TradeRepublicClient {
     readonly web: WebApi;
     securitiesAccountNumber: string | undefined;
     private session;
+    private wafContext;
     private deviceInfo;
     private readonly http;
     private readonly endpoints;
@@ -1059,9 +1125,11 @@ declare class TradeRepublicClient {
     private readonly validateRaw;
     constructor(options?: TradeRepublicClientOptions);
     static create(options?: TradeRepublicClientOptions): TradeRepublicClient;
+    static collectWafContext(options?: TradeRepublicCollectWafContextOptions): Promise<TradeRepublicWafContext>;
     getSession(): Session | undefined;
     setSession(session: Session): void;
     useWebContext(webContext: TradeRepublicWebContext): Session;
+    useWafContext(wafContext: TradeRepublicWafContext): void;
     close(): void;
     private setSecuritiesAccountNumber;
     private captureSecuritiesAccountNumber;
@@ -1407,49 +1475,6 @@ declare const BOND_CANDLE_RESOLUTIONS: readonly CandleTimeframe[];
 declare function candleResolutionsForInstrumentType(instrumentType: string | undefined): CandleTimeframe[];
 declare function candleResolutionMs(resolution: CandleResolution): number;
 
-interface TradeRepublicBrowserLike {
-    newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
-}
-type TradeRepublicBrowserContextOptions = Record<string, unknown>;
-interface CollectTradeRepublicWebContextOptions {
-    appUrl?: string | undefined;
-    apiUrl?: string | undefined;
-    contextOptions?: TradeRepublicBrowserContextOptions | undefined;
-    timeoutMs?: number | undefined;
-    settleMs?: number | undefined;
-    waitUntil?: string | undefined;
-}
-interface TradeRepublicBrowserContextLike {
-    newPage(): Promise<TradeRepublicPageLike>;
-    cookies(urls?: string | string[]): Promise<TradeRepublicCookieLike[]>;
-    close(): Promise<void> | void;
-    on?(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void;
-}
-interface TradeRepublicPageLike {
-    goto(url: string, options?: {
-        waitUntil?: string;
-        timeout?: number;
-    }): Promise<unknown>;
-    waitForLoadState?(state?: string, options?: {
-        timeout?: number;
-    }): Promise<unknown>;
-    waitForTimeout?(timeout: number): Promise<unknown>;
-    evaluate?<T>(fn: () => T): Promise<T>;
-    on?(event: 'request', listener: (request: TradeRepublicRequestLike) => void): void;
-}
-interface TradeRepublicRequestLike {
-    url(): string;
-    headers(): Record<string, string>;
-}
-interface TradeRepublicCookieLike {
-    name: string;
-    value: string;
-    domain?: string | undefined;
-    path?: string | undefined;
-    expires?: number | undefined;
-}
-declare function collectTradeRepublicWebContext(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWebContextOptions): Promise<TradeRepublicWebContext>;
-
 type SchemaRisk = 'read' | 'lowRiskMutation' | 'highRiskMutation';
 type SchemaTransport = 'rest' | 'websocket';
 interface TradeRepublicSchemaEntry {
@@ -1469,4 +1494,4 @@ declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicS
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafContextOptions, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafContextOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafContext, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafContext, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

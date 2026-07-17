@@ -58,6 +58,7 @@ export interface TradeRepublicClientOptions {
   userAgent?: string | undefined;
   deviceInfo?: Partial<TradeRepublicDeviceInfo> | undefined;
   defaultHeaders?: TradeRepublicDefaultHeaders | undefined;
+  wafContext?: TradeRepublicWafContext | undefined;
   webContext?: TradeRepublicWebContext | undefined;
   session?: Session | undefined;
   sessionStore?: SessionStore | undefined;
@@ -179,6 +180,12 @@ export interface TradeRepublicWebContext {
   xsrfToken?: string | undefined;
   capturedAt?: string | undefined;
   metadata?: Record<string, unknown> | undefined;
+}
+
+export interface TradeRepublicWafContext {
+  awsWafToken: string;
+  xsrfToken?: string | undefined;
+  capturedAt?: string | undefined;
 }
 
 export interface InstantLoginChallenge {

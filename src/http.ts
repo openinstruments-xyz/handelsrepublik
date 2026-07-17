@@ -5,6 +5,7 @@ import type {
   Session,
   TradeRepublicDefaultHeaders,
   TradeRepublicDeviceInfo,
+  TradeRepublicWafContext,
 } from './types.js';
 
 export interface HttpClientOptions {
@@ -16,6 +17,7 @@ export interface HttpClientOptions {
   fetch: typeof fetch;
   getSession: () => Session | undefined;
   getDeviceInfo: () => TradeRepublicDeviceInfo;
+  getWafContext?: (() => TradeRepublicWafContext | undefined) | undefined;
 }
 
 export class HttpClient {
@@ -78,14 +80,23 @@ export class HttpClient {
   headers(extra: Record<string, string> = {}, hasJsonBody = false): Record<string, string> {
     const session = this.options.getSession();
     const webContext = session?.webContext;
-    const xsrfToken = session?.cookies?.['XSRF-TOKEN'] ?? webContext?.cookies?.['XSRF-TOKEN'] ?? webContext?.xsrfToken;
+    const wafContext = this.options.getWafContext?.();
+    const xsrfToken = session?.cookies?.['XSRF-TOKEN']
+      ?? wafContext?.xsrfToken
+      ?? webContext?.cookies?.['XSRF-TOKEN']
+      ?? webContext?.xsrfToken;
+    const webContextHeaders = normalizeHeaderRecord(webContext?.headers);
+    if (wafContext) {
+      deleteHeader(webContextHeaders, 'x-aws-waf-token');
+      deleteHeader(webContextHeaders, 'x-xsrf-token');
+    }
     const headers: Record<string, string> = {
       accept: 'application/json, text/plain, */*',
       'accept-language': this.options.locale,
       origin: 'https://app.traderepublic.com',
       referer: 'https://app.traderepublic.com/',
       'user-agent': this.options.userAgent,
-      ...normalizeHeaderRecord(webContext?.headers),
+      ...webContextHeaders,
       ...normalizeHeaderRecord(this.options.sdkHeaders),
       'x-tr-device-info': encodeDeviceInfo(this.options.getDeviceInfo()),
       ...normalizeHeaderRecord(this.options.defaultHeaders),
@@ -94,11 +105,15 @@ export class HttpClient {
     if (hasJsonBody && !hasHeader(headers, 'content-type')) headers['content-type'] = 'application/json';
     if (session?.accessToken) headers.authorization = `Bearer ${session.accessToken}`;
     if (session?.sessionToken) headers['x-tr-session'] = session.sessionToken;
-    if (webContext?.awsWafToken && !hasHeader(headers, 'x-aws-waf-token')) headers['x-aws-waf-token'] = webContext.awsWafToken;
+    const awsWafToken = wafContext?.awsWafToken ?? webContext?.awsWafToken;
+    if (awsWafToken && !hasHeader(headers, 'x-aws-waf-token')) headers['x-aws-waf-token'] = awsWafToken;
     if (xsrfToken && !hasHeader(headers, 'x-xsrf-token')) headers['x-xsrf-token'] = decodeCookieValue(xsrfToken);
+    const cookies = { ...(webContext?.cookies ?? {}), ...(session?.cookies ?? {}) };
+    if (wafContext?.awsWafToken) cookies['aws-waf-token'] = wafContext.awsWafToken;
+    if (wafContext?.xsrfToken && !cookies['XSRF-TOKEN']) cookies['XSRF-TOKEN'] = wafContext.xsrfToken;
     const cookieHeader = mergeCookieHeaders(
       [headers.cookie, webContext?.cookieHeader].filter((value): value is string => Boolean(value)).join('; '),
-      { ...(webContext?.cookies ?? {}), ...(session?.cookies ?? {}) },
+      cookies,
     );
     if (cookieHeader) {
       headers.cookie = cookieHeader;
@@ -122,6 +137,13 @@ function normalizeHeaderRecord(headers: Record<string, string | undefined> | und
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   const lowerName = name.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === lowerName);
+}
+
+function deleteHeader(headers: Record<string, string>, name: string): void {
+  const lowerName = name.toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === lowerName) delete headers[key];
+  }
 }
 
 function decodeCookieValue(value: string): string {

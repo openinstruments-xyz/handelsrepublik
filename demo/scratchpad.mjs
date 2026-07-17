@@ -13,6 +13,7 @@ const LIMIT_EUR = 0.9;
 
 const client = TradeRepublicClient.create({
   sessionStore: new FileSessionStore('./demo/.demo-session.json'),
+  rawSchemaValidation: 'throw',
 });
 
 try {

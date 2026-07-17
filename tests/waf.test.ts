@@ -1,5 +1,7 @@
+import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
-import { collectTradeRepublicWebContext } from '../src/waf.js';
+import { collectTradeRepublicWafContext, collectTradeRepublicWebContext } from '../src/waf.js';
+import { TradeRepublicClient } from '../src/index.js';
 import type {
   TradeRepublicBrowserContextLike,
   TradeRepublicBrowserLike,
@@ -44,16 +46,63 @@ describe('collectTradeRepublicWebContext', () => {
 
     expect(context.awsWafToken).toBe('storage-waf-token');
   });
+
+  it('returns a shareable WAF context without account cookies or browser headers', async () => {
+    const context = await collectTradeRepublicWafContext(new FakeBrowser(), {
+      timeoutMs: 1_000,
+      settleMs: 0,
+    });
+
+    expect(context).toMatchObject({
+      awsWafToken: 'waf-token',
+      xsrfToken: 'xsrf-cookie',
+    });
+    assert.deepEqual(Object.keys(context).sort(), ['awsWafToken', 'capturedAt', 'xsrfToken']);
+    assert.equal('cookies' in context, false);
+    assert.equal('headers' in context, false);
+  });
+
+  it('accepts a caller-owned browser without closing it', async () => {
+    const browser = new FakeBrowser();
+
+    const context = await TradeRepublicClient.collectWafContext({
+      browser,
+      timeoutMs: 1_000,
+      settleMs: 0,
+    });
+
+    expect(context.awsWafToken).toBe('waf-token');
+    expect(browser.context?.closed).toBe(true);
+    expect(browser.closed).toBe(false);
+  });
+
+  it('rejects launch options for a caller-owned browser', async () => {
+    const browser = new FakeBrowser();
+
+    await assert.rejects(
+      () => TradeRepublicClient.collectWafContext({
+        browser,
+        browserLaunchOptions: { headless: true },
+      } as never),
+      /browserLaunchOptions cannot be used/,
+    );
+    expect(browser.closed).toBe(false);
+  });
 });
 
 class FakeBrowser implements TradeRepublicBrowserLike {
   context: FakeContext | undefined;
+  closed = false;
 
   constructor(private readonly includeWafCookie = true) {}
 
   async newContext(): Promise<TradeRepublicBrowserContextLike> {
     this.context = new FakeContext(this.includeWafCookie);
     return this.context;
+  }
+
+  close(): void {
+    this.closed = true;
   }
 }
 

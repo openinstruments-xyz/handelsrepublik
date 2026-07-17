@@ -58,57 +58,64 @@ Install the package directly from GitHub:
 
 ```bash
 npm install github:VIEWVIEWVIEW/handelsrepublik#v0.1.0
-
 ```
 
 The package is ESM-only and includes its compiled `dist` output. Consumers do
 not need to build TypeScript during installation.
 
-⚠️ Trade Republic requires passing an AWS WAF browser challenge before login (`WAF token`). The SDK can collect the matching WAF token, XSRF token, cookies, and browser headers from Playwright, which is an optional consumer dependency:
+⚠️ Trade Republic requires passing an AWS WAF browser challenge before login (`WAF token`). The SDK can launch Playwright to collect a shareable WAF context containing the WAF token and its anonymous XSRF companion. Playwright is an optional consumer dependency:
 
 ```bash
 npm install playwright
 npx playwright install chromium
 ```
 
-You can omit Playwright if your application supplies a valid `TradeRepublicWebContext` through another mechanism.
+You can omit Playwright if your application supplies a valid
+`TradeRepublicWafContext` through another mechanism.
 
 ## Quick Start
 
-This example captures the browser context, restores and refreshes an existing
+This example lets the SDK launch a temporary Chromium browser and collect a
+shareable WAF context. It then restores and refreshes an existing account
 session when available, otherwise performs QR login, and finally makes a
-read-only request:
+read-only request. The SDK closes Chromium immediately after collecting the WAF
+context:
 
 ```ts
-import { chromium } from 'playwright';
 import {
-  collectTradeRepublicWebContext,
   FileSessionStore,
   TradeRepublicClient,
 } from 'handelsrepublik';
 
-const webContext = await (async () => {
-  const browser = await chromium.launch({ headless: false });
-  try {
-    return await collectTradeRepublicWebContext(browser);
-  } finally {
-    await browser.close();
-  }
-})();
+// First, we need to get a token for passing the AWS WAF challenge
+// This will launch a browser in the background, visits the TradeRepublic site, collect the WAF token, and then close again.
+// This process might take a while.
+const wafContext = await TradeRepublicClient.collectWafContext({
+  // browserLaunchOptions: {
+  //  channel: 'chrome',
+  //  headless: true, // setting headless 'true' is useful for debugging if the browser doesn't pass AWS WAF
+  // },
+});
 
+// Second, create the client.
+// It takes a session store (you can implement your own, e.g. in Redis. More on that later.).
+// We will use the simple file based session store. It will create a simple ``.tr-session.json`` in the currenct directory.
 const tr = TradeRepublicClient.create({
-  webContext,
+  wafContext,
   sessionStore: new FileSessionStore('.tr-session.json'),
 
-  // Choose schema behavior during setup. Passthrough is useful while working
-  // with a private API because it reports drift without immediately stopping.
+  // We currently validate all answers from TradeRepublic via zod schemas.
+  // 'throw' lets the application crash on schema drift, 'passthrough' accepts invalid responses.
   rawSchemaValidation: 'passthrough',
   onRawSchemaValidationFailure({ schemaName, error }) {
-    console.warn(`Trade Republic schema drift in ${schemaName}`, error);
+    console.warn(`Trade Republic schema drift in ${schemaName}`, error); // Create an issue, if you ever encounter this ;)
+
   },
 });
 
+// Restore old, saved sessions like this
 try {
+  //
   const restored = await tr.auth.restoreSession();
 
   if (restored) {
@@ -120,7 +127,7 @@ try {
     });
 
     console.log(
-      // you probably want to render `challenge.qrCode` using a third party package
+      // Show the qr code to your user, or make them open the link with the TR app
       challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
     );
 
@@ -133,7 +140,165 @@ try {
 } finally {
   tr.close();
 }
+
+// Do some basic operations
 ```
+
+## WAF context collection
+
+`TradeRepublicClient.collectWafContext()` obtains the browser proof required by
+AWS WAF before Trade Republic login. It is asynchronous because collection can
+launch a browser, navigate to Trade Republic, and wait for the browser challenge
+to complete. `TradeRepublicClient.create()` remains synchronous and accepts the
+finished `wafContext`; it never accepts or owns a browser.
+
+The returned value has the following deliberately narrow shape:
+
+```ts
+type TradeRepublicWafContext = {
+  awsWafToken: string;
+  xsrfToken?: string;
+  capturedAt?: string;
+};
+```
+
+It does not contain `tr_session`, login cookies, authorization values, or the
+browser's general headers. Consequently, a WAF context can be reused by
+multiple separately authenticated account clients operating as the same
+logical browser/client environment.
+
+### SDK-managed browser
+
+With no options, the SDK dynamically loads the optional `playwright` package,
+launches Playwright Chromium visibly, creates a temporary browser context,
+collects the WAF context, and closes both the temporary context and browser on
+success or failure:
+
+```ts
+const wafContext = await TradeRepublicClient.collectWafContext();
+const tr = TradeRepublicClient.create({ wafContext });
+```
+
+To use an installed Chrome or another Playwright-supported Chromium channel,
+provide launch options. The SDK still owns and closes the launched browser:
+
+```ts
+const wafContext = await TradeRepublicClient.collectWafContext({
+  browserLaunchOptions: {
+    channel: 'chrome',
+    headless: false,
+  },
+});
+
+const tr = TradeRepublicClient.create({ wafContext });
+```
+
+Supported `browserLaunchOptions` are:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `headless` | `false` | Whether the SDK-launched browser runs without a visible window. |
+| `channel` | Playwright Chromium | Selects an installed Playwright-supported Chromium channel such as `chrome`. |
+| `executablePath` | Playwright default | Uses a specific browser executable. |
+| `args` | Playwright default | Adds command-line arguments to the launched browser. |
+
+The selected channel or executable must already exist on the machine. The
+default path requires the Playwright Chromium installation shown in the
+installation section.
+
+### Caller-owned browser
+
+Pass `browser` to use an already launched Playwright Chromium, Firefox, WebKit,
+or another structurally compatible browser. The SDK creates and closes one
+temporary browser context, but the caller retains ownership of the browser:
+
+```ts
+import { firefox } from 'playwright';
+import { TradeRepublicClient } from 'handelsrepublik';
+
+const browser = await firefox.launch({ headless: false });
+
+try {
+  const wafContext = await TradeRepublicClient.collectWafContext({ browser });
+  const tr = TradeRepublicClient.create({ wafContext });
+
+  // Use tr here. tr.close() does not close browser.
+} finally {
+  await browser.close();
+}
+```
+
+`browser` and `browserLaunchOptions` are mutually exclusive. TypeScript rejects
+the combination, and JavaScript callers receive a `TypeError`. If `browser` is
+provided, collection does not dynamically load Playwright, so any compatible
+browser adapter can be supplied.
+
+The equivalent lower-level function is available when a class method is not
+desired:
+
+```ts
+import { collectTradeRepublicWafContext } from 'handelsrepublik';
+
+const wafContext = await collectTradeRepublicWafContext(browser);
+```
+
+Like the class method's caller-owned-browser form, it closes the temporary
+browser context but not `browser`.
+
+### Collection options
+
+The following options apply to both SDK-managed and caller-owned browsers:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `appUrl` | `https://app.traderepublic.com/` | Page used to run the browser challenge. |
+| `apiUrl` | `https://api.traderepublic.com/` | API origin whose request data and cookies are inspected. |
+| `contextOptions` | `{}` | Options forwarded to `browser.newContext()`. |
+| `timeoutMs` | `60_000` | Maximum total time allowed for navigation and WAF collection. |
+| `settleMs` | `0` | Optional initial wait before the collector begins short polling. |
+| `waitUntil` | `'domcontentloaded'` | Load state passed to the initial page navigation. |
+
+Collection rejects if Playwright is missing for an SDK-managed browser, browser
+launch or navigation fails, or the required WAF token and browser cookie context
+are not available before the timeout. Any internally launched browser is still
+closed.
+
+### Sharing and renewal
+
+Keep one account session and one `SessionStore` per Trade Republic account, but
+reuse the WAF context when those clients represent the same logical browser
+environment:
+
+```ts
+const wafContext = await TradeRepublicClient.collectWafContext();
+
+const alice = TradeRepublicClient.create({
+  wafContext,
+  sessionStore: new FileSessionStore('.alice-session.json'),
+});
+
+const bob = TradeRepublicClient.create({
+  wafContext,
+  sessionStore: new FileSessionStore('.bob-session.json'),
+});
+```
+
+The SDK holds `wafContext` separately from account authentication and never
+writes it to an account's `SessionStore`. A WAF context is not permanent. When
+AWS WAF rejects or expires it, collect a replacement and apply it to every
+active client that should continue sharing the browser proof:
+
+```ts
+const nextWafContext = await TradeRepublicClient.collectWafContext();
+
+alice.useWafContext(nextWafContext);
+bob.useWafContext(nextWafContext);
+```
+
+`collectTradeRepublicWebContext()` remains available for advanced compatibility
+use, but it captures a broader browser context that can contain account cookies
+and headers. Do not share its result between accounts. Prefer the narrow
+`collectWafContext()` or `collectTradeRepublicWafContext()` interfaces.
 
 Choose `rawSchemaValidation` deliberately:
 
@@ -203,10 +368,13 @@ const tr = TradeRepublicClient.create({
 });
 ```
 
-Use one `TradeRepublicClient`, one session store, and one WAF/browser context per
-Trade Republic account. Do not share a client between users. Login and refresh
-save finalized sessions automatically; `auth.saveSession()` is available when
-the application explicitly needs to persist the client's current session.
+Use one `TradeRepublicClient` and one session store per Trade Republic account.
+Do not share a client or account session between users. WAF-context ownership,
+safe reuse, and renewal are described in
+[WAF context collection](#waf-context-collection). Login and refresh save
+finalized account sessions automatically;
+`auth.saveSession()` is available when the application explicitly needs to
+persist the client's current session.
 
 Cookie expiry does not necessarily mean the complete account session expired.
 For example, `tr_claims` can expire while `tr_session` remains usable. Restore

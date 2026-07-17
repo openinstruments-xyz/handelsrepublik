@@ -1,4 +1,4 @@
-import type { TradeRepublicWebContext } from './types.js';
+import type { TradeRepublicWafContext, TradeRepublicWebContext } from './types.js';
 
 export interface TradeRepublicBrowserLike {
   newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
@@ -14,6 +14,8 @@ export interface CollectTradeRepublicWebContextOptions {
   settleMs?: number | undefined;
   waitUntil?: string | undefined;
 }
+
+export type CollectTradeRepublicWafContextOptions = CollectTradeRepublicWebContextOptions;
 
 export interface TradeRepublicBrowserContextLike {
   newPage(): Promise<TradeRepublicPageLike>;
@@ -95,6 +97,39 @@ export async function collectTradeRepublicWebContext(
   } finally {
     await context.close();
   }
+}
+
+export async function collectTradeRepublicWafContext(
+  browser: TradeRepublicBrowserLike,
+  options: CollectTradeRepublicWebContextOptions = {},
+): Promise<TradeRepublicWafContext> {
+  return toTradeRepublicWafContext(await collectTradeRepublicWebContext(browser, options));
+}
+
+export function toTradeRepublicWafContext(context: TradeRepublicWebContext): TradeRepublicWafContext {
+  const normalized = normalizeTradeRepublicWebContext(context);
+  if (!normalized.awsWafToken) {
+    throw new TypeError('Trade Republic WAF context requires an AWS WAF token.');
+  }
+  return {
+    awsWafToken: normalized.awsWafToken,
+    ...(normalized.xsrfToken ? { xsrfToken: normalized.xsrfToken } : {}),
+    ...(normalized.capturedAt ? { capturedAt: normalized.capturedAt } : {}),
+  };
+}
+
+export function normalizeTradeRepublicWafContext(context: TradeRepublicWafContext): TradeRepublicWafContext {
+  const awsWafToken = normalizeString(context.awsWafToken);
+  if (!awsWafToken) {
+    throw new TypeError('Trade Republic WAF context requires an AWS WAF token.');
+  }
+  const xsrfToken = normalizeString(context.xsrfToken);
+  const capturedAt = normalizeString(context.capturedAt);
+  return {
+    awsWafToken,
+    ...(xsrfToken ? { xsrfToken } : {}),
+    ...(capturedAt ? { capturedAt } : {}),
+  };
 }
 
 export function normalizeTradeRepublicWebContext(context: TradeRepublicWebContext): TradeRepublicWebContext {
