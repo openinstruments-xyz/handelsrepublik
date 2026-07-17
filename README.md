@@ -315,6 +315,153 @@ switch (result.status) {
 }
 ```
 
+### Selling a complete derivative position
+
+Portfolio derivative payloads currently keep fields such as the underlying,
+direction, and held size in `position.raw`. Narrow the raw value before reading
+those fields; for example, this validates, previews, and—after the indicated
+confirmation point—submits a day-limit sale of a specific gold short
+certificate:
+
+```ts
+import { FileSessionStore, TradeRepublicClient } from 'handelsrepublik';
+
+const INSTRUMENT_ID = 'DE000HM8CS45';
+const EXCHANGE_ID = 'TUB';
+const EXPECTED_SIZE = 6;
+const LIMIT_EUR = 0.9;
+
+const tr = TradeRepublicClient.create({
+  sessionStore: new FileSessionStore('./demo/.demo-session.json'),
+});
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+try {
+  const restored = await tr.auth.restoreSession();
+  if (!restored) throw new Error('The demo session could not be restored.');
+  await tr.auth.refreshSession();
+
+  const [portfolio, asset] = await Promise.all([
+    tr.portfolio.current({ timeoutMs: 15_000 }),
+    tr.assets.get(INSTRUMENT_ID),
+  ]);
+  const position = portfolio.positions.find(({ id }) => id === INSTRUMENT_ID);
+  if (!position) {
+    throw new Error(`${INSTRUMENT_ID} is no longer in the portfolio.`);
+  }
+
+  const rawPosition = position.raw;
+  const rawAsset = asset.raw;
+  if (!isRecord(rawPosition) || !isRecord(rawAsset)) {
+    throw new Error('The position or asset payload is malformed.');
+  }
+
+  const derivativeInfo = rawAsset.derivativeInfo;
+  if (!isRecord(derivativeInfo)) {
+    throw new Error('The position is no longer a derivative.');
+  }
+
+  const underlying = derivativeInfo.underlying;
+  const properties = derivativeInfo.properties;
+  if (!isRecord(underlying) || !isRecord(properties)) {
+    throw new Error('The derivative details are incomplete.');
+  }
+
+  if (
+    !/gold/i.test(String(underlying.name ?? ''))
+    || properties.optionType !== 'short'
+    || derivativeInfo.knocked === true
+    || asset.type !== 'derivative'
+    || rawAsset.active !== true
+    || rawAsset.tradable !== true
+    || !asset.exchangeIds?.includes(EXCHANGE_ID)
+    || rawPosition.status !== 'ACTIVE'
+  ) {
+    throw new Error(
+      'The position no longer matches the active gold short certificate.',
+    );
+  }
+
+  const heldSize = Number(position.quantity);
+  if (!Number.isFinite(heldSize) || heldSize !== EXPECTED_SIZE) {
+    throw new Error(
+      `Held size changed from ${EXPECTED_SIZE} to ${String(position.quantity)}; aborting.`,
+    );
+  }
+
+  const [availableSize, quote, destinations] = await Promise.all([
+    tr.trading.availableSize(INSTRUMENT_ID, undefined, {
+      timeoutMs: 15_000,
+    }),
+    tr.trading.priceForOrder(
+      { instrumentId: INSTRUMENT_ID, exchangeId: EXCHANGE_ID, side: 'sell' },
+      { timeoutMs: 15_000 },
+    ),
+    tr.trading.orderDestinations(INSTRUMENT_ID, {
+      productContext: 'derivative',
+    }),
+  ]);
+
+  const sellableSize = Number(availableSize.size);
+  if (!Number.isFinite(sellableSize) || sellableSize !== heldSize) {
+    throw new Error(
+      `Sellable size ${String(availableSize.size)} does not match held size ${heldSize}; aborting.`,
+    );
+  }
+
+  const destination = destinations.find(({ id }) => id === EXCHANGE_ID);
+  if (!destination?.open) {
+    throw new Error(`${EXCHANGE_ID} is not currently open.`);
+  }
+  if (!destination.orderModes?.includes('limit')) {
+    throw new Error(`${EXCHANGE_ID} does not support limit orders.`);
+  }
+  if (!destination.orderExpiries?.includes('gfd')) {
+    throw new Error(`${EXCHANGE_ID} does not support day validity.`);
+  }
+
+  const preview = await tr.orders.preview({
+    instrumentId: INSTRUMENT_ID,
+    exchangeId: EXCHANGE_ID,
+    side: 'sell',
+    mode: 'limit',
+    size: sellableSize,
+    limit: LIMIT_EUR,
+    validity: 'day',
+  });
+
+  console.log({
+    instrument: `${asset.issuer ?? ''} ${asset.name ?? position.name ?? ''}`.trim(),
+    instrumentId: INSTRUMENT_ID,
+    exchangeId: EXCHANGE_ID,
+    size: sellableSize,
+    limit: LIMIT_EUR,
+    latestBid: quote.bid ?? quote.price,
+    quoteTime: quote.time,
+    grossAtLimit: sellableSize * LIMIT_EUR,
+    fees: preview.totalFees,
+    estimatedProceeds: preview.estimatedTotal,
+  });
+
+  // This sends a real sell order. Require explicit user confirmation first.
+  const result = await tr.orders.submit(preview.order);
+  console.log(result);
+} finally {
+  tr.close();
+}
+```
+
+The raw-shape checks are intentional. The normalized asset name identifies the
+product (`Open End Turbo auf Gold`), but direction and knock-out state live in
+`asset.raw.derivativeInfo`, and the active position status remains in
+`position.raw`. The SDK normalizes the position's `raw.netSize` as
+`position.quantity`. Abort instead of submitting if any identity, size, status,
+quote, or venue check no longer matches. Handle `outcomeUnknown` as described
+below; never submit the same order automatically after an ambiguous result.
+
 Provide exactly one of `size` and `amount`:
 
 - `size: 3` requests three shares or units.

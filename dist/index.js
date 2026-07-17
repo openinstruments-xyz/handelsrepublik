@@ -280,7 +280,7 @@ function normalizePortfolioPosition(value) {
     id: stringValue(record2.id, record2.instrumentId, record2.isin),
     isin: optionalString(record2.isin, record2.instrumentId),
     name: optionalString(record2.name, record2.instrumentName),
-    quantity: optionalNumber(record2.quantity, record2.shares, record2.size),
+    quantity: optionalNumber(record2.quantity, record2.shares, record2.size, record2.netSize),
     value: optionalNumber(record2.value, record2.netValue, asRecord(record2.marketValue).amount),
     currency: optionalString(record2.currency, asRecord(record2.marketValue).currency),
     categoryType: optionalString(record2.categoryType),

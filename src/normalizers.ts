@@ -308,7 +308,7 @@ export function normalizePortfolioPosition(value: unknown): PortfolioPosition {
     id: stringValue(record.id, record.instrumentId, record.isin),
     isin: optionalString(record.isin, record.instrumentId),
     name: optionalString(record.name, record.instrumentName),
-    quantity: optionalNumber(record.quantity, record.shares, record.size),
+    quantity: optionalNumber(record.quantity, record.shares, record.size, record.netSize),
     value: optionalNumber(record.value, record.netValue, asRecord(record.marketValue).amount),
     currency: optionalString(record.currency, asRecord(record.marketValue).currency),
     categoryType: optionalString(record.categoryType),
