@@ -30,17 +30,16 @@ export class DiscoveryApi {
     return this.operations.executeRaw(discoveryOperations.instrumentStatus, { isin, exchange });
   }
 
-  watchlists(): Promise<unknown> {
-    return this.rawWatchlists();
+  watchlists(): Promise<Watchlist[]> {
+    return this.operations.execute(discoveryOperations.watchlists, {});
   }
 
   async cloudWatchlist(options: { pageSize?: number } = {}): Promise<Watchlist | undefined> {
-    const watchlist = arrayPayload(await this.rawWatchlists())[0];
+    const watchlist = (await this.watchlists())[0];
     if (!watchlist) return undefined;
-    const normalized = normalizeWatchlist(watchlist);
-    if (!normalized.id) return normalized;
-    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
-    return normalizeWatchlist(watchlist, items);
+    if (!watchlist.id) return watchlist;
+    const items = arrayPayload(await this.rawWatchlistItems(watchlist.id, options));
+    return normalizeWatchlist(watchlist.raw, items);
   }
 
   rawWatchlistItems(watchlistId: string, options: { pageSize?: number } = {}): Promise<unknown> {

@@ -24,7 +24,7 @@ export class ClientRuntime {
     private readonly accountIdentity: AccountIdentityAdapter,
   ) {
     this.resources = new ResourceClient(http, endpoints, raw, validateRaw);
-    this.operations = new OperationClient(http, raw, validateRaw, endpoints);
+    this.operations = new OperationClient(http, validateRaw, endpoints);
   }
 
   get securitiesAccountNumber(): string | undefined {

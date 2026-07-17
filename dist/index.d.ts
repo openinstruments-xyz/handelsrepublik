@@ -43,6 +43,19 @@ interface TradeRepublicClientOptions {
     onRawSchemaValidationFailure?: ((failure: RawSchemaValidationFailure) => void) | undefined;
 }
 type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;
+interface AccountRelationshipBankingInfo {
+    iban?: string | undefined;
+    bic?: string | undefined;
+    raw: unknown;
+}
+interface AccountRelationship {
+    customerId?: string | undefined;
+    firstName?: string | undefined;
+    lastName?: string | undefined;
+    relationshipType?: string | undefined;
+    bankingInfo?: AccountRelationshipBankingInfo | undefined;
+    raw: unknown;
+}
 interface IbanInfo {
     iban: string;
     bic?: string | undefined;
@@ -256,10 +269,34 @@ interface OrderPreview {
 }
 type OrderSubmissionStatus = 'succeeded' | 'failed' | 'outcomeUnknown';
 type MutationOutcomeUnknownReason = 'clientClosed' | 'disconnect' | 'sendFailure' | 'sessionRefresh' | 'timeout';
+type OrderMutationStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed';
+type OrderMutationErrorCode = 'cashMissing' | 'currentQuoteMissing' | 'exchangeClosed' | 'instrumentSuspended' | 'internalError' | 'invalidSecurityDerivative' | 'invalidSecurityNonDerivative' | 'limitDenied' | 'maxQuantityExceeded' | 'noRefPriceAvailable' | 'noRouteToMarket' | 'orderAlreadyDeleted' | 'orderAlreadyExists' | 'orderNotFound' | 'orderRejectedAtExchange' | 'portfolioInactive' | 'quoteMissing' | 'savingsplanSharesMissingToday' | 'sharesMissing' | 'shortPositionNotAllowed' | 'timeoutError' | 'unknownInstrument' | (string & {});
+interface OrderMutationErrorDetails {
+    exchangeId?: string | undefined;
+    isin?: string | undefined;
+    orderId?: string | undefined;
+    userId?: string | undefined;
+    clientProcessId?: string | undefined;
+    isNostro?: boolean | undefined;
+    raw: unknown;
+}
+interface OrderMutationError {
+    code?: OrderMutationErrorCode | undefined;
+    message?: string | undefined;
+    details?: OrderMutationErrorDetails | undefined;
+    raw: unknown;
+}
+interface OrderMutationUpdate {
+    status: OrderMutationStatus;
+    orderId?: string | undefined;
+    message?: string | undefined;
+    error?: OrderMutationError | undefined;
+    raw: unknown;
+}
 interface OrderSubmissionBase {
     orderId?: string | undefined;
     clientProcessId: string;
-    updates: unknown[];
+    updates: OrderMutationUpdate[];
     raw: unknown;
 }
 interface OrderSubmissionSucceeded extends OrderSubmissionBase {
@@ -267,18 +304,18 @@ interface OrderSubmissionSucceeded extends OrderSubmissionBase {
 }
 interface OrderSubmissionFailed extends OrderSubmissionBase {
     status: 'failed';
-    error: unknown;
+    error: OrderMutationError;
 }
 interface OrderSubmissionOutcomeUnknown extends OrderSubmissionBase {
     status: 'outcomeUnknown';
     outcomeReason: MutationOutcomeUnknownReason;
     connectionLoss?: WebSocketDisconnectEvent | undefined;
-    error: unknown;
+    error: Error;
 }
 type OrderSubmission = OrderSubmissionSucceeded | OrderSubmissionFailed | OrderSubmissionOutcomeUnknown;
 interface OrderCancellationBase {
     orderId: string;
-    updates: unknown[];
+    updates: OrderMutationUpdate[];
     raw: unknown;
 }
 interface OrderCancellationSucceeded extends OrderCancellationBase {
@@ -286,13 +323,13 @@ interface OrderCancellationSucceeded extends OrderCancellationBase {
 }
 interface OrderCancellationFailed extends OrderCancellationBase {
     status: 'failed';
-    error: unknown;
+    error: OrderMutationError;
 }
 interface OrderCancellationOutcomeUnknown extends OrderCancellationBase {
     status: 'outcomeUnknown';
     outcomeReason: MutationOutcomeUnknownReason;
     connectionLoss?: WebSocketDisconnectEvent | undefined;
-    error: unknown;
+    error: Error;
 }
 type OrderCancellation = OrderCancellationSucceeded | OrderCancellationFailed | OrderCancellationOutcomeUnknown;
 interface OrderReplacementOptions {
@@ -317,7 +354,7 @@ interface OrderReplacementNotSent extends OrderReplacementBase {
     status: 'replacementNotSent';
     cancellation: OrderCancellationSucceeded;
     submission?: never;
-    error: unknown;
+    error: Error;
 }
 interface OrderReplacementSucceeded extends OrderReplacementBase {
     status: 'succeeded';
@@ -413,6 +450,17 @@ interface PriceAlarm {
     price?: number | undefined;
     currency?: string | undefined;
     triggeredAt?: string | undefined;
+    raw: unknown;
+}
+type PriceAlarmMutationStatus = 'created' | 'ok' | (string & {});
+interface PriceAlarmCreation {
+    alarmId?: string | undefined;
+    status?: PriceAlarmMutationStatus | undefined;
+    raw: unknown;
+}
+interface PriceAlarmCancellation {
+    alarmId: string;
+    status?: PriceAlarmMutationStatus | undefined;
     raw: unknown;
 }
 interface SavingsPlan {
@@ -616,10 +664,6 @@ interface MarketQuote {
 interface L2OrderBookOptions {
     assetId: string;
     exchangeId: string;
-    /** Retained for source compatibility; the protobuf L2 resource chooses the published depth. */
-    depth?: number | undefined;
-    /** Retained for source compatibility; the protobuf L2 resource does not accept client throttling. */
-    throttleMs?: number | undefined;
 }
 interface L2Venue {
     exchangeId: string;
@@ -766,11 +810,6 @@ declare class MapperRequestError extends TradeRepublicProtocolError {
     readonly outcomeUnknown: boolean;
     constructor(message: string, reason: MapperRequestFailureReason, deliveryState: MapperDeliveryState, connectionLoss?: WebSocketDisconnectEvent | undefined, cause?: unknown);
 }
-/** @deprecated Use MapperRequestError and inspect reason/deliveryState. */
-declare class MapperConnectionLostError extends MapperRequestError {
-    readonly event: WebSocketDisconnectEvent;
-    constructor(event: WebSocketDisconnectEvent);
-}
 interface MapperSubscription extends AsyncIterable<unknown> {
     readonly deliveryState: MapperDeliveryState;
     close(): void;
@@ -803,7 +842,6 @@ declare class RawApi {
     constructor(http: HttpClient, websocketUrl: string, websocketFactory: WebSocketFactory, getSession: () => Session | undefined, websocketMode?: 'shared' | 'isolated', reconnectDelayMs?: number, handshakeTimeoutMs?: number, onWebSocketDisconnect?: ((event: WebSocketDisconnectEvent) => void | Promise<void>) | undefined, onWebSocketReconnect?: ((event: WebSocketReconnectEvent) => void | Promise<void>) | undefined);
     request<T = unknown>(request: RawRequest): Promise<T>;
     subscribe(topic: string, payload?: unknown, options?: RawSubscriptionOptions): RawSubscription;
-    subscribeLegacy(topic: string, payload?: unknown, options?: RawSubscriptionOptions): RawSubscription;
     subscribeResource(payload: Record<string, unknown>, options?: RawSubscriptionOptions): RawSubscription;
     subscribeProtobufResource(topic: MapperProtobufTopic, request?: MapperProtobufRequestOptions, options?: RawSubscriptionOptions): RawSubscription;
     query<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
@@ -881,25 +919,13 @@ interface RestOperation<TParams, TResult> extends OperationBase<TParams, TResult
     query?: ((params: TParams) => Record<string, string | number | boolean | undefined>) | undefined;
     body?: ((params: TParams) => unknown) | undefined;
 }
-interface MapperQueryOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
-    transport: 'mapper-query';
-    payload: (params: TParams) => Record<string, unknown>;
-    timeoutMs?: ((params: TParams) => number | undefined) | undefined;
-}
-interface MapperStreamOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
-    transport: 'mapper-stream';
-    payload: (params: TParams) => Record<string, unknown>;
-}
-type Operation<TParams, TResult> = RestOperation<TParams, TResult> | MapperQueryOperation<TParams, TResult> | MapperStreamOperation<TParams, TResult>;
 declare class OperationClient {
     private readonly http;
-    private readonly raw;
     private readonly validateRaw;
     private readonly endpoints?;
-    constructor(http: HttpClient, raw: RawApi, validateRaw: RawSchemaValidator, endpoints?: EndpointResolver | undefined);
-    execute<TParams, TResult>(operation: Exclude<Operation<TParams, TResult>, MapperStreamOperation<TParams, TResult>>, params: TParams): Promise<TResult>;
-    executeRaw<TParams, TResult>(operation: Exclude<Operation<TParams, TResult>, MapperStreamOperation<TParams, TResult>>, params: TParams): Promise<unknown>;
-    stream<TParams, TResult>(operation: MapperStreamOperation<TParams, TResult>, params: TParams): Subscription<TResult>;
+    constructor(http: HttpClient, validateRaw: RawSchemaValidator, endpoints?: EndpointResolver | undefined);
+    execute<TParams, TResult>(operation: RestOperation<TParams, TResult>, params: TParams): Promise<TResult>;
+    executeRaw<TParams, TResult>(operation: RestOperation<TParams, TResult>, params: TParams): Promise<unknown>;
     private resolvePath;
 }
 
@@ -930,7 +956,8 @@ declare class AccountApi {
     session(): Promise<unknown>;
     accountSettings(): Promise<unknown>;
     personalDetails(): Promise<unknown>;
-    relationships(): Promise<unknown>;
+    relationships(): Promise<AccountRelationship[]>;
+    rawRelationships(): Promise<unknown>;
     cardsHome(): Promise<unknown>;
 }
 declare class BoardsApi {
@@ -976,7 +1003,7 @@ declare class DiscoveryApi {
     rawExchangeSchedule(exchange: string): Promise<unknown>;
     instrumentStatus(isin: string, exchange: string): Promise<InstrumentStatus>;
     rawInstrumentStatus(isin: string, exchange: string): Promise<unknown>;
-    watchlists(): Promise<unknown>;
+    watchlists(): Promise<Watchlist[]>;
     cloudWatchlist(options?: {
         pageSize?: number;
     }): Promise<Watchlist | undefined>;
@@ -1195,13 +1222,13 @@ declare class PriceAlarmsApi {
         isin: string;
         price: number;
         timeoutMs?: number;
-    }): Promise<unknown>;
+    }): Promise<PriceAlarmCreation>;
     rawCreate(payload: Record<string, unknown>, options?: {
         timeoutMs?: number;
     }): Promise<unknown>;
     cancel(id: string, options?: {
         timeoutMs?: number;
-    }): Promise<unknown>;
+    }): Promise<PriceAlarmCancellation>;
     rawCancel(id: string, options?: {
         timeoutMs?: number;
     }): Promise<unknown>;
@@ -1442,4 +1469,4 @@ declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicS
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

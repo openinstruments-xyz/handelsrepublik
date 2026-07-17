@@ -19,10 +19,10 @@ const TEST_DEVICE_INFO: TradeRepublicDeviceInfo = {
 };
 
 describe('TradeRepublicClient', () => {
-  it('rejects legacy sessions without device information', () => {
+  it('rejects sessions without device information', () => {
     assert.throws(() => TradeRepublicClient.create({
       session: {
-        sessionToken: 'legacy-session',
+        sessionToken: 'session-without-device-info',
       },
     }), /must contain deviceInfo/);
   });
@@ -945,7 +945,15 @@ describe('TradeRepublicClient', () => {
       websocketFactory: () => {
         const socket = new FakeSocket((payload, id) => {
           if (payload.type === 'simpleCreateOrder') {
-            socket.emit('message', `${id} A ${JSON.stringify({ status: 'failed', error: 'broker rejected order' })}`);
+            socket.emit('message', `${id} A ${JSON.stringify({
+              status: 'failed',
+              message: 'Exchange is closed',
+              error: {
+                code: 'exchangeClosed',
+                message: 'Exchange is closed',
+                details: { exchangeId: 'LSX', isin: 'US0378331005', isNostro: false },
+              },
+            })}`);
           }
         });
         return socket;
@@ -957,7 +965,18 @@ describe('TradeRepublicClient', () => {
       lastClientPrice: 201.5, clientProcessId: 'failed-process-1', secAccNo: '0000000000',
     });
 
-    expect(result).toMatchObject({ status: 'failed', error: 'broker rejected order' });
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'exchangeClosed',
+        message: 'Exchange is closed',
+        details: {
+          exchangeId: 'LSX',
+          isin: 'US0378331005',
+          isNostro: false,
+        },
+      },
+    });
     client.close();
   });
 
@@ -1175,7 +1194,10 @@ describe('TradeRepublicClient', () => {
     await expect(client.orders.replace('old-order', preparedReplacement())).resolves.toMatchObject({
       status: 'cancelFailed',
       previousOrderId: 'old-order',
-      cancellation: { status: 'failed' },
+      cancellation: {
+        status: 'failed',
+        error: { code: 'orderNotFound', raw: { code: 'orderNotFound' } },
+      },
     });
     expect(payloads).toEqual([{ type: 'cancelOrder', orderId: 'old-order' }]);
   });
@@ -1462,7 +1484,7 @@ describe('TradeRepublicClient', () => {
         jsonResponse({ data: [{ exchangeId: 'LSX', name: 'Lang & Schwarz' }] }),
         jsonResponse({ exchangeId: 'LSX', sessions: [] }),
         jsonResponse({ isin: 'US1', exchangeId: 'LSX', status: 'OPEN' }),
-        jsonResponse({ watchlists: [] }),
+        jsonResponse({ watchlists: [{ id: 'wl-1', name: 'Main', items: [] }] }),
         jsonResponse({ screeners: [] }),
         jsonResponse({ options: [] }),
         jsonResponse({ theme: 'dark' }),
@@ -1475,7 +1497,15 @@ describe('TradeRepublicClient', () => {
         jsonResponse({ pnl: 1 }),
         jsonResponse({ account: true }),
         jsonResponse({ name: 'Example' }),
-        jsonResponse({ relationships: [] }),
+        jsonResponse({
+          relationships: [{
+            customerId: 'customer-1',
+            firstName: 'Example',
+            lastName: 'Person',
+            relationshipType: 'SELF',
+            bankingInfo: { iban: 'DE00', bic: 'TRBKDEBBXXX' },
+          }],
+        }),
         jsonResponse({ cards: [] }),
         jsonResponse({ documents: [] }),
         jsonResponse({ paymentMethods: [] }),
@@ -1510,7 +1540,14 @@ describe('TradeRepublicClient', () => {
     ]);
     await expect(client.discovery.exchangeSchedule('LSX')).resolves.toEqual(expect.objectContaining({ exchangeId: 'LSX' }));
     await expect(client.discovery.instrumentStatus('US1', 'LSX')).resolves.toEqual(expect.objectContaining({ isin: 'US1', exchangeId: 'LSX', status: 'OPEN' }));
-    await expect(client.discovery.watchlists()).resolves.toEqual({ watchlists: [] });
+    await expect(client.discovery.watchlists()).resolves.toEqual([
+      {
+        id: 'wl-1',
+        name: 'Main',
+        items: [],
+        raw: { id: 'wl-1', name: 'Main', items: [] },
+      },
+    ]);
     await expect(client.discovery.screeners()).resolves.toEqual({ screeners: [] });
     await expect(client.discovery.screenerOptions()).resolves.toEqual({ options: [] });
     await expect(client.discovery.userPreferences()).resolves.toEqual({ theme: 'dark' });
@@ -1523,7 +1560,26 @@ describe('TradeRepublicClient', () => {
     await expect(client.trading.dailyPnl([{ id: 'US1' }])).resolves.toEqual({ pnl: 1 });
     await expect(client.account.accountSettings()).resolves.toEqual({ account: true });
     await expect(client.account.personalDetails()).resolves.toEqual({ name: 'Example' });
-    await expect(client.account.relationships()).resolves.toEqual({ relationships: [] });
+    await expect(client.account.relationships()).resolves.toEqual([
+      {
+        customerId: 'customer-1',
+        firstName: 'Example',
+        lastName: 'Person',
+        relationshipType: 'SELF',
+        bankingInfo: {
+          iban: 'DE00',
+          bic: 'TRBKDEBBXXX',
+          raw: { iban: 'DE00', bic: 'TRBKDEBBXXX' },
+        },
+        raw: {
+          customerId: 'customer-1',
+          firstName: 'Example',
+          lastName: 'Person',
+          relationshipType: 'SELF',
+          bankingInfo: { iban: 'DE00', bic: 'TRBKDEBBXXX' },
+        },
+      },
+    ]);
     await expect(client.account.cardsHome()).resolves.toEqual({ cards: [] });
     await expect(client.documents.documents()).resolves.toEqual({ documents: [] });
     await expect(client.payments.paymentMethods()).resolves.toEqual({ paymentMethods: [] });
@@ -1593,8 +1649,16 @@ describe('TradeRepublicClient', () => {
       },
     });
 
-    await expect(client.priceAlarms.create({ isin: 'US1', price: 123.45 })).resolves.toEqual({ status: 'created', alarmId: 'alarm-1' });
-    await expect(client.priceAlarms.cancel('alarm-1')).resolves.toEqual({ status: 'ok', id: 'alarm-1' });
+    await expect(client.priceAlarms.create({ isin: 'US1', price: 123.45 })).resolves.toEqual({
+      alarmId: 'alarm-1',
+      status: 'created',
+      raw: { status: 'created', alarmId: 'alarm-1' },
+    });
+    await expect(client.priceAlarms.cancel('alarm-1')).resolves.toEqual({
+      alarmId: 'alarm-1',
+      status: 'ok',
+      raw: { status: 'ok', id: 'alarm-1' },
+    });
 
     expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({
       type: 'createPriceAlarm',
@@ -1706,15 +1770,6 @@ function mockFetch(calls: Array<{ url: string; init: RequestInit }>, responseBod
   return (async (url: URL | RequestInfo, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {} });
     return jsonResponse(responseBody);
-  }) as typeof fetch;
-}
-
-function mockFetchMap(responses: Map<string, unknown>): typeof fetch {
-  return (async (url: URL | RequestInfo) => {
-    const parsed = new URL(String(url));
-    const response = responses.get(parsed.pathname);
-    if (response === undefined) return jsonResponse({ error: 'not found' }, 404);
-    return jsonResponse(response);
   }) as typeof fetch;
 }
 

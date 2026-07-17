@@ -15,7 +15,7 @@ describe('public convenience methods', () => {
     const client = TradeRepublicClient.create({
       sessionStore: {
         async load() {
-          return { sessionToken: 'legacy-token' };
+          return { sessionToken: 'session-without-device-info' };
         },
         async save() {},
         async clear() {},
@@ -228,7 +228,7 @@ describe('public convenience methods', () => {
     });
     alias.close();
 
-    const orderBook = client.market.l2OrderBook('US3', 'XETR', { depth: 3, throttleMs: 250 });
+    const orderBook = client.market.l2OrderBook('US3', 'XETR');
     connect(sockets[2]);
     expect(decodeMapperProtobufRequest(sockets[2]!.binarySent[0]!)).toEqual({
       subscriptionId: 1, topic: 'L2', instrumentId: { isin: 'US3', exchangeId: 'XETR' },

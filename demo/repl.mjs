@@ -12,7 +12,6 @@ import { collectTradeRepublicWebContext, FileSessionStore, TradeRepublicClient }
 const here = dirname(fileURLToPath(import.meta.url));
 const sessionPath = process.env.TR_SESSION_FILE || join(here, '.demo-session.json');
 const configPath = process.env.TR_CONFIG_FILE || join(here, '.demo-config.json');
-const legacyScratchpadConfigPath = join(here, '..', 'scratchpad', '.scratchpad-config.json');
 const sessionStoreConfig = createSessionStore();
 const sessionStore = sessionStoreConfig.store;
 let runtimeConfig = await loadRuntimeConfig();
@@ -85,7 +84,7 @@ const helperSignatures = new Map([
   ['quoteWatch', 'quoteWatch(query?: string, options?: { type?: string; exchangeId?: string; unit?: string })'],
   ['priceSearch', 'priceSearch(query?: string, options?: { type?: string; exchangeId?: string })'],
   ['l2Venues', 'l2Venues(assetId?: string)'],
-  ['l2', 'l2(assetId?: string, exchangeId?: string, options?: { depth?: number; throttleMs?: number })'],
+  ['l2', 'l2(assetId?: string, exchangeId?: string)'],
   ['next', 'next(subscription?: AsyncIterable, options?: { timeoutMs?: number; close?: boolean })'],
   ['collect', 'collect(subscription?: AsyncIterable, count?: number, options?: { timeoutMs?: number; close?: boolean })'],
   ['watch', 'watch(subscription?: AsyncIterable, options?: { label?: string; limit?: number })'],
@@ -965,15 +964,10 @@ async function l2Venues(assetId) {
   return client.market.availableL2Books(assetId);
 }
 
-function l2(assetId, exchangeId, options = {}) {
+function l2(assetId, exchangeId) {
   assetId ??= EXAMPLE_ASSET_ID;
   exchangeId ??= EXAMPLE_L2_EXCHANGE_ID;
-  return client.market.subscribeL2OrderBook({
-    assetId,
-    exchangeId,
-    depth: options.depth ?? 10,
-    throttleMs: options.throttleMs ?? 250,
-  });
+  return client.market.subscribeL2OrderBook({ assetId, exchangeId });
 }
 
 async function next(subscription, options = {}) {
@@ -1325,7 +1319,6 @@ function authContext() {
   const config = currentRuntimeConfig();
   return {
     configPath,
-    legacyScratchpadConfigPath,
     hasAwsWafToken: Boolean(config.awsWafToken),
     hasCookie: Boolean(config.cookie),
     hasXsrfToken: Boolean(config.xsrfToken),
@@ -1339,10 +1332,7 @@ function authContext() {
 }
 
 async function loadRuntimeConfig() {
-  const fileConfig = {
-    ...await readJsonFile(legacyScratchpadConfigPath),
-    ...await readJsonFile(configPath),
-  };
+  const fileConfig = await readJsonFile(configPath);
   return {
     awsWafToken: cleanString(process.env.TR_AWS_WAF_TOKEN ?? fileConfig.awsWafToken),
     xsrfToken: cleanString(process.env.TR_XSRF_TOKEN ?? fileConfig.xsrfToken),

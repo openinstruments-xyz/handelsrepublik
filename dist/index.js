@@ -93,6 +93,28 @@ function normalizeIbanInfo(value) {
     raw: relationship
   };
 }
+function normalizeAccountRelationship(value) {
+  const record2 = asRecord(value);
+  const rawBankingInfo = record2.bankingInfo;
+  const bankingInfo = asRecord(rawBankingInfo);
+  const hasBankingInfo = typeof rawBankingInfo === "object" && rawBankingInfo !== null;
+  return {
+    customerId: optionalString(record2.customerId),
+    firstName: optionalString(record2.firstName),
+    lastName: optionalString(record2.lastName),
+    relationshipType: optionalString(record2.relationshipType),
+    bankingInfo: hasBankingInfo ? {
+      iban: optionalString(bankingInfo.iban),
+      bic: optionalString(bankingInfo.bic),
+      raw: rawBankingInfo
+    } : void 0,
+    raw: value
+  };
+}
+function normalizeAccountRelationships(value) {
+  const relationships = asRecord(value).relationships;
+  return (Array.isArray(relationships) ? relationships : arrayPayload(value)).map(normalizeAccountRelationship);
+}
 function normalizeAsset(value) {
   const record2 = asRecord(value);
   const instrument = asRecord(record2.instrument);
@@ -345,6 +367,22 @@ function normalizePriceAlarm(value) {
     price,
     currency,
     triggeredAt: optionalString(record2.triggeredAt, record2.triggered, record2.notificationSentAt),
+    raw: value
+  };
+}
+function normalizePriceAlarmCreation(value) {
+  const record2 = asRecord(value);
+  return {
+    alarmId: optionalString(record2.alarmId, record2.priceAlarmId, record2.id),
+    status: optionalString(record2.status),
+    raw: value
+  };
+}
+function normalizePriceAlarmCancellation(value, requestedAlarmId) {
+  const record2 = asRecord(value);
+  return {
+    alarmId: optionalString(record2.alarmId, record2.priceAlarmId, record2.id) ?? requestedAlarmId,
+    status: optionalString(record2.status),
     raw: value
   };
 }
@@ -1601,6 +1639,39 @@ function dedupeCandles(candles) {
   return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
 }
 
+// src/operations.ts
+var OperationClient = class {
+  constructor(http, validateRaw, endpoints) {
+    this.http = http;
+    this.validateRaw = validateRaw;
+    this.endpoints = endpoints;
+  }
+  http;
+  validateRaw;
+  endpoints;
+  async execute(operation, params) {
+    return operation.normalize(await this.executeRaw(operation, params), params);
+  }
+  async executeRaw(operation, params) {
+    const raw = await this.http.request(
+      operation.method ?? "GET",
+      this.resolvePath(operation, params),
+      operation.body?.(params),
+      operation.query?.(params)
+    );
+    return operation.schemaName ? this.validateRaw(operation.schemaName, raw) : raw;
+  }
+  resolvePath(operation, params) {
+    if (operation.endpoint) {
+      if (!this.endpoints) throw new Error(`Operation ${operation.name} needs an endpoint resolver.`);
+      return this.endpoints.resolve(operation.endpoint, operation.pathParams?.(params));
+    }
+    if (!operation.path) throw new Error(`REST operation ${operation.name} needs a path or endpoint.`);
+    return typeof operation.path === "function" ? operation.path(params) : operation.path;
+  }
+};
+var identity = (value) => value;
+
 // src/schemas/registry.ts
 import { z } from "zod";
 var scalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
@@ -1608,7 +1679,6 @@ var jsonValue = z.lazy(() => z.union([scalar, z.array(jsonValue), z.record(z.str
 var jsonRecord = z.record(z.string(), jsonValue);
 var emptyObject = z.strictObject({});
 var optionalNullableString = z.string().nullable().optional();
-var optionalNullableNumber = z.number().nullable().optional();
 var optionalNullableBoolean = z.boolean().nullable().optional();
 var availableCashItemSchema = z.strictObject({
   accountNumber: z.string(),
@@ -1998,48 +2068,6 @@ async function* mapAsync(source, mapper) {
   for await (const item of source) yield mapper(item);
 }
 
-// src/operations.ts
-var OperationClient = class {
-  constructor(http, raw, validateRaw, endpoints) {
-    this.http = http;
-    this.raw = raw;
-    this.validateRaw = validateRaw;
-    this.endpoints = endpoints;
-  }
-  http;
-  raw;
-  validateRaw;
-  endpoints;
-  async execute(operation, params) {
-    return operation.normalize(await this.executeRaw(operation, params), params);
-  }
-  async executeRaw(operation, params) {
-    const timeoutMs = operation.transport === "mapper-query" ? operation.timeoutMs?.(params) : void 0;
-    const raw = operation.transport === "rest" ? await this.http.request(
-      operation.method ?? "GET",
-      this.resolvePath(operation, params),
-      operation.body?.(params),
-      operation.query?.(params)
-    ) : await this.raw.query(
-      operation.payload(params),
-      timeoutMs === void 0 ? {} : { timeoutMs }
-    );
-    return operation.schemaName ? this.validateRaw(operation.schemaName, raw) : raw;
-  }
-  stream(operation, params) {
-    return toSubscription(this.raw.subscribeResource(operation.payload(params))).map((raw) => operation.normalize(operation.schemaName ? this.validateRaw(operation.schemaName, raw) : raw, params));
-  }
-  resolvePath(operation, params) {
-    if (operation.endpoint) {
-      if (!this.endpoints) throw new Error(`Operation ${operation.name} needs an endpoint resolver.`);
-      return this.endpoints.resolve(operation.endpoint, operation.pathParams?.(params));
-    }
-    if (!operation.path) throw new Error(`REST operation ${operation.name} needs a path or endpoint.`);
-    return typeof operation.path === "function" ? operation.path(params) : operation.path;
-  }
-};
-var identity = (value) => value;
-
 // src/client-runtime.ts
 var ClientRuntime = class {
   constructor(http, endpoints, raw, validateRaw, accountIdentity) {
@@ -2049,7 +2077,7 @@ var ClientRuntime = class {
     this.validateRaw = validateRaw;
     this.accountIdentity = accountIdentity;
     this.resources = new ResourceClient(http, endpoints, raw, validateRaw);
-    this.operations = new OperationClient(http, raw, validateRaw, endpoints);
+    this.operations = new OperationClient(http, validateRaw, endpoints);
   }
   http;
   endpoints;
@@ -2164,7 +2192,10 @@ var accountOperations = {
   session: endpoint("auth.session", "auth.session"),
   accountSettings: endpoint("auth.account", "auth.account"),
   personalDetails: rest("account.personalDetails", "/api/v1/customer/personal-details"),
-  relationships: rest("account.relationships", "/api/v1/customer/relationships/detailed"),
+  relationships: {
+    ...rest("account.relationships", "/api/v1/customer/relationships/detailed"),
+    normalize: (raw) => normalizeAccountRelationships(raw)
+  },
   cardsHome: rest("account.cardsHome", "/api/v1/card/cards/home")
 };
 var boardOperations = {
@@ -2201,7 +2232,10 @@ var discoveryOperations = {
     path: ({ isin, exchange }) => `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`,
     normalize: (raw) => normalizeInstrumentStatus(raw)
   },
-  watchlists: rest("discovery.watchlists", "/api-gateway/watchlists/api/v2/watchlists"),
+  watchlists: {
+    ...rest("discovery.watchlists", "/api-gateway/watchlists/api/v2/watchlists"),
+    normalize: (raw) => arrayPayload(raw).map((watchlist) => normalizeWatchlist(watchlist))
+  },
   watchlistItems: {
     transport: "rest",
     name: "discovery.watchlists.items",
@@ -2234,12 +2268,6 @@ var customerOperations = {
     normalize: normalizeIbanInfo
   }
 };
-var operationCatalog = [
-  ...Object.values(accountOperations),
-  ...Object.values(boardOperations),
-  ...Object.values(discoveryOperations),
-  ...Object.values(customerOperations)
-];
 function rest(name, path) {
   return { transport: "rest", name, schemaName: name, path, normalize: identity };
 }
@@ -2277,6 +2305,9 @@ var AccountApi = class {
     return this.operations.executeRaw(accountOperations.personalDetails, {});
   }
   relationships() {
+    return this.operations.execute(accountOperations.relationships, {});
+  }
+  rawRelationships() {
     return this.operations.executeRaw(accountOperations.relationships, {});
   }
   cardsHome() {
@@ -2383,15 +2414,14 @@ var DiscoveryApi = class {
     return this.operations.executeRaw(discoveryOperations.instrumentStatus, { isin, exchange });
   }
   watchlists() {
-    return this.rawWatchlists();
+    return this.operations.execute(discoveryOperations.watchlists, {});
   }
   async cloudWatchlist(options = {}) {
-    const watchlist = arrayPayload(await this.rawWatchlists())[0];
+    const watchlist = (await this.watchlists())[0];
     if (!watchlist) return void 0;
-    const normalized = normalizeWatchlist(watchlist);
-    if (!normalized.id) return normalized;
-    const items = arrayPayload(await this.rawWatchlistItems(normalized.id, options));
-    return normalizeWatchlist(watchlist, items);
+    if (!watchlist.id) return watchlist;
+    const items = arrayPayload(await this.rawWatchlistItems(watchlist.id, options));
+    return normalizeWatchlist(watchlist.raw, items);
   }
   rawWatchlistItems(watchlistId, options = {}) {
     return this.operations.executeRaw(discoveryOperations.watchlistItems, {
@@ -2876,19 +2906,6 @@ var MapperRequestError = class extends TradeRepublicProtocolError {
   connectionLoss;
   outcomeUnknown;
 };
-var MapperConnectionLostError = class extends MapperRequestError {
-  constructor(event) {
-    super(
-      "WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.",
-      "disconnect",
-      "sent",
-      event
-    );
-    this.event = event;
-    this.name = "MapperConnectionLostError";
-  }
-  event;
-};
 var MapperConnection = class {
   constructor(options) {
     this.options = options;
@@ -3198,8 +3215,7 @@ var MapperConnection = class {
     for (const state of [...this.subscriptions.values()]) {
       if (!state.sent || state.replayOnReconnect) continue;
       const event = this.outage?.disconnectEvent;
-      const error = reason === "disconnect" && event ? new MapperConnectionLostError(event) : requestError(reason, "sent", event, cause);
-      this.fail(state, error);
+      this.fail(state, requestError(reason, "sent", event, cause));
     }
   }
 };
@@ -3309,13 +3325,6 @@ var RawApi = class {
   }
   subscribe(topic, payload = {}, options = {}) {
     return this.subscribeResource({ ...asObject(payload), type: topic }, options);
-  }
-  subscribeLegacy(topic, payload = {}, options = {}) {
-    const operation = options.operation ?? classifyMapperOperation({ type: topic });
-    return this.openSubscription(
-      JSON.stringify({ type: "subscribe", topic, payload, token: this.getSession()?.sessionToken }),
-      { replayOnReconnect: operation === "mutation" ? false : options.replayOnReconnect }
-    );
   }
   subscribeResource(payload, options = {}) {
     const operation = options.operation ?? classifyMapperOperation(payload);
@@ -3902,9 +3911,9 @@ var OrdersApi = class {
         if (result.done || "timedOut" in result && result.timedOut) break;
         const raw = this.validateRaw("orders.submit", result.value);
         throwResourceErrors(raw, "simpleCreateOrder");
-        updates.push(raw);
-        const status = orderMutationStatus(raw);
-        const orderId = firstStringAtPaths(raw, ["orderId"], ["id"], ["order.id"]);
+        const update = normalizeOrderMutationUpdate(raw);
+        updates.push(update);
+        const { status, orderId } = update;
         if (status === "succeeded" || orderId && !status) {
           return { status: "succeeded", orderId, clientProcessId: order.clientProcessId, updates, raw };
         }
@@ -3914,7 +3923,7 @@ var OrdersApi = class {
             ...orderId ? { orderId } : {},
             clientProcessId: order.clientProcessId,
             updates,
-            error: firstValueAtPaths(raw, ["error"], ["errors"], ["message"]),
+            error: update.error ?? normalizeOrderMutationError(void 0, update.message),
             raw
           };
         }
@@ -3929,7 +3938,7 @@ var OrdersApi = class {
         outcomeReason: mutationOutcomeReason(error),
         ...error.connectionLoss ? { connectionLoss: error.connectionLoss } : {},
         error,
-        raw: updates.at(-1)
+        raw: updates.at(-1)?.raw
       };
     } finally {
       subscription.close();
@@ -3952,16 +3961,17 @@ var OrdersApi = class {
         if (result.done || "timedOut" in result && result.timedOut) break;
         const raw = this.validateRaw("orders.cancel", result.value);
         throwResourceErrors(raw, "cancelOrder");
-        updates.push(raw);
-        const status = orderMutationStatus(raw);
-        const resolvedOrderId = firstStringAtPaths(raw, ["orderId"], ["id"]) ?? id;
+        const update = normalizeOrderMutationUpdate(raw);
+        updates.push(update);
+        const { status } = update;
+        const resolvedOrderId = update.orderId ?? id;
         if (status === "succeeded") return { orderId: resolvedOrderId, status, updates, raw };
         if (status === "failed") {
           return {
             orderId: resolvedOrderId,
             status,
             updates,
-            error: firstValueAtPaths(raw, ["error"], ["errors"], ["message"]),
+            error: update.error ?? normalizeOrderMutationError(void 0, update.message),
             raw
           };
         }
@@ -3976,7 +3986,7 @@ var OrdersApi = class {
         outcomeReason: mutationOutcomeReason(error),
         ...error.connectionLoss ? { connectionLoss: error.connectionLoss } : {},
         error,
-        raw: updates.at(-1)
+        raw: updates.at(-1)?.raw
       };
     } finally {
       subscription.close();
@@ -4114,12 +4124,52 @@ function normalizeOrderFees(raw) {
 function isPreparedOrder(value) {
   return Boolean(value && typeof value === "object" && "parameters" in value && "clientProcessId" in value && "secAccNo" in value);
 }
+var ORDER_MUTATION_STATUSES = [
+  "received",
+  "waiting",
+  "confirmationNeeded",
+  "succeeded",
+  "failed"
+];
 function orderMutationStatus(value) {
   const status = firstStringAtPaths(value, ["status"], ["state"], ["result.status"]);
   if (!status) return void 0;
   const normalized = status.replaceAll("_", "").replaceAll("-", "").toLowerCase();
   if (normalized === "confirmationneeded") return "confirmationNeeded";
-  return normalized;
+  return ORDER_MUTATION_STATUSES.find((candidate) => candidate.toLowerCase() === normalized);
+}
+function normalizeOrderMutationUpdate(value) {
+  const status = orderMutationStatus(value);
+  if (!status) throw new TradeRepublicProtocolError("Trade Republic returned an order mutation update without a known status.");
+  const rawError = firstValueAtPaths(value, ["error"], ["errors"]);
+  const message2 = firstStringAtPaths(value, ["message"]);
+  return {
+    status,
+    orderId: firstStringAtPaths(value, ["orderId"], ["id"], ["order", "id"], ["order.id"]),
+    message: message2,
+    error: rawError === void 0 ? void 0 : normalizeOrderMutationError(rawError, message2),
+    raw: value
+  };
+}
+function normalizeOrderMutationError(value, fallbackMessage) {
+  const record2 = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawDetails = record2.details;
+  const detailsRecord = rawDetails && typeof rawDetails === "object" && !Array.isArray(rawDetails) ? rawDetails : void 0;
+  const details = detailsRecord ? {
+    exchangeId: firstStringAtPaths(detailsRecord, ["exchangeId"]),
+    isin: firstStringAtPaths(detailsRecord, ["isin"]),
+    orderId: firstStringAtPaths(detailsRecord, ["orderId"]),
+    userId: firstStringAtPaths(detailsRecord, ["userId"]),
+    clientProcessId: firstStringAtPaths(detailsRecord, ["clientProcessId"]),
+    isNostro: typeof detailsRecord.isNostro === "boolean" ? detailsRecord.isNostro : void 0,
+    raw: rawDetails
+  } : void 0;
+  return {
+    code: firstStringAtPaths(record2, ["code"]),
+    message: typeof value === "string" ? value : firstStringAtPaths(record2, ["message"]) ?? fallbackMessage,
+    details,
+    raw: value
+  };
 }
 function mutationOutcomeReason(error) {
   switch (error.reason) {
@@ -4442,16 +4492,17 @@ var PriceAlarmsApi = class {
       this.raw.queryProtobufResource("priceAlarmNotifications", {}, pickTimeoutOptions(options))
     );
   }
-  create(options) {
+  async create(options) {
     const { timeoutMs, isin, price } = options;
     const payload = { instrumentId: isin, targetPrice: price };
-    return this.rawCreate(payload, timeoutMs === void 0 ? {} : { timeoutMs });
+    const raw = await this.rawCreate(payload, timeoutMs === void 0 ? {} : { timeoutMs });
+    return normalizePriceAlarmCreation(raw);
   }
   rawCreate(payload, options = {}) {
     return validated(this.validateRaw, "priceAlarms.create", this.raw.query({ type: "createPriceAlarm", ...payload }, pickTimeoutOptions(options)));
   }
-  cancel(id, options = {}) {
-    return this.rawCancel(id, options);
+  async cancel(id, options = {}) {
+    return normalizePriceAlarmCancellation(await this.rawCancel(id, options), id);
   }
   rawCancel(id, options = {}) {
     return validated(this.validateRaw, "priceAlarms.cancel", this.raw.query({ type: "cancelPriceAlarm", id }, pickTimeoutOptions(options)));
@@ -4794,7 +4845,6 @@ export {
   CandleQuery,
   DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS,
   FileSessionStore,
-  MapperConnectionLostError,
   MapperRequestError,
   MemorySessionStore,
   STANDARD_CANDLE_RESOLUTIONS,

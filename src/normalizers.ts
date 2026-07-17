@@ -1,4 +1,5 @@
 import type {
+  AccountRelationship,
   Asset,
   AssetDetail,
   Board,
@@ -32,6 +33,8 @@ import type {
   PortfolioChart,
   PortfolioPosition,
   PriceAlarm,
+  PriceAlarmCancellation,
+  PriceAlarmCreation,
   SavingsPlan,
   TimelineAction,
   TimelineDetail,
@@ -100,6 +103,30 @@ export function normalizeIbanInfo(value: unknown): IbanInfo {
     relationshipType: optionalString(record.relationshipType),
     raw: relationship,
   };
+}
+
+export function normalizeAccountRelationship(value: unknown): AccountRelationship {
+  const record = asRecord(value);
+  const rawBankingInfo = record.bankingInfo;
+  const bankingInfo = asRecord(rawBankingInfo);
+  const hasBankingInfo = typeof rawBankingInfo === 'object' && rawBankingInfo !== null;
+  return {
+    customerId: optionalString(record.customerId),
+    firstName: optionalString(record.firstName),
+    lastName: optionalString(record.lastName),
+    relationshipType: optionalString(record.relationshipType),
+    bankingInfo: hasBankingInfo ? {
+      iban: optionalString(bankingInfo.iban),
+      bic: optionalString(bankingInfo.bic),
+      raw: rawBankingInfo,
+    } : undefined,
+    raw: value,
+  };
+}
+
+export function normalizeAccountRelationships(value: unknown): AccountRelationship[] {
+  const relationships = asRecord(value).relationships;
+  return (Array.isArray(relationships) ? relationships : arrayPayload(value)).map(normalizeAccountRelationship);
 }
 
 export function normalizeAsset(value: unknown): Asset {
@@ -382,6 +409,24 @@ export function normalizePriceAlarm(value: unknown): PriceAlarm {
     price,
     currency,
     triggeredAt: optionalString(record.triggeredAt, record.triggered, record.notificationSentAt),
+    raw: value,
+  };
+}
+
+export function normalizePriceAlarmCreation(value: unknown): PriceAlarmCreation {
+  const record = asRecord(value);
+  return {
+    alarmId: optionalString(record.alarmId, record.priceAlarmId, record.id),
+    status: optionalString(record.status),
+    raw: value,
+  };
+}
+
+export function normalizePriceAlarmCancellation(value: unknown, requestedAlarmId: string): PriceAlarmCancellation {
+  const record = asRecord(value);
+  return {
+    alarmId: optionalString(record.alarmId, record.priceAlarmId, record.id) ?? requestedAlarmId,
+    status: optionalString(record.status),
     raw: value,
   };
 }

@@ -116,7 +116,6 @@ describe('market abstractions', () => {
     const subscription = client.market.subscribeL2OrderBook({
       assetId: 'US1',
       exchangeId: 'XETR',
-      depth: 5,
     });
 
     await expect(subscription[Symbol.asyncIterator]().next()).resolves.toEqual({

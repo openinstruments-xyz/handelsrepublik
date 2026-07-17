@@ -8,7 +8,19 @@ import {
   TradeRepublicSchemaError,
   validateRawResponse,
 } from '../src/index.js';
-import { operationCatalog } from '../src/operation-specs.js';
+import {
+  accountOperations,
+  boardOperations,
+  customerOperations,
+  discoveryOperations,
+} from '../src/operation-specs.js';
+
+const operationCatalog = [
+  ...Object.values(accountOperations),
+  ...Object.values(boardOperations),
+  ...Object.values(discoveryOperations),
+  ...Object.values(customerOperations),
+] as const;
 
 describe('schema registry', () => {
   it('validates committed raw fixtures', () => {

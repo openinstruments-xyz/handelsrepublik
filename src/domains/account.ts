@@ -1,6 +1,6 @@
 import { accountOperations, boardOperations } from '../operation-specs.js';
 import type { OperationClient } from '../operations.js';
-import type { Board } from '../types.js';
+import type { AccountRelationship, Board } from '../types.js';
 
 export class AccountApi {
   constructor(private readonly operations: OperationClient) {}
@@ -21,7 +21,11 @@ export class AccountApi {
     return this.operations.executeRaw(accountOperations.personalDetails, {});
   }
 
-  relationships(): Promise<unknown> {
+  relationships(): Promise<AccountRelationship[]> {
+    return this.operations.execute(accountOperations.relationships, {});
+  }
+
+  rawRelationships(): Promise<unknown> {
     return this.operations.executeRaw(accountOperations.relationships, {});
   }
 

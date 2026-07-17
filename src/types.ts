@@ -75,7 +75,18 @@ export interface TradeRepublicClientOptions {
 
 export type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;
 
-export interface Account {
+export interface AccountRelationshipBankingInfo {
+  iban?: string | undefined;
+  bic?: string | undefined;
+  raw: unknown;
+}
+
+export interface AccountRelationship {
+  customerId?: string | undefined;
+  firstName?: string | undefined;
+  lastName?: string | undefined;
+  relationshipType?: string | undefined;
+  bankingInfo?: AccountRelationshipBankingInfo | undefined;
   raw: unknown;
 }
 
@@ -321,10 +332,62 @@ export interface OrderPreview {
 export type OrderSubmissionStatus = 'succeeded' | 'failed' | 'outcomeUnknown';
 export type MutationOutcomeUnknownReason = 'clientClosed' | 'disconnect' | 'sendFailure' | 'sessionRefresh' | 'timeout';
 
+export type OrderMutationStatus = 'received' | 'waiting' | 'confirmationNeeded' | 'succeeded' | 'failed';
+
+export type OrderMutationErrorCode =
+  | 'cashMissing'
+  | 'currentQuoteMissing'
+  | 'exchangeClosed'
+  | 'instrumentSuspended'
+  | 'internalError'
+  | 'invalidSecurityDerivative'
+  | 'invalidSecurityNonDerivative'
+  | 'limitDenied'
+  | 'maxQuantityExceeded'
+  | 'noRefPriceAvailable'
+  | 'noRouteToMarket'
+  | 'orderAlreadyDeleted'
+  | 'orderAlreadyExists'
+  | 'orderNotFound'
+  | 'orderRejectedAtExchange'
+  | 'portfolioInactive'
+  | 'quoteMissing'
+  | 'savingsplanSharesMissingToday'
+  | 'sharesMissing'
+  | 'shortPositionNotAllowed'
+  | 'timeoutError'
+  | 'unknownInstrument'
+  | (string & {});
+
+export interface OrderMutationErrorDetails {
+  exchangeId?: string | undefined;
+  isin?: string | undefined;
+  orderId?: string | undefined;
+  userId?: string | undefined;
+  clientProcessId?: string | undefined;
+  isNostro?: boolean | undefined;
+  raw: unknown;
+}
+
+export interface OrderMutationError {
+  code?: OrderMutationErrorCode | undefined;
+  message?: string | undefined;
+  details?: OrderMutationErrorDetails | undefined;
+  raw: unknown;
+}
+
+export interface OrderMutationUpdate {
+  status: OrderMutationStatus;
+  orderId?: string | undefined;
+  message?: string | undefined;
+  error?: OrderMutationError | undefined;
+  raw: unknown;
+}
+
 interface OrderSubmissionBase {
   orderId?: string | undefined;
   clientProcessId: string;
-  updates: unknown[];
+  updates: OrderMutationUpdate[];
   raw: unknown;
 }
 
@@ -334,21 +397,21 @@ export interface OrderSubmissionSucceeded extends OrderSubmissionBase {
 
 export interface OrderSubmissionFailed extends OrderSubmissionBase {
   status: 'failed';
-  error: unknown;
+  error: OrderMutationError;
 }
 
 export interface OrderSubmissionOutcomeUnknown extends OrderSubmissionBase {
   status: 'outcomeUnknown';
   outcomeReason: MutationOutcomeUnknownReason;
   connectionLoss?: WebSocketDisconnectEvent | undefined;
-  error: unknown;
+  error: Error;
 }
 
 export type OrderSubmission = OrderSubmissionSucceeded | OrderSubmissionFailed | OrderSubmissionOutcomeUnknown;
 
 interface OrderCancellationBase {
   orderId: string;
-  updates: unknown[];
+  updates: OrderMutationUpdate[];
   raw: unknown;
 }
 
@@ -358,14 +421,14 @@ export interface OrderCancellationSucceeded extends OrderCancellationBase {
 
 export interface OrderCancellationFailed extends OrderCancellationBase {
   status: 'failed';
-  error: unknown;
+  error: OrderMutationError;
 }
 
 export interface OrderCancellationOutcomeUnknown extends OrderCancellationBase {
   status: 'outcomeUnknown';
   outcomeReason: MutationOutcomeUnknownReason;
   connectionLoss?: WebSocketDisconnectEvent | undefined;
-  error: unknown;
+  error: Error;
 }
 
 export type OrderCancellation = OrderCancellationSucceeded | OrderCancellationFailed | OrderCancellationOutcomeUnknown;
@@ -396,7 +459,7 @@ export interface OrderReplacementNotSent extends OrderReplacementBase {
   status: 'replacementNotSent';
   cancellation: OrderCancellationSucceeded;
   submission?: never;
-  error: unknown;
+  error: Error;
 }
 
 export interface OrderReplacementSucceeded extends OrderReplacementBase {
@@ -513,6 +576,20 @@ export interface PriceAlarm {
   price?: number | undefined;
   currency?: string | undefined;
   triggeredAt?: string | undefined;
+  raw: unknown;
+}
+
+export type PriceAlarmMutationStatus = 'created' | 'ok' | (string & {});
+
+export interface PriceAlarmCreation {
+  alarmId?: string | undefined;
+  status?: PriceAlarmMutationStatus | undefined;
+  raw: unknown;
+}
+
+export interface PriceAlarmCancellation {
+  alarmId: string;
+  status?: PriceAlarmMutationStatus | undefined;
   raw: unknown;
 }
 
@@ -760,10 +837,6 @@ export interface MarketQuote {
 export interface L2OrderBookOptions {
   assetId: string;
   exchangeId: string;
-  /** Retained for source compatibility; the protobuf L2 resource chooses the published depth. */
-  depth?: number | undefined;
-  /** Retained for source compatibility; the protobuf L2 resource does not accept client throttling. */
-  throttleMs?: number | undefined;
 }
 
 export interface L2Venue {

@@ -1275,7 +1275,6 @@ async function probeOrderBookVenue(assetId, venue, generation) {
   const subscription = state.client.market.subscribeL2OrderBook({
     assetId,
     exchangeId: venue.exchangeId,
-    depth: 5,
   });
   const iterator = subscription[Symbol.asyncIterator]();
   const deadline = Date.now() + l2ProbeTimeoutMs;

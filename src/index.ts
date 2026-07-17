@@ -12,7 +12,7 @@ export {
 } from './candle-resolutions.js';
 export { collectTradeRepublicWebContext } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
-export { MapperConnectionLostError, MapperRequestError } from './mapper-connection.js';
+export { MapperRequestError } from './mapper-connection.js';
 export { classifyMapperOperation } from './raw.js';
 export type { MapperDeliveryState, MapperRequestFailureReason } from './mapper-connection.js';
 export type { RawOperationKind, RawQueryOptions, RawSubscription, RawSubscriptionOptions } from './raw.js';
@@ -27,6 +27,8 @@ export type {
 } from './waf.js';
 export type { ProtobufStreamSpec, QuerySpec, StreamSpec, Subscription } from './resource.js';
 export type {
+  AccountRelationship,
+  AccountRelationshipBankingInfo,
   Asset,
   AssetDetail,
   AssetSearchType,
@@ -74,6 +76,11 @@ export type {
   OrderExpiry,
   OrderFeeItem,
   OrderMode,
+  OrderMutationError,
+  OrderMutationErrorCode,
+  OrderMutationErrorDetails,
+  OrderMutationStatus,
+  OrderMutationUpdate,
   OrderPriceOptions,
   OrderPriceQuote,
   OrderPreview,
@@ -100,6 +107,9 @@ export type {
   PortfolioChart,
   PortfolioPosition,
   PriceAlarm,
+  PriceAlarmCancellation,
+  PriceAlarmCreation,
+  PriceAlarmMutationStatus,
   PrivateMarketsOrdersOptions,
   RequestOptions,
   SavingsPlan,

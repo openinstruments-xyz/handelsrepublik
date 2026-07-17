@@ -2,20 +2,25 @@ import type { RestOperation } from './operations.js';
 import { identity } from './operations.js';
 import {
   arrayPayload,
+  normalizeAccountRelationships,
   normalizeBoard,
   normalizeExchangeDetails,
   normalizeExchangeSchedule,
   normalizeIbanInfo,
   normalizeInstrumentStatus,
+  normalizeWatchlist,
 } from './normalizers.js';
-import type { Board, ExchangeDetails, ExchangeSchedule, IbanInfo, InstrumentStatus } from './types.js';
+import type { AccountRelationship, Board, ExchangeDetails, ExchangeSchedule, IbanInfo, InstrumentStatus, Watchlist } from './types.js';
 
 export const accountOperations = {
   current: endpoint('auth.account', 'auth.account'),
   session: endpoint('auth.session', 'auth.session'),
   accountSettings: endpoint('auth.account', 'auth.account'),
   personalDetails: rest('account.personalDetails', '/api/v1/customer/personal-details'),
-  relationships: rest('account.relationships', '/api/v1/customer/relationships/detailed'),
+  relationships: {
+    ...rest('account.relationships', '/api/v1/customer/relationships/detailed'),
+    normalize: (raw: unknown): AccountRelationship[] => normalizeAccountRelationships(raw),
+  } satisfies RestOperation<Record<string, never>, AccountRelationship[]>,
   cardsHome: rest('account.cardsHome', '/api/v1/card/cards/home'),
 } as const;
 
@@ -54,7 +59,10 @@ export const discoveryOperations = {
     path: ({ isin, exchange }: { isin: string; exchange: string }) => `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`,
     normalize: (raw: unknown): InstrumentStatus => normalizeInstrumentStatus(raw),
   } satisfies RestOperation<{ isin: string; exchange: string }, InstrumentStatus>,
-  watchlists: rest('discovery.watchlists', '/api-gateway/watchlists/api/v2/watchlists'),
+  watchlists: {
+    ...rest('discovery.watchlists', '/api-gateway/watchlists/api/v2/watchlists'),
+    normalize: (raw: unknown): Watchlist[] => arrayPayload(raw).map((watchlist) => normalizeWatchlist(watchlist)),
+  } satisfies RestOperation<Record<string, never>, Watchlist[]>,
   watchlistItems: {
     transport: 'rest',
     name: 'discovery.watchlists.items',
@@ -88,13 +96,6 @@ export const customerOperations = {
     normalize: normalizeIbanInfo,
   } satisfies RestOperation<Record<string, never>, IbanInfo>,
 } as const;
-
-export const operationCatalog = [
-  ...Object.values(accountOperations),
-  ...Object.values(boardOperations),
-  ...Object.values(discoveryOperations),
-  ...Object.values(customerOperations),
-] as const;
 
 interface WatchlistItemParams {
   watchlistId: string;

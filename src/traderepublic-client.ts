@@ -36,6 +36,8 @@ import {
   normalizePortfolio,
   normalizePortfolioChart,
   normalizePriceAlarm,
+  normalizePriceAlarmCancellation,
+  normalizePriceAlarmCreation,
   normalizeSavingsPlan,
   normalizeTimelineAction,
   normalizeTimelineDetail,
@@ -75,6 +77,10 @@ import type {
   OrderCancellation,
   CreateOrderOptions,
   OrderFeeItem,
+  OrderMutationError,
+  OrderMutationErrorDetails,
+  OrderMutationStatus,
+  OrderMutationUpdate,
   OrderPriceOptions,
   OrderPriceQuote,
   OrderPreview,
@@ -88,6 +94,8 @@ import type {
   PortfolioChart,
   PrivateMarketsOrdersOptions,
   PriceAlarm,
+  PriceAlarmCancellation,
+  PriceAlarmCreation,
   SavingsPlan,
   Session,
   TimelineAction,
@@ -634,7 +642,7 @@ export class OrdersApi {
     };
     const subscription = this.raw.subscribeResource(payload, { operation: 'mutation' });
     const iterator = subscription[Symbol.asyncIterator]();
-    const updates: unknown[] = [];
+    const updates: OrderMutationUpdate[] = [];
     const deadline = Date.now() + timeoutMs;
     try {
       while (Date.now() < deadline) {
@@ -643,9 +651,9 @@ export class OrdersApi {
         if (result.done || ('timedOut' in result && result.timedOut)) break;
         const raw = this.validateRaw('orders.submit', result.value);
         throwResourceErrors(raw, 'simpleCreateOrder');
-        updates.push(raw);
-        const status = orderMutationStatus(raw);
-        const orderId = firstStringAtPaths(raw, ['orderId'], ['id'], ['order.id']);
+        const update = normalizeOrderMutationUpdate(raw);
+        updates.push(update);
+        const { status, orderId } = update;
         if (status === 'succeeded' || (orderId && !status)) {
           return { status: 'succeeded', orderId, clientProcessId: order.clientProcessId, updates, raw };
         }
@@ -655,7 +663,7 @@ export class OrdersApi {
             ...(orderId ? { orderId } : {}),
             clientProcessId: order.clientProcessId,
             updates,
-            error: firstValueAtPaths(raw, ['error'], ['errors'], ['message']),
+            error: update.error ?? normalizeOrderMutationError(undefined, update.message),
             raw,
           };
         }
@@ -670,7 +678,7 @@ export class OrdersApi {
         outcomeReason: mutationOutcomeReason(error),
         ...(error.connectionLoss ? { connectionLoss: error.connectionLoss } : {}),
         error,
-        raw: updates.at(-1),
+        raw: updates.at(-1)?.raw,
       };
     } finally {
       subscription.close();
@@ -685,7 +693,7 @@ export class OrdersApi {
       { operation: 'mutation' },
     );
     const iterator = subscription[Symbol.asyncIterator]();
-    const updates: unknown[] = [];
+    const updates: OrderMutationUpdate[] = [];
     const deadline = Date.now() + timeoutMs;
     try {
       while (Date.now() < deadline) {
@@ -694,16 +702,17 @@ export class OrdersApi {
         if (result.done || ('timedOut' in result && result.timedOut)) break;
         const raw = this.validateRaw('orders.cancel', result.value);
         throwResourceErrors(raw, 'cancelOrder');
-        updates.push(raw);
-        const status = orderMutationStatus(raw);
-        const resolvedOrderId = firstStringAtPaths(raw, ['orderId'], ['id']) ?? id;
+        const update = normalizeOrderMutationUpdate(raw);
+        updates.push(update);
+        const { status } = update;
+        const resolvedOrderId = update.orderId ?? id;
         if (status === 'succeeded') return { orderId: resolvedOrderId, status, updates, raw };
         if (status === 'failed') {
           return {
             orderId: resolvedOrderId,
             status,
             updates,
-            error: firstValueAtPaths(raw, ['error'], ['errors'], ['message']),
+            error: update.error ?? normalizeOrderMutationError(undefined, update.message),
             raw,
           };
         }
@@ -718,7 +727,7 @@ export class OrdersApi {
         outcomeReason: mutationOutcomeReason(error),
         ...(error.connectionLoss ? { connectionLoss: error.connectionLoss } : {}),
         error,
-        raw: updates.at(-1),
+        raw: updates.at(-1)?.raw,
       };
     } finally {
       subscription.close();
@@ -881,12 +890,59 @@ function isPreparedOrder(value: CreateOrderOptions | PreparedOrder): value is Pr
   return Boolean(value && typeof value === 'object' && 'parameters' in value && 'clientProcessId' in value && 'secAccNo' in value);
 }
 
-function orderMutationStatus(value: unknown): string | undefined {
+const ORDER_MUTATION_STATUSES: readonly OrderMutationStatus[] = [
+  'received',
+  'waiting',
+  'confirmationNeeded',
+  'succeeded',
+  'failed',
+];
+
+function orderMutationStatus(value: unknown): OrderMutationStatus | undefined {
   const status = firstStringAtPaths(value, ['status'], ['state'], ['result.status']);
   if (!status) return undefined;
   const normalized = status.replaceAll('_', '').replaceAll('-', '').toLowerCase();
   if (normalized === 'confirmationneeded') return 'confirmationNeeded';
-  return normalized;
+  return ORDER_MUTATION_STATUSES.find((candidate) => candidate.toLowerCase() === normalized);
+}
+
+function normalizeOrderMutationUpdate(value: unknown): OrderMutationUpdate {
+  const status = orderMutationStatus(value);
+  if (!status) throw new TradeRepublicProtocolError('Trade Republic returned an order mutation update without a known status.');
+  const rawError = firstValueAtPaths(value, ['error'], ['errors']);
+  const message = firstStringAtPaths(value, ['message']);
+  return {
+    status,
+    orderId: firstStringAtPaths(value, ['orderId'], ['id'], ['order', 'id'], ['order.id']),
+    message,
+    error: rawError === undefined ? undefined : normalizeOrderMutationError(rawError, message),
+    raw: value,
+  };
+}
+
+function normalizeOrderMutationError(value: unknown, fallbackMessage?: string): OrderMutationError {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const rawDetails = record.details;
+  const detailsRecord = rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails)
+    ? rawDetails as Record<string, unknown>
+    : undefined;
+  const details: OrderMutationErrorDetails | undefined = detailsRecord ? {
+    exchangeId: firstStringAtPaths(detailsRecord, ['exchangeId']),
+    isin: firstStringAtPaths(detailsRecord, ['isin']),
+    orderId: firstStringAtPaths(detailsRecord, ['orderId']),
+    userId: firstStringAtPaths(detailsRecord, ['userId']),
+    clientProcessId: firstStringAtPaths(detailsRecord, ['clientProcessId']),
+    isNostro: typeof detailsRecord.isNostro === 'boolean' ? detailsRecord.isNostro : undefined,
+    raw: rawDetails,
+  } : undefined;
+  return {
+    code: firstStringAtPaths(record, ['code']),
+    message: typeof value === 'string' ? value : firstStringAtPaths(record, ['message']) ?? fallbackMessage,
+    details,
+    raw: value,
+  };
 }
 
 function mutationOutcomeReason(error: MapperRequestError): MutationOutcomeUnknownReason {
@@ -1269,18 +1325,19 @@ export class PriceAlarmsApi {
     );
   }
 
-  create(options: { isin: string; price: number; timeoutMs?: number }): Promise<unknown> {
+  async create(options: { isin: string; price: number; timeoutMs?: number }): Promise<PriceAlarmCreation> {
     const { timeoutMs, isin, price } = options;
     const payload = { instrumentId: isin, targetPrice: price };
-    return this.rawCreate(payload, timeoutMs === undefined ? {} : { timeoutMs });
+    const raw = await this.rawCreate(payload, timeoutMs === undefined ? {} : { timeoutMs });
+    return normalizePriceAlarmCreation(raw);
   }
 
   rawCreate(payload: Record<string, unknown>, options: { timeoutMs?: number } = {}): Promise<unknown> {
     return validated(this.validateRaw, 'priceAlarms.create', this.raw.query({ type: 'createPriceAlarm', ...payload }, pickTimeoutOptions(options)));
   }
 
-  cancel(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return this.rawCancel(id, options);
+  async cancel(id: string, options: { timeoutMs?: number } = {}): Promise<PriceAlarmCancellation> {
+    return normalizePriceAlarmCancellation(await this.rawCancel(id, options), id);
   }
 
   rawCancel(id: string, options: { timeoutMs?: number } = {}): Promise<unknown> {

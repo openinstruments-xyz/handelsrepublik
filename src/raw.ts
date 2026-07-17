@@ -61,14 +61,6 @@ export class RawApi {
     return this.subscribeResource({ ...asObject(payload), type: topic }, options);
   }
 
-  subscribeLegacy(topic: string, payload: unknown = {}, options: RawSubscriptionOptions = {}): RawSubscription {
-    const operation = options.operation ?? classifyMapperOperation({ type: topic });
-    return this.openSubscription(
-      JSON.stringify({ type: 'subscribe', topic, payload, token: this.getSession()?.sessionToken }),
-      { replayOnReconnect: operation === 'mutation' ? false : options.replayOnReconnect },
-    );
-  }
-
   subscribeResource(payload: Record<string, unknown>, options: RawSubscriptionOptions = {}): RawSubscription {
     const operation = options.operation ?? classifyMapperOperation(payload);
     return this.openSubscription(

@@ -23,7 +23,6 @@ const jsonValue: ZodType<unknown> = z.lazy(() => z.union([scalar, z.array(jsonVa
 const jsonRecord = z.record(z.string(), jsonValue);
 const emptyObject = z.strictObject({});
 const optionalNullableString = z.string().nullable().optional();
-const optionalNullableNumber = z.number().nullable().optional();
 const optionalNullableBoolean = z.boolean().nullable().optional();
 
 const availableCashItemSchema = z.strictObject({
@@ -336,8 +335,6 @@ export const schemaRegistry = [
   entry('payments.paymentMethods', 'Payment methods', 'rest', 'read', 'GET /api/v2/payment/methods', jsonValue),
   entry('payments.iban', 'IBAN information', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', ibanRelationshipsSchema),
 ] as const satisfies readonly TradeRepublicSchemaEntry[];
-
-export type SchemaName = (typeof schemaRegistry)[number]['name'];
 
 const schemasByName = new Map<string, TradeRepublicSchemaEntry>(schemaRegistry.map((item) => [item.name, item]));
 

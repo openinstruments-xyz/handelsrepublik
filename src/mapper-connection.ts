@@ -34,19 +34,6 @@ export class MapperRequestError extends TradeRepublicProtocolError {
   }
 }
 
-/** @deprecated Use MapperRequestError and inspect reason/deliveryState. */
-export class MapperConnectionLostError extends MapperRequestError {
-  constructor(public readonly event: WebSocketDisconnectEvent) {
-    super(
-      'WebSocket disconnected after a non-replayable mutation was sent. The broker outcome is unknown.',
-      'disconnect',
-      'sent',
-      event,
-    );
-    this.name = 'MapperConnectionLostError';
-  }
-}
-
 export interface MapperSubscription extends AsyncIterable<unknown> {
   readonly deliveryState: MapperDeliveryState;
   close(): void;
@@ -426,10 +413,7 @@ export class MapperConnection {
     for (const state of [...this.subscriptions.values()]) {
       if (!state.sent || state.replayOnReconnect) continue;
       const event = this.outage?.disconnectEvent;
-      const error = reason === 'disconnect' && event
-        ? new MapperConnectionLostError(event)
-        : requestError(reason, 'sent', event, cause);
-      this.fail(state, error);
+      this.fail(state, requestError(reason, 'sent', event, cause));
     }
   }
 }
