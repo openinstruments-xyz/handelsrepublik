@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from './test-compat.js';
 import { TradeRepublicClient } from '../src/index.js';
+import {
+  decodeMapperProtobufRequest,
+  encodeMapperProtobufDataEnvelope,
+  encodeMapperProtobufTopicPayload,
+} from '../src/mapper-protobuf.js';
 import { FakeSocket } from './fake-socket.js';
 import type { Session, WebSocketLike } from '../src/types.js';
 
@@ -191,7 +196,13 @@ describe('public convenience methods', () => {
     const client = TradeRepublicClient.create({
       rawSchemaValidation: false,
       websocketFactory: () => {
-        const socket = new ManualSocket();
+        const socket = new ManualSocket((binary) => {
+          const request = decodeMapperProtobufRequest(binary);
+          socket.emit('message', encodeMapperProtobufDataEnvelope(request.subscriptionId,
+            encodeMapperProtobufTopicPayload('L2', {
+              instrumentId: 'US3.XETR', currency: 'EUR', bid: [{ price: 10, size: 2 }], ask: [{ price: 11, size: 3 }], timestamp: 1,
+            })), true);
+        });
         sockets.push(socket);
         return socket;
       },
@@ -210,20 +221,19 @@ describe('public convenience methods', () => {
     });
     direct.close();
 
-    const alias = client.market.liveFeed('US2', { exchangeId: 'XETRA' });
+    const alias = client.market.liveFeed('US2', { exchangeId: 'XETR' });
     connect(sockets[1]);
     expect(subscriptionPayload(sockets[1]?.sent[1])).toMatchObject({
-      isin: 'US2', exchangeId: 'XETRA', type: 'tickerV3',
+      isin: 'US2', exchangeId: 'XETR', type: 'tickerV3',
     });
     alias.close();
 
-    const orderBook = client.market.l2OrderBook('US3', 'LSX', { depth: 3, throttleMs: 250 });
+    const orderBook = client.market.l2OrderBook('US3', 'XETR', { depth: 3, throttleMs: 250 });
     connect(sockets[2]);
-    expect(subscriptionPayload(sockets[2]?.sent[1])).toEqual({
-      isin: 'US3', exchangeId: 'LSX', depth: 3, throttleMs: 250, type: 'L2',
+    expect(decodeMapperProtobufRequest(sockets[2]!.binarySent[0]!)).toEqual({
+      subscriptionId: 1, topic: 'L2', instrumentId: { isin: 'US3', exchangeId: 'XETR' },
     });
     const bookNext = orderBook[Symbol.asyncIterator]().next();
-    sockets[2]?.emit('message', '1 L2 {"bid":[{"price":10,"size":2}],"ask":[{"price":11,"size":3}]}');
     await expect(bookNext).resolves.toEqual({
       done: false,
       value: expect.objectContaining({ bids: [[10, 2]], asks: [[11, 3]] }),
@@ -254,8 +264,21 @@ function accountPairsPayload(): unknown {
 
 class ManualSocket extends EventEmitter implements WebSocketLike {
   readonly sent: string[] = [];
+  readonly binarySent: Uint8Array[] = [];
+
+  constructor(private readonly onBinarySubscribe?: (payload: Uint8Array) => void) {
+    super();
+  }
 
   send(data: string | ArrayBuffer | Buffer): void {
+    if (typeof data !== 'string') {
+      const payload = data instanceof ArrayBuffer
+        ? new Uint8Array(data)
+        : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      this.binarySent.push(payload);
+      queueMicrotask(() => this.onBinarySubscribe?.(payload));
+      return;
+    }
     this.sent.push(String(data));
   }
 

@@ -28,7 +28,8 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `portfolio.savingsPlans` | `read` | `websocket` | `savingsPlans` |  |
 | `portfolio.privateMarketsPositions` | `read` | `websocket` | `privateMarketsPositions` |  |
 | `portfolio.portfolioChart` | `read` | `rest` | `GET /api-gateway/portfolio-chart/v2/chart` |  |
-| `market.subscriptions` | `read` | `websocket` | `accountPairs` |  |
+| `market.subscriptions` | `read` | `rest` | `GET /api-gateway/subscriptions/api/v1/subscriptions` |  |
+| `market.entitlements` | `read` | `rest` | `GET /api-gateway/subscriptions/api/v1/entitlements/topics/{topic}` |  |
 | `market.candles` | `read` | `websocket` | `aggregateHistoryLightV2` | stock, crypto |
 | `market.quote` | `read` | `websocket` | `ticker` | stock, crypto |
 | `market.liveFeed` | `read` | `websocket` | `tickerV3` | stock, crypto |

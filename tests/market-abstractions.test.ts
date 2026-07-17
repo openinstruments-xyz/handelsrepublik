@@ -1,8 +1,12 @@
-import { EventEmitter } from 'node:events';
 import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
 import { TradeRepublicClient } from '../src/index.js';
-import type { WebSocketLike } from '../src/types.js';
+import {
+  decodeMapperProtobufRequest,
+  encodeMapperProtobufDataEnvelope,
+  encodeMapperProtobufStatusEnvelope,
+  encodeMapperProtobufTopicPayload,
+} from '../src/mapper-protobuf.js';
 import { FakeSocket } from './fake-socket.js';
 
 describe('market abstractions', () => {
@@ -36,29 +40,74 @@ describe('market abstractions', () => {
     ]);
   });
 
-  it('can disable ResourceClient raw schema validation', async () => {
-    const sockets: FakeSocket[] = [];
+  it('reads market subscriptions and topic entitlements from REST', async () => {
+    const calls: string[] = [];
+    let socketsOpened = 0;
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
-      websocketFactory: () => {
-        const socket = new FakeSocket((payload, id) => {
-          assert.equal(payload.type, 'accountPairs');
-          socket.emit('message', `${id} accountPairs ${JSON.stringify({ unexpected: true })}`);
+      fetch: (async (input: URL | RequestInfo) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes('/subscriptions/api/v1/subscriptions')) {
+          return jsonResponse([{
+            id: 'subscription-1',
+            plan: {
+              id: 'plan-1', name: 'Xetra', description: 'Orderbook', product: 'XETR_L2', group: 'MARKET_DATA',
+              price: { value: '0.0', currency: 'EUR' }, termPeriod: 'P1Y6M',
+              tier: { level: 2, group: 'XETR' },
+            },
+            createdAt: '2026-07-02T14:50:36.023750Z',
+            terms: [{ id: 'term-1', activatedAt: '2026-07-02T14:50:36.023750Z', validUntil: '2028-01-02T15:50:35.981Z' }],
+          }]);
+        }
+        return jsonResponse({
+          kind: 'TOPIC',
+          name: 'L2',
+          entitlements: [{
+            query: [{ name: 'exchangeId', value: 'XETR' }],
+            planId: 'plan-1', subscribedUntil: '2028-01-02T15:50:35.981Z', isSubscribed: true, isCanceled: false,
+          }],
         });
-        sockets.push(socket);
-        return socket;
+      }) as typeof fetch,
+      websocketFactory: () => {
+        socketsOpened += 1;
+        return new FakeSocket();
       },
     });
 
-    await expect(client.market.subscriptions()).resolves.toEqual([]);
-    expect(sockets[0]?.sent[1]).toBe('sub 1 {"type":"accountPairs"}');
+    await expect(client.market.subscriptions()).resolves.toEqual([
+      expect.objectContaining({
+        id: 'subscription-1',
+        plan: expect.objectContaining({ product: 'XETR_L2', price: expect.objectContaining({ value: '0.0', currency: 'EUR' }) }),
+        terms: [expect.objectContaining({ id: 'term-1', validUntil: '2028-01-02T15:50:35.981Z' })],
+      }),
+    ]);
+    const entitlements = await client.market.entitlements('L2', { exchangeIds: ['LSX', 'XETR'] });
+    expect(entitlements.entitlements).toEqual([
+      expect.objectContaining({ query: [expect.objectContaining({ value: 'XETR' })], isSubscribed: true }),
+    ]);
+    expect(entitlements.entitlements).toHaveLength(1);
+    expect(new URL(calls[0]!).pathname).toBe('/api-gateway/subscriptions/api/v1/subscriptions');
+    const entitlementUrl = new URL(calls[1]!);
+    expect(entitlementUrl.pathname).toBe('/api-gateway/subscriptions/api/v1/entitlements/topics/L2');
+    expect(entitlementUrl.searchParams.get('exchangeId')).toBe('LSX,XETR');
+    expect(socketsOpened).toBe(0);
   });
 
-  it('subscribes to typed l2 order book streams', async () => {
-    const sockets: LocalFakeSocket[] = [];
+  it('subscribes to typed l2 order book streams over protobuf', async () => {
+    const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
       websocketFactory: () => {
-        const socket = new LocalFakeSocket();
+        const socket = new FakeSocket(undefined, (binary) => {
+          const request = decodeMapperProtobufRequest(binary);
+          const payload = encodeMapperProtobufTopicPayload('L2', {
+            instrumentId: 'US1.XETR',
+            currency: 'EUR',
+            bid: [{ price: 10, size: 2 }],
+            ask: [{ price: 11, size: 3 }],
+            timestamp: 1_784_294_157_408,
+          });
+          socket.emit('message', encodeMapperProtobufDataEnvelope(request.subscriptionId, payload), true);
+        });
         sockets.push(socket);
         return socket;
       },
@@ -66,33 +115,54 @@ describe('market abstractions', () => {
 
     const subscription = client.market.subscribeL2OrderBook({
       assetId: 'US1',
-      exchangeId: 'LSX',
+      exchangeId: 'XETR',
       depth: 5,
     });
 
-    sockets[0]?.emit('open');
-    sockets[0]?.emit('message', 'connected');
-    expect(sockets[0]?.sent[0]).toMatch(/^connect 34 /);
-    expect(sockets[0]?.sent[1]).toBe('sub 1 {"isin":"US1","exchangeId":"LSX","depth":5,"type":"L2"}');
-
-    const next = subscription[Symbol.asyncIterator]().next();
-    sockets[0]?.emit('message', '1 L2 {"bid":[{"price":10,"size":2}],"ask":[{"price":11,"size":3}]}');
-    await expect(next).resolves.toEqual({
+    await expect(subscription[Symbol.asyncIterator]().next()).resolves.toEqual({
       done: false,
-      value: expect.objectContaining({ bids: [[10, 2]], asks: [[11, 3]] }),
+      value: expect.objectContaining({
+        instrumentId: 'US1.XETR',
+        currency: 'EUR',
+        bids: [[10, 2]],
+        asks: [[11, 3]],
+        timestamp: 1_784_294_157_408,
+      }),
+    });
+    expect(decodeMapperProtobufRequest(sockets[0]!.binarySent[0]!)).toEqual({
+      subscriptionId: 1,
+      topic: 'L2',
+      instrumentId: { isin: 'US1', exchangeId: 'XETR' },
+    });
+    subscription.close();
+  });
+
+  it('surfaces protobuf l2 venue errors to subscription consumers', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket(undefined, (binary) => {
+          const request = decodeMapperProtobufRequest(binary);
+          socket.emit('message', encodeMapperProtobufStatusEnvelope(
+            request.subscriptionId,
+            5,
+            'No L2 market data is available for US1.LSX',
+          ), true);
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const subscription = client.market.l2OrderBook('US1', 'LSX');
+    await assert.rejects(subscription[Symbol.asyncIterator]().next(), {
+      name: 'TradeRepublicProtocolError',
+      message: 'Trade Republic protobuf resource failed (5): No L2 market data is available for US1.LSX',
     });
     subscription.close();
   });
 });
 
-class LocalFakeSocket extends EventEmitter implements WebSocketLike {
-  readonly sent: string[] = [];
-
-  send(data: string | ArrayBuffer | Buffer): void {
-    this.sent.push(String(data));
-  }
-
-  close(): void {
-    this.emit('close');
-  }
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
 }

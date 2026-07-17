@@ -1,7 +1,7 @@
 import { ZodType } from 'zod';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'boards.list' | 'boards.detail' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
+type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'boards.list' | 'boards.detail' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.entitlements' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
 type EndpointMap = Partial<Record<EndpointKey, string>>;
 type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
 interface RawSchemaValidationFailure {
@@ -488,16 +488,65 @@ interface CandleSeries {
 interface AvailableCandleResolutionsOptions {
     assetId: string;
 }
-interface MarketSubscriptionsOptions {
-    assetId?: string | undefined;
-    exchangeId?: string | undefined;
-    type?: string | undefined;
-}
 interface MarketSubscription {
     id: string;
-    assetId?: string | undefined;
-    exchangeId?: string | undefined;
-    type?: string | undefined;
+    plan: MarketSubscriptionPlan;
+    createdAt?: string | undefined;
+    terms: MarketSubscriptionTerm[];
+    raw: unknown;
+}
+interface MarketSubscriptionPlan {
+    id: string;
+    name: string;
+    description?: string | undefined;
+    product: string;
+    group: string;
+    price: MarketSubscriptionPrice;
+    termPeriod?: string | undefined;
+    createdAt?: string | undefined;
+    updatedAt?: string | undefined;
+    imageId?: string | undefined;
+    version?: number | undefined;
+    tier?: MarketSubscriptionTier | undefined;
+    raw: unknown;
+}
+interface MarketSubscriptionPrice {
+    value: string;
+    currency: string;
+    raw: unknown;
+}
+interface MarketSubscriptionTier {
+    level: number;
+    group: string;
+    raw: unknown;
+}
+interface MarketSubscriptionTerm {
+    id: string;
+    activatedAt?: string | undefined;
+    validUntil?: string | undefined;
+    raw: unknown;
+}
+type MarketDataTopic = 'L2' | 'tickerV3' | 'tape' | 'tradeAggregateHistory' | (string & {});
+interface MarketEntitlementsOptions {
+    exchangeIds: string[];
+}
+interface MarketEntitlementSet {
+    kind: string;
+    name: string;
+    entitlements: MarketEntitlement[];
+    raw: unknown;
+}
+interface MarketEntitlement {
+    query: MarketEntitlementQuery[];
+    planId?: string | undefined;
+    subscribedUntil?: string | undefined;
+    isSubscribed: boolean;
+    isCanceled: boolean;
+    raw: unknown;
+}
+interface MarketEntitlementQuery {
+    name: string;
+    value: string;
     raw: unknown;
 }
 interface LiveFeedOptions {
@@ -527,7 +576,9 @@ interface MarketQuote {
 interface L2OrderBookOptions {
     assetId: string;
     exchangeId: string;
+    /** Retained for source compatibility; the protobuf L2 resource chooses the published depth. */
     depth?: number | undefined;
+    /** Retained for source compatibility; the protobuf L2 resource does not accept client throttling. */
     throttleMs?: number | undefined;
 }
 interface L2Venue {
@@ -536,6 +587,9 @@ interface L2Venue {
     raw: unknown;
 }
 interface L2OrderBook {
+    instrumentId?: string | undefined;
+    currency?: string | undefined;
+    timestamp?: number | undefined;
     bids: Array<[price: number, size: number]>;
     asks: Array<[price: number, size: number]>;
     raw: unknown;
@@ -654,7 +708,14 @@ declare class TradeRepublicSchemaError extends TradeRepublicError {
     constructor(message: string, schemaName: string, issues: unknown, rawSummary: unknown, cause?: unknown);
 }
 
-type MapperProtobufTopic = 'orderUpdates' | 'priceAlarmNotifications';
+type MapperProtobufTopic = 'L2' | 'orderUpdates' | 'priceAlarmNotifications';
+interface MapperProtobufRequestOptions {
+    accountNumber?: string | undefined;
+    instrumentId?: {
+        isin: string;
+        exchangeId: string;
+    } | undefined;
+}
 
 type MapperDeliveryState = 'notSent' | 'sent';
 type MapperRequestFailureReason = 'clientClosed' | 'connectFailure' | 'disconnect' | 'handshakeTimeout' | 'sendFailure' | 'sessionRefresh' | 'timeout';
@@ -704,14 +765,10 @@ declare class RawApi {
     subscribe(topic: string, payload?: unknown, options?: RawSubscriptionOptions): RawSubscription;
     subscribeLegacy(topic: string, payload?: unknown, options?: RawSubscriptionOptions): RawSubscription;
     subscribeResource(payload: Record<string, unknown>, options?: RawSubscriptionOptions): RawSubscription;
-    subscribeProtobufResource(topic: MapperProtobufTopic, request?: {
-        accountNumber?: string | undefined;
-    }, options?: RawSubscriptionOptions): RawSubscription;
+    subscribeProtobufResource(topic: MapperProtobufTopic, request?: MapperProtobufRequestOptions, options?: RawSubscriptionOptions): RawSubscription;
     query<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
     queryResource<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
-    queryProtobufResource<T = unknown>(topic: MapperProtobufTopic, request?: {
-        accountNumber?: string | undefined;
-    }, options?: RawQueryOptions): Promise<T>;
+    queryProtobufResource<T = unknown>(topic: MapperProtobufTopic, request?: MapperProtobufRequestOptions, options?: RawQueryOptions): Promise<T>;
     /** Reconnect active subscriptions after session or browser-context changes. */
     refreshSession(): void;
     close(): void;
@@ -736,6 +793,12 @@ interface StreamSpec<TParams, TResult> {
     schemaName?: string | undefined;
     normalize: (raw: unknown, params: TParams) => TResult;
 }
+interface ProtobufStreamSpec<TParams, TResult> {
+    topic: MapperProtobufTopic;
+    request: (params: TParams) => MapperProtobufRequestOptions;
+    schemaName?: string | undefined;
+    normalize: (raw: unknown, params: TParams) => TResult;
+}
 interface Subscription<T> extends AsyncIterable<T> {
     close(): void;
     map<U>(mapper: (value: T) => U): Subscription<U>;
@@ -748,6 +811,7 @@ declare class ResourceClient {
     constructor(http: HttpClient, endpoints: EndpointResolver, raw: RawApi, validateRaw?: RawSchemaValidator);
     query<TParams, TResult>(spec: QuerySpec<TParams, TResult>, params: TParams): Promise<TResult>;
     stream<TParams, TResult>(spec: StreamSpec<TParams, TResult>, params: TParams): Subscription<TResult>;
+    protobufStream<TParams, TResult>(spec: ProtobufStreamSpec<TParams, TResult>, params: TParams): Subscription<TResult>;
 }
 
 declare class CandleQuery {
@@ -1027,7 +1091,8 @@ declare class PortfolioApi {
 declare class MarketApi {
     private readonly resources;
     constructor(resources: ResourceClient);
-    subscriptions(options?: MarketSubscriptionsOptions): Promise<MarketSubscription[]>;
+    subscriptions(): Promise<MarketSubscription[]>;
+    entitlements(topic: MarketDataTopic, options: MarketEntitlementsOptions): Promise<MarketEntitlementSet>;
     candleQuery(options: CandleDownloadOptions): CandleQuery;
     candles(options: CandleDownloadOptions): Promise<Candle[]>;
     candleSeries(options: CandleDownloadOptions): Promise<CandleSeries>;
@@ -1330,8 +1395,8 @@ interface TradeRepublicSchemaEntry {
         sample?: 'once' | 'stream' | 'cleanup' | undefined;
     } | undefined;
 }
-declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
+declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

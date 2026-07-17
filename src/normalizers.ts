@@ -15,8 +15,15 @@ import type {
   L2OrderBook,
   L2Venue,
   LiveFeedEvent,
+  MarketEntitlement,
+  MarketEntitlementQuery,
+  MarketEntitlementSet,
   MarketQuote,
   MarketSubscription,
+  MarketSubscriptionPlan,
+  MarketSubscriptionPrice,
+  MarketSubscriptionTerm,
+  MarketSubscriptionTier,
   Order,
   OrderDestination,
   OrderPriceOptions,
@@ -553,11 +560,77 @@ export function normalizeSubscription(value: unknown): MarketSubscription {
   const record = asRecord(value);
   return {
     id: stringValue(record.id, record.subscriptionId),
-    assetId: optionalString(record.assetId, record.instrumentId, record.isin),
-    exchangeId: optionalString(record.exchangeId, record.exchange),
-    type: optionalString(record.type),
+    plan: normalizeSubscriptionPlan(record.plan),
+    createdAt: optionalString(record.createdAt),
+    terms: Array.isArray(record.terms) ? record.terms.map(normalizeSubscriptionTerm) : [],
     raw: value,
   };
+}
+
+function normalizeSubscriptionPlan(value: unknown): MarketSubscriptionPlan {
+  const record = asRecord(value);
+  return {
+    id: stringValue(record.id),
+    name: stringValue(record.name),
+    description: optionalString(record.description),
+    product: stringValue(record.product),
+    group: stringValue(record.group),
+    price: normalizeSubscriptionPrice(record.price),
+    termPeriod: optionalString(record.termPeriod),
+    createdAt: optionalString(record.createdAt),
+    updatedAt: optionalString(record.updatedAt),
+    imageId: optionalString(record.imageId),
+    version: optionalNumber(record.version),
+    tier: record.tier ? normalizeSubscriptionTier(record.tier) : undefined,
+    raw: value,
+  };
+}
+
+function normalizeSubscriptionPrice(value: unknown): MarketSubscriptionPrice {
+  const record = asRecord(value);
+  return { value: stringValue(record.value), currency: stringValue(record.currency), raw: value };
+}
+
+function normalizeSubscriptionTier(value: unknown): MarketSubscriptionTier {
+  const record = asRecord(value);
+  return { level: numberValue(record.level), group: stringValue(record.group), raw: value };
+}
+
+function normalizeSubscriptionTerm(value: unknown): MarketSubscriptionTerm {
+  const record = asRecord(value);
+  return {
+    id: stringValue(record.id),
+    activatedAt: optionalString(record.activatedAt),
+    validUntil: optionalString(record.validUntil),
+    raw: value,
+  };
+}
+
+export function normalizeMarketEntitlementSet(value: unknown): MarketEntitlementSet {
+  const record = asRecord(value);
+  return {
+    kind: stringValue(record.kind),
+    name: stringValue(record.name),
+    entitlements: Array.isArray(record.entitlements) ? record.entitlements.map(normalizeMarketEntitlement) : [],
+    raw: value,
+  };
+}
+
+function normalizeMarketEntitlement(value: unknown): MarketEntitlement {
+  const record = asRecord(value);
+  return {
+    query: Array.isArray(record.query) ? record.query.map(normalizeMarketEntitlementQuery) : [],
+    planId: optionalString(record.planId),
+    subscribedUntil: optionalString(record.subscribedUntil),
+    isSubscribed: record.isSubscribed === true,
+    isCanceled: record.isCanceled === true,
+    raw: value,
+  };
+}
+
+function normalizeMarketEntitlementQuery(value: unknown): MarketEntitlementQuery {
+  const record = asRecord(value);
+  return { name: stringValue(record.name), value: stringValue(record.value), raw: value };
 }
 
 export function normalizeLiveFeedEvent(value: unknown): LiveFeedEvent {
@@ -627,6 +700,9 @@ export function normalizeL2Venue(value: unknown): L2Venue {
 export function normalizeL2OrderBook(value: unknown): L2OrderBook {
   const record = asRecord(value);
   return {
+    instrumentId: optionalString(record.instrumentId),
+    currency: optionalString(record.currency),
+    timestamp: optionalNumber(record.timestamp),
     bids: normalizeLevels(record.bids, record.bid),
     asks: normalizeLevels(record.asks, record.ask),
     raw: value,

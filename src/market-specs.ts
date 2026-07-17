@@ -1,4 +1,4 @@
-import type { QuerySpec, StreamSpec } from './resource.js';
+import type { ProtobufStreamSpec, QuerySpec, StreamSpec } from './resource.js';
 import { candleResolutionMs, candleResolutionsForInstrumentType } from './candle-resolutions.js';
 import {
   arrayPayload,
@@ -8,6 +8,7 @@ import {
   normalizeL2OrderBook,
   normalizeL2Venues,
   normalizeLiveFeedEvent,
+  normalizeMarketEntitlementSet,
   normalizeMarketQuote,
   normalizeSubscription,
 } from './normalizers.js';
@@ -22,19 +23,27 @@ import type {
   LiveFeedEvent,
   LiveFeedOptions,
   MarketQuote,
+  MarketDataTopic,
+  MarketEntitlementSet,
+  MarketEntitlementsOptions,
   MarketSubscription,
-  MarketSubscriptionsOptions,
 } from './types.js';
 
-export const marketSubscriptionsSpec: QuerySpec<MarketSubscriptionsOptions, MarketSubscription[]> = {
+export const marketSubscriptionsSpec: QuerySpec<void, MarketSubscription[]> = {
+  endpoint: 'market.subscriptions',
   schemaName: 'market.subscriptions',
-  resource: (params) => ({
-    type: 'accountPairs',
-    assetId: params.assetId,
-    exchangeId: params.exchangeId,
-    subscriptionType: params.type,
-  }),
   normalize: (raw) => arrayPayload(raw).map(normalizeSubscription),
+};
+
+export const marketEntitlementsSpec: QuerySpec<{
+  topic: MarketDataTopic;
+  options: MarketEntitlementsOptions;
+}, MarketEntitlementSet> = {
+  endpoint: 'market.entitlements',
+  schemaName: 'market.entitlements',
+  pathParams: ({ topic }) => ({ topic }),
+  query: ({ options }) => ({ exchangeId: options.exchangeIds.join(',') }),
+  normalize: normalizeMarketEntitlementSet,
 };
 
 export const candlesSpec: QuerySpec<CandleDownloadOptions, Candle[]> = {
@@ -79,15 +88,10 @@ export const liveFeedSpec: StreamSpec<LiveFeedOptions, LiveFeedEvent> = {
   normalize: (raw) => normalizeLiveFeedEvent(raw),
 };
 
-export const l2OrderBookSpec: StreamSpec<L2OrderBookOptions, L2OrderBook> = {
+export const l2OrderBookSpec: ProtobufStreamSpec<L2OrderBookOptions, L2OrderBook> = {
   schemaName: 'market.l2OrderBook',
   topic: 'L2',
-  payload: (params) => ({
-    isin: params.assetId,
-    exchangeId: params.exchangeId,
-    depth: params.depth,
-    throttleMs: params.throttleMs,
-  }),
+  request: (params) => ({ instrumentId: { isin: params.assetId, exchangeId: params.exchangeId } }),
   normalize: (raw) => normalizeL2OrderBook(raw),
 };
 

@@ -18,6 +18,7 @@ import {
   candlesSpec,
   l2OrderBookSpec,
   liveFeedSpec,
+  marketEntitlementsSpec,
   marketSubscriptionsSpec,
   quoteSpec,
 } from './market-specs.js';
@@ -63,9 +64,11 @@ import type {
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,
+  MarketDataTopic,
+  MarketEntitlementSet,
+  MarketEntitlementsOptions,
   MarketQuote,
   MarketSubscription,
-  MarketSubscriptionsOptions,
   MutualFundOrdersOptions,
   MutationOutcomeUnknownReason,
   Order,
@@ -1110,8 +1113,16 @@ function createRawSchemaValidator(
 export class MarketApi {
   constructor(private readonly resources: ResourceClient) {}
 
-  subscriptions(options: MarketSubscriptionsOptions = {}): Promise<MarketSubscription[]> {
-    return this.resources.query(marketSubscriptionsSpec, options);
+  subscriptions(): Promise<MarketSubscription[]> {
+    return this.resources.query(marketSubscriptionsSpec, undefined);
+  }
+
+  entitlements(topic: MarketDataTopic, options: MarketEntitlementsOptions): Promise<MarketEntitlementSet> {
+    if (!topic.trim()) throw new TypeError('Market entitlement topic must not be empty.');
+    if (options.exchangeIds.length === 0 || options.exchangeIds.some((exchangeId) => !exchangeId.trim())) {
+      throw new TypeError('Market entitlements require at least one non-empty exchange ID.');
+    }
+    return this.resources.query(marketEntitlementsSpec, { topic, options });
   }
 
   candleQuery(options: CandleDownloadOptions): CandleQuery {
@@ -1151,7 +1162,7 @@ export class MarketApi {
   }
 
   subscribeL2OrderBook(options: L2OrderBookOptions): Subscription<L2OrderBook> {
-    return this.resources.stream(l2OrderBookSpec, options);
+    return this.resources.protobufStream(l2OrderBookSpec, options);
   }
 
   l2OrderBook(assetId: string, exchangeId: string, options: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'> = {}): Subscription<L2OrderBook> {

@@ -1,7 +1,12 @@
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { boot, messageDesc } from '@bufbuild/protobuf/codegenv2';
 
-export type MapperProtobufTopic = 'orderUpdates' | 'priceAlarmNotifications';
+export type MapperProtobufTopic = 'L2' | 'orderUpdates' | 'priceAlarmNotifications';
+
+export interface MapperProtobufRequestOptions {
+  accountNumber?: string | undefined;
+  instrumentId?: { isin: string; exchangeId: string } | undefined;
+}
 
 export interface MapperProtobufCodec {
   encode(subscriptionId: number): Uint8Array;
@@ -18,12 +23,7 @@ export interface MapperProtobufRequest {
   subscriptionId: number;
   topic: MapperProtobufTopic;
   accountNumber?: string | undefined;
-}
-
-export interface MapperProtobufRequest {
-  subscriptionId: number;
-  topic: MapperProtobufTopic;
-  accountNumber?: string | undefined;
+  instrumentId?: { isin: string; exchangeId: string } | undefined;
 }
 
 const file = boot({
@@ -36,6 +36,7 @@ const file = boot({
     message('SubscribeRequest', [
       field('sub_id', 1, 5),
       field('topic_id', 2, 9),
+      field('by_instrument', 3, 11, '.handelsrepublik.mapper.InstrumentSelector'),
       field('by_sec_acc_no', 4, 11, '.handelsrepublik.mapper.SecAccNoSelector'),
     ]),
     message('Request', [field('sub', 1, 11, '.handelsrepublik.mapper.SubscribeRequest')]),
@@ -104,6 +105,19 @@ const file = boot({
     message('PriceAlarmNotification', [
       field('price_alarms', 1, 11, '.handelsrepublik.mapper.PriceAlarm', 3),
     ]),
+    message('InstrumentId', [field('isin', 1, 9), field('exchange_id', 2, 9)]),
+    message('InstrumentSelector', [
+      field('instrument_id', 1, 11, '.handelsrepublik.mapper.InstrumentId'),
+      field('currency', 2, 9),
+    ]),
+    message('PriceLevel', [field('price', 1, 2), field('size', 2, 1)]),
+    message('InstrumentOrderBook', [
+      field('instrument_id', 1, 9),
+      field('currency', 2, 9),
+      field('ask', 3, 11, '.handelsrepublik.mapper.PriceLevel', 3),
+      field('bid', 4, 11, '.handelsrepublik.mapper.PriceLevel', 3),
+      field('timestamp', 5, 3),
+    ]),
   ],
 } as never);
 
@@ -111,21 +125,24 @@ const RequestSchema = messageDesc(file, 2);
 const ResponseSchema = messageDesc(file, 5);
 const OrderTradeSchema = messageDesc(file, 11);
 const PriceAlarmNotificationSchema = messageDesc(file, 14);
+const InstrumentOrderBookSchema = messageDesc(file, 18);
 
 export function mapperProtobufCodec(
   topic: MapperProtobufTopic,
-  request: { accountNumber?: string | undefined } = {},
+  request: MapperProtobufRequestOptions = {},
 ): MapperProtobufCodec {
   return {
     encode(subscriptionId) {
       const sub = {
         subId: subscriptionId,
         topicId: topic,
+        ...(request.instrumentId ? { byInstrument: { instrumentId: request.instrumentId } } : {}),
         ...(request.accountNumber ? { bySecAccNo: { accountNumber: request.accountNumber } } : {}),
       };
       return toBinary(RequestSchema, create(RequestSchema, { sub } as never));
     },
     decode(payload) {
+      if (topic === 'L2') return normalizeInstrumentOrderBook(fromBinary(InstrumentOrderBookSchema, payload));
       if (topic === 'orderUpdates') return normalizeOrderTrade(fromBinary(OrderTradeSchema, payload));
       return normalizePriceAlarmNotification(fromBinary(PriceAlarmNotificationSchema, payload));
     },
@@ -150,16 +167,24 @@ export function decodeMapperProtobufEnvelope(bytes: Uint8Array): MapperProtobufE
 export function decodeMapperProtobufRequest(bytes: Uint8Array): MapperProtobufRequest {
   const request = record(fromBinary(RequestSchema, bytes));
   const sub = record(request.sub);
-  const selector = record(sub.bySecAccNo);
+  const accountSelector = record(sub.bySecAccNo);
+  const instrumentSelector = record(record(sub.byInstrument).instrumentId);
   return {
     subscriptionId: Number(sub.subId),
     topic: String(sub.topicId) as MapperProtobufTopic,
-    ...(typeof selector.accountNumber === 'string' ? { accountNumber: selector.accountNumber } : {}),
+    ...(typeof accountSelector.accountNumber === 'string' ? { accountNumber: accountSelector.accountNumber } : {}),
+    ...(typeof instrumentSelector.isin === 'string' && typeof instrumentSelector.exchangeId === 'string'
+      ? { instrumentId: { isin: instrumentSelector.isin, exchangeId: instrumentSelector.exchangeId } }
+      : {}),
   };
 }
 
 export function encodeMapperProtobufTopicPayload(topic: MapperProtobufTopic, value: unknown): Uint8Array {
-  const schema = topic === 'orderUpdates' ? OrderTradeSchema : PriceAlarmNotificationSchema;
+  const schema = topic === 'L2'
+    ? InstrumentOrderBookSchema
+    : topic === 'orderUpdates'
+      ? OrderTradeSchema
+      : PriceAlarmNotificationSchema;
   return toBinary(schema, create(schema, value as never));
 }
 
@@ -168,6 +193,32 @@ export function encodeMapperProtobufDataEnvelope(subscriptionId: number, payload
     subId: subscriptionId,
     data: { data: payload },
   } as never));
+}
+
+export function encodeMapperProtobufStatusEnvelope(subscriptionId: number, code: number, message: string): Uint8Array {
+  return toBinary(ResponseSchema, create(ResponseSchema, {
+    subId: subscriptionId,
+    status: { code, message },
+  } as never));
+}
+
+function normalizeInstrumentOrderBook(value: unknown): Record<string, unknown> {
+  const source = record(value);
+  return {
+    instrumentId: source.instrumentId,
+    currency: source.currency,
+    bid: priceLevels(source.bid),
+    ask: priceLevels(source.ask),
+    timestamp: Number(source.timestamp),
+  };
+}
+
+function priceLevels(value: unknown): Array<{ price: number; size: number }> {
+  if (!Array.isArray(value)) return [];
+  return value.map((level) => {
+    const source = record(level);
+    return { price: Number(source.price), size: Number(source.size) };
+  });
 }
 
 function normalizeOrderTrade(value: unknown): Record<string, unknown> {

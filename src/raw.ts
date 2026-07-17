@@ -9,6 +9,7 @@ import { TradeRepublicProtocolError } from './errors.js';
 import {
   mapperProtobufCodec,
   type MapperProtobufCodec,
+  type MapperProtobufRequestOptions,
   type MapperProtobufTopic,
 } from './mapper-protobuf.js';
 import type { HttpClient } from './http.js';
@@ -78,7 +79,7 @@ export class RawApi {
 
   subscribeProtobufResource(
     topic: MapperProtobufTopic,
-    request: { accountNumber?: string | undefined } = {},
+    request: MapperProtobufRequestOptions = {},
     options: RawSubscriptionOptions = {},
   ): RawSubscription {
     return this.openSubscription(mapperProtobufCodec(topic, request), options);
@@ -108,7 +109,7 @@ export class RawApi {
 
   async queryProtobufResource<T = unknown>(
     topic: MapperProtobufTopic,
-    request: { accountNumber?: string | undefined } = {},
+    request: MapperProtobufRequestOptions = {},
     options: RawQueryOptions = {},
   ): Promise<T> {
     const subscription = this.subscribeProtobufResource(topic, request, options);

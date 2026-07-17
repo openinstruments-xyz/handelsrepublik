@@ -589,6 +589,28 @@ try {
 } finally {
   feed.close();
 }
+
+// User-owned market-data plans and per-topic exchange entitlements are REST
+// resources. Missing exchanges are not converted into false entitlements.
+const subscriptions = await tr.market.subscriptions();
+const l2Entitlements = await tr.market.entitlements('L2', {
+  exchangeIds: ['LSX', 'XETR', 'XLON'],
+});
+
+console.log(subscriptions.map(({ plan }) => plan.product));
+console.log(l2Entitlements.entitlements);
+
+// L2 uses the mapper's protobuf order-book stream. Xetra's exchange ID is
+// XETR. Venues such as LSX that do not publish L2 may return a protocol error
+// through the async iterator; close every stream in a finally block.
+const orderBook = tr.market.l2OrderBook('US0378331005', 'XETR');
+try {
+  for await (const book of orderBook) {
+    console.log(book.instrumentId, book.currency, book.bids, book.asks);
+  }
+} finally {
+  orderBook.close();
+}
 ```
 
 Order updates are also a stream:
@@ -762,7 +784,7 @@ workflow has no push or pull-request trigger. It runs `npm run test:integration`
 only on `main`, only for the repository owner, and only after its unit-test gate
 passes. It runs at 10:15 and 16:15 Europe/Berlin on weekdays to refresh the
 account session, and the repository owner can also start it manually. Those
-times keep the scheduled AAPL/XETRA L2 test inside Xetra's 09:00-17:30 German
+times keep the scheduled AAPL/XETR L2 test inside Xetra's 09:00-17:30 German
 market hours even when GitHub starts the workflow up to an hour late.
 
 The GitHub workflow explicitly sets both mutation opt-ins to `0`, and the suite

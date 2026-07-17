@@ -22,6 +22,7 @@ export type EndpointKey =
   | 'portfolio.cash'
   | 'portfolio.markToMarket'
   | 'market.subscriptions'
+  | 'market.entitlements'
   | 'market.candles'
   | 'market.liveFeed'
   | 'market.availableL2Books'
@@ -603,17 +604,74 @@ export interface AvailableCandleResolutionsOptions {
   assetId: string;
 }
 
-export interface MarketSubscriptionsOptions {
-  assetId?: string | undefined;
-  exchangeId?: string | undefined;
-  type?: string | undefined;
-}
-
 export interface MarketSubscription {
   id: string;
-  assetId?: string | undefined;
-  exchangeId?: string | undefined;
-  type?: string | undefined;
+  plan: MarketSubscriptionPlan;
+  createdAt?: string | undefined;
+  terms: MarketSubscriptionTerm[];
+  raw: unknown;
+}
+
+export interface MarketSubscriptionPlan {
+  id: string;
+  name: string;
+  description?: string | undefined;
+  product: string;
+  group: string;
+  price: MarketSubscriptionPrice;
+  termPeriod?: string | undefined;
+  createdAt?: string | undefined;
+  updatedAt?: string | undefined;
+  imageId?: string | undefined;
+  version?: number | undefined;
+  tier?: MarketSubscriptionTier | undefined;
+  raw: unknown;
+}
+
+export interface MarketSubscriptionPrice {
+  value: string;
+  currency: string;
+  raw: unknown;
+}
+
+export interface MarketSubscriptionTier {
+  level: number;
+  group: string;
+  raw: unknown;
+}
+
+export interface MarketSubscriptionTerm {
+  id: string;
+  activatedAt?: string | undefined;
+  validUntil?: string | undefined;
+  raw: unknown;
+}
+
+export type MarketDataTopic = 'L2' | 'tickerV3' | 'tape' | 'tradeAggregateHistory' | (string & {});
+
+export interface MarketEntitlementsOptions {
+  exchangeIds: string[];
+}
+
+export interface MarketEntitlementSet {
+  kind: string;
+  name: string;
+  entitlements: MarketEntitlement[];
+  raw: unknown;
+}
+
+export interface MarketEntitlement {
+  query: MarketEntitlementQuery[];
+  planId?: string | undefined;
+  subscribedUntil?: string | undefined;
+  isSubscribed: boolean;
+  isCanceled: boolean;
+  raw: unknown;
+}
+
+export interface MarketEntitlementQuery {
+  name: string;
+  value: string;
   raw: unknown;
 }
 
@@ -647,7 +705,9 @@ export interface MarketQuote {
 export interface L2OrderBookOptions {
   assetId: string;
   exchangeId: string;
+  /** Retained for source compatibility; the protobuf L2 resource chooses the published depth. */
   depth?: number | undefined;
+  /** Retained for source compatibility; the protobuf L2 resource does not accept client throttling. */
   throttleMs?: number | undefined;
 }
 
@@ -658,6 +718,9 @@ export interface L2Venue {
 }
 
 export interface L2OrderBook {
+  instrumentId?: string | undefined;
+  currency?: string | undefined;
+  timestamp?: number | undefined;
   bids: Array<[price: number, size: number]>;
   asks: Array<[price: number, size: number]>;
   raw: unknown;

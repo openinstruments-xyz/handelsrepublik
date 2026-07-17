@@ -23,7 +23,7 @@ const defaultWatchlistId = '00000000-0000-0000-0000-000000000000';
 const bitcoinAssetId = 'XF000BTC0017';
 const bitcoinExchangeId = 'BHS';
 const appleAssetId = 'US0378331005';
-const appleL2ExchangeId = 'XETRA';
+const appleL2ExchangeId = 'XETR';
 const runXetraMarketHoursTests = isXetraMarketHours();
 const runningOnGitHubActions = process.env.GITHUB_ACTIONS === 'true';
 const runClosedExchangeOrderTests = !runningOnGitHubActions
@@ -86,12 +86,14 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
   liveIt('reads market discovery, search, candles, and current price data', { timeout: 60_000 }, async () => {
     const { client } = await createLiveClient();
 
-    const [searchResults, asset, venues, candles, price] = await Promise.all([
+    const [searchResults, asset, venues, candles, price, subscriptions, l2Entitlements] = await Promise.all([
       client.assets.search(testQuery, { type: testAssetType, limit: 5 }),
       client.assets.get(testAssetId),
       client.market.availableL2Books(testAssetId),
       client.raw.query({ type: 'aggregateHistoryLightV2', isin: testAssetId, exchangeId: testExchangeId, unit: 'EUR', range: '1d' }, { timeoutMs: 15_000 }),
       client.raw.query({ type: 'ticker', id: `${testAssetId}.${testExchangeId}` }, { timeoutMs: 15_000 }),
+      client.market.subscriptions(),
+      client.market.entitlements('L2', { exchangeIds: ['LSX', 'XETR'] }),
     ]);
 
     assert.ok(Array.isArray(searchResults), 'assets.search should return an array');
@@ -100,6 +102,9 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     assert.ok(Array.isArray(venues), 'market.availableL2Books should return an array');
     assert.ok(candles !== undefined && candles !== null, 'aggregateHistoryLightV2 should return a payload');
     assert.ok(price !== undefined && price !== null, 'ticker should return a current-price payload');
+    assert.ok(Array.isArray(subscriptions), 'market.subscriptions should return an array');
+    assert.equal(l2Entitlements.name, 'L2');
+    assert.ok(Array.isArray(l2Entitlements.entitlements), 'market.entitlements should return an array of explicit entitlement entries');
   });
 
   liveIt('lists current derivative products for an underlying', { timeout: 45_000 }, async () => {
@@ -214,12 +219,10 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     skip: runXetraMarketHoursTests ? false : 'runs only during Xetra market hours (weekdays, 09:00-17:30 Europe/Berlin)',
   }, async () => {
     const { client } = await createLiveClient();
-    const subscription = client.market.l2OrderBook(appleAssetId, appleL2ExchangeId, {
-      depth: 5,
-    });
+    const subscription = client.market.l2OrderBook(appleAssetId, appleL2ExchangeId);
     try {
-      const orderBook = await nextStreamValue(subscription, 'AAPL/XETRA L2 order book');
-      assert.ok(orderBook.bids.length + orderBook.asks.length > 0, 'expected at least one AAPL/XETRA L2 level');
+      const orderBook = await nextStreamValue(subscription, 'AAPL/XETR L2 order book');
+      assert.ok(orderBook.bids.length + orderBook.asks.length > 0, 'expected at least one AAPL/XETR L2 level');
     } finally {
       subscription.close();
     }

@@ -1,6 +1,7 @@
 import type { EndpointResolver } from './endpoints.js';
 import type { HttpClient } from './http.js';
 import type { RawApi, RawSubscription } from './raw.js';
+import type { MapperProtobufRequestOptions, MapperProtobufTopic } from './mapper-protobuf.js';
 import { validateRawResponse } from './schemas/registry.js';
 import type { EndpointKey, HttpMethod, RawSchemaValidator } from './types.js';
 
@@ -18,6 +19,13 @@ export interface QuerySpec<TParams, TResult> {
 export interface StreamSpec<TParams, TResult> {
   topic: string;
   payload: (params: TParams) => unknown;
+  schemaName?: string | undefined;
+  normalize: (raw: unknown, params: TParams) => TResult;
+}
+
+export interface ProtobufStreamSpec<TParams, TResult> {
+  topic: MapperProtobufTopic;
+  request: (params: TParams) => MapperProtobufRequestOptions;
   schemaName?: string | undefined;
   normalize: (raw: unknown, params: TParams) => TResult;
 }
@@ -50,6 +58,11 @@ export class ResourceClient {
 
   stream<TParams, TResult>(spec: StreamSpec<TParams, TResult>, params: TParams): Subscription<TResult> {
     return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params)))
+      .map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
+  }
+
+  protobufStream<TParams, TResult>(spec: ProtobufStreamSpec<TParams, TResult>, params: TParams): Subscription<TResult> {
+    return toSubscription(this.raw.subscribeProtobufResource(spec.topic, spec.request(params)))
       .map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
   }
 }

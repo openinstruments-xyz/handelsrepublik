@@ -25,7 +25,7 @@ export type {
   TradeRepublicPageLike,
   TradeRepublicRequestLike,
 } from './waf.js';
-export type { QuerySpec, StreamSpec, Subscription } from './resource.js';
+export type { ProtobufStreamSpec, QuerySpec, StreamSpec, Subscription } from './resource.js';
 export type {
   Asset,
   AssetDetail,
@@ -52,9 +52,17 @@ export type {
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,
+  MarketDataTopic,
+  MarketEntitlement,
+  MarketEntitlementQuery,
+  MarketEntitlementSet,
+  MarketEntitlementsOptions,
   MarketQuote,
   MarketSubscription,
-  MarketSubscriptionsOptions,
+  MarketSubscriptionPlan,
+  MarketSubscriptionPrice,
+  MarketSubscriptionTerm,
+  MarketSubscriptionTier,
   MutualFundOrdersOptions,
   MutationOutcomeUnknownReason,
   Order,

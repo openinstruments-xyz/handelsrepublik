@@ -32,10 +32,42 @@ const availableCashItemSchema = z.strictObject({
   amount: z.number(),
 });
 
-const accountPairSchema = z.strictObject({
-  securitiesAccountNumber: z.string(),
-  cashAccountNumber: z.string().optional(),
-  accountProductType: z.string().optional(),
+const marketSubscriptionPriceSchema = z.strictObject({ value: z.string(), currency: z.string() });
+const marketSubscriptionTierSchema = z.strictObject({ level: z.number(), group: z.string() });
+const marketSubscriptionPlanSchema = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  product: z.string(),
+  group: z.string(),
+  price: marketSubscriptionPriceSchema,
+  termPeriod: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  imageId: z.string().optional(),
+  version: z.number().optional(),
+  tier: marketSubscriptionTierSchema.optional(),
+});
+const marketSubscriptionSchema = z.strictObject({
+  id: z.string(),
+  plan: marketSubscriptionPlanSchema,
+  createdAt: z.string().optional(),
+  terms: z.array(z.strictObject({
+    id: z.string(),
+    activatedAt: z.string().optional(),
+    validUntil: z.string().optional(),
+  })),
+});
+const marketEntitlementsSchema = z.strictObject({
+  kind: z.string(),
+  name: z.string(),
+  entitlements: z.array(z.strictObject({
+    query: z.array(z.strictObject({ name: z.string(), value: z.string() })),
+    planId: z.string().optional(),
+    subscribedUntil: z.string().optional(),
+    isSubscribed: z.boolean(),
+    isCanceled: z.boolean(),
+  })),
 });
 
 const normalizedArrayWrappers = z.union([
@@ -246,7 +278,8 @@ export const schemaRegistry = [
   entry('portfolio.savingsPlans', 'Savings plans', 'websocket', 'read', 'savingsPlans', normalizedArrayWrappers),
   entry('portfolio.privateMarketsPositions', 'Private markets positions', 'websocket', 'read', 'privateMarketsPositions', jsonValue),
   entry('portfolio.portfolioChart', 'Portfolio chart', 'rest', 'read', 'GET /api-gateway/portfolio-chart/v2/chart', jsonValue),
-  entry('market.subscriptions', 'Market subscriptions', 'websocket', 'read', 'accountPairs', z.union([z.array(accountPairSchema), normalizedArrayWrappers])),
+  entry('market.subscriptions', 'Market subscriptions', 'rest', 'read', 'GET /api-gateway/subscriptions/api/v1/subscriptions', z.array(marketSubscriptionSchema)),
+  entry('market.entitlements', 'Market topic entitlements', 'rest', 'read', 'GET /api-gateway/subscriptions/api/v1/entitlements/topics/{topic}', marketEntitlementsSchema),
   entry('market.candles', 'Price history candles', 'websocket', 'read', 'aggregateHistoryLightV2', jsonValue, { variants: ['stock', 'crypto'] }),
   entry('market.quote', 'Market quote', 'websocket', 'read', 'ticker', jsonValue, { variants: ['stock', 'crypto'] }),
   entry('market.liveFeed', 'Live quote feed', 'websocket', 'read', 'tickerV3', jsonValue, { variants: ['stock', 'crypto'], live: { sample: 'stream' } }),

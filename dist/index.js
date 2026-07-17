@@ -500,11 +500,70 @@ function normalizeSubscription(value) {
   const record2 = asRecord(value);
   return {
     id: stringValue(record2.id, record2.subscriptionId),
-    assetId: optionalString(record2.assetId, record2.instrumentId, record2.isin),
-    exchangeId: optionalString(record2.exchangeId, record2.exchange),
-    type: optionalString(record2.type),
+    plan: normalizeSubscriptionPlan(record2.plan),
+    createdAt: optionalString(record2.createdAt),
+    terms: Array.isArray(record2.terms) ? record2.terms.map(normalizeSubscriptionTerm) : [],
     raw: value
   };
+}
+function normalizeSubscriptionPlan(value) {
+  const record2 = asRecord(value);
+  return {
+    id: stringValue(record2.id),
+    name: stringValue(record2.name),
+    description: optionalString(record2.description),
+    product: stringValue(record2.product),
+    group: stringValue(record2.group),
+    price: normalizeSubscriptionPrice(record2.price),
+    termPeriod: optionalString(record2.termPeriod),
+    createdAt: optionalString(record2.createdAt),
+    updatedAt: optionalString(record2.updatedAt),
+    imageId: optionalString(record2.imageId),
+    version: optionalNumber(record2.version),
+    tier: record2.tier ? normalizeSubscriptionTier(record2.tier) : void 0,
+    raw: value
+  };
+}
+function normalizeSubscriptionPrice(value) {
+  const record2 = asRecord(value);
+  return { value: stringValue(record2.value), currency: stringValue(record2.currency), raw: value };
+}
+function normalizeSubscriptionTier(value) {
+  const record2 = asRecord(value);
+  return { level: numberValue(record2.level), group: stringValue(record2.group), raw: value };
+}
+function normalizeSubscriptionTerm(value) {
+  const record2 = asRecord(value);
+  return {
+    id: stringValue(record2.id),
+    activatedAt: optionalString(record2.activatedAt),
+    validUntil: optionalString(record2.validUntil),
+    raw: value
+  };
+}
+function normalizeMarketEntitlementSet(value) {
+  const record2 = asRecord(value);
+  return {
+    kind: stringValue(record2.kind),
+    name: stringValue(record2.name),
+    entitlements: Array.isArray(record2.entitlements) ? record2.entitlements.map(normalizeMarketEntitlement) : [],
+    raw: value
+  };
+}
+function normalizeMarketEntitlement(value) {
+  const record2 = asRecord(value);
+  return {
+    query: Array.isArray(record2.query) ? record2.query.map(normalizeMarketEntitlementQuery) : [],
+    planId: optionalString(record2.planId),
+    subscribedUntil: optionalString(record2.subscribedUntil),
+    isSubscribed: record2.isSubscribed === true,
+    isCanceled: record2.isCanceled === true,
+    raw: value
+  };
+}
+function normalizeMarketEntitlementQuery(value) {
+  const record2 = asRecord(value);
+  return { name: stringValue(record2.name), value: stringValue(record2.value), raw: value };
 }
 function normalizeLiveFeedEvent(value) {
   const record2 = asRecord(value);
@@ -568,6 +627,9 @@ function normalizeL2Venue(value) {
 function normalizeL2OrderBook(value) {
   const record2 = asRecord(value);
   return {
+    instrumentId: optionalString(record2.instrumentId),
+    currency: optionalString(record2.currency),
+    timestamp: optionalNumber(record2.timestamp),
     bids: normalizeLevels(record2.bids, record2.bid),
     asks: normalizeLevels(record2.asks, record2.ask),
     raw: value
@@ -1423,14 +1485,16 @@ function candleResolutionMs(resolution) {
 
 // src/market-specs.ts
 var marketSubscriptionsSpec = {
+  endpoint: "market.subscriptions",
   schemaName: "market.subscriptions",
-  resource: (params) => ({
-    type: "accountPairs",
-    assetId: params.assetId,
-    exchangeId: params.exchangeId,
-    subscriptionType: params.type
-  }),
   normalize: (raw) => arrayPayload(raw).map(normalizeSubscription)
+};
+var marketEntitlementsSpec = {
+  endpoint: "market.entitlements",
+  schemaName: "market.entitlements",
+  pathParams: ({ topic }) => ({ topic }),
+  query: ({ options }) => ({ exchangeId: options.exchangeIds.join(",") }),
+  normalize: normalizeMarketEntitlementSet
 };
 var candlesSpec = {
   schemaName: "market.candles",
@@ -1471,12 +1535,7 @@ var liveFeedSpec = {
 var l2OrderBookSpec = {
   schemaName: "market.l2OrderBook",
   topic: "L2",
-  payload: (params) => ({
-    isin: params.assetId,
-    exchangeId: params.exchangeId,
-    depth: params.depth,
-    throttleMs: params.throttleMs
-  }),
+  request: (params) => ({ instrumentId: { isin: params.assetId, exchangeId: params.exchangeId } }),
   normalize: (raw) => normalizeL2OrderBook(raw)
 };
 function candleResource(params) {
@@ -1556,10 +1615,42 @@ var availableCashItemSchema = z.strictObject({
   currencyId: z.string(),
   amount: z.number()
 });
-var accountPairSchema = z.strictObject({
-  securitiesAccountNumber: z.string(),
-  cashAccountNumber: z.string().optional(),
-  accountProductType: z.string().optional()
+var marketSubscriptionPriceSchema = z.strictObject({ value: z.string(), currency: z.string() });
+var marketSubscriptionTierSchema = z.strictObject({ level: z.number(), group: z.string() });
+var marketSubscriptionPlanSchema = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  product: z.string(),
+  group: z.string(),
+  price: marketSubscriptionPriceSchema,
+  termPeriod: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  imageId: z.string().optional(),
+  version: z.number().optional(),
+  tier: marketSubscriptionTierSchema.optional()
+});
+var marketSubscriptionSchema = z.strictObject({
+  id: z.string(),
+  plan: marketSubscriptionPlanSchema,
+  createdAt: z.string().optional(),
+  terms: z.array(z.strictObject({
+    id: z.string(),
+    activatedAt: z.string().optional(),
+    validUntil: z.string().optional()
+  }))
+});
+var marketEntitlementsSchema = z.strictObject({
+  kind: z.string(),
+  name: z.string(),
+  entitlements: z.array(z.strictObject({
+    query: z.array(z.strictObject({ name: z.string(), value: z.string() })),
+    planId: z.string().optional(),
+    subscribedUntil: z.string().optional(),
+    isSubscribed: z.boolean(),
+    isCanceled: z.boolean()
+  }))
 });
 var normalizedArrayWrappers = z.union([
   z.array(jsonValue),
@@ -1754,7 +1845,8 @@ var schemaRegistry = [
   entry("portfolio.savingsPlans", "Savings plans", "websocket", "read", "savingsPlans", normalizedArrayWrappers),
   entry("portfolio.privateMarketsPositions", "Private markets positions", "websocket", "read", "privateMarketsPositions", jsonValue),
   entry("portfolio.portfolioChart", "Portfolio chart", "rest", "read", "GET /api-gateway/portfolio-chart/v2/chart", jsonValue),
-  entry("market.subscriptions", "Market subscriptions", "websocket", "read", "accountPairs", z.union([z.array(accountPairSchema), normalizedArrayWrappers])),
+  entry("market.subscriptions", "Market subscriptions", "rest", "read", "GET /api-gateway/subscriptions/api/v1/subscriptions", z.array(marketSubscriptionSchema)),
+  entry("market.entitlements", "Market topic entitlements", "rest", "read", "GET /api-gateway/subscriptions/api/v1/entitlements/topics/{topic}", marketEntitlementsSchema),
   entry("market.candles", "Price history candles", "websocket", "read", "aggregateHistoryLightV2", jsonValue, { variants: ["stock", "crypto"] }),
   entry("market.quote", "Market quote", "websocket", "read", "ticker", jsonValue, { variants: ["stock", "crypto"] }),
   entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
@@ -1873,6 +1965,9 @@ var ResourceClient = class {
   }
   stream(spec, params) {
     return toSubscription(this.raw.subscribe(spec.topic, spec.payload(params))).map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
+  }
+  protobufStream(spec, params) {
+    return toSubscription(this.raw.subscribeProtobufResource(spec.topic, spec.request(params))).map((raw) => spec.normalize(spec.schemaName ? this.validateRaw(spec.schemaName, raw) : raw, params));
   }
 };
 function requiredEndpoint(spec) {
@@ -2037,7 +2132,8 @@ var DEFAULT_ENDPOINTS = {
   "portfolio.current": "/api/v2/portfolio",
   "portfolio.cash": "/api/v2/portfolio/cash",
   "portfolio.markToMarket": "/api/v2/portfolio/mark-to-market",
-  "market.subscriptions": "/api/v2/market-data/subscriptions",
+  "market.subscriptions": "/api-gateway/subscriptions/api/v1/subscriptions",
+  "market.entitlements": "/api-gateway/subscriptions/api/v1/entitlements/topics/{topic}",
   "market.candles": "/api/v2/market-data/candles",
   "market.liveFeed": "/api/v2/market-data/live-feed",
   "market.availableL2Books": "/api/v2/market-data/l2/venues",
@@ -2486,6 +2582,7 @@ var file = boot({
     message("SubscribeRequest", [
       field("sub_id", 1, 5),
       field("topic_id", 2, 9),
+      field("by_instrument", 3, 11, ".handelsrepublik.mapper.InstrumentSelector"),
       field("by_sec_acc_no", 4, 11, ".handelsrepublik.mapper.SecAccNoSelector")
     ]),
     message("Request", [field("sub", 1, 11, ".handelsrepublik.mapper.SubscribeRequest")]),
@@ -2553,6 +2650,19 @@ var file = boot({
     ]),
     message("PriceAlarmNotification", [
       field("price_alarms", 1, 11, ".handelsrepublik.mapper.PriceAlarm", 3)
+    ]),
+    message("InstrumentId", [field("isin", 1, 9), field("exchange_id", 2, 9)]),
+    message("InstrumentSelector", [
+      field("instrument_id", 1, 11, ".handelsrepublik.mapper.InstrumentId"),
+      field("currency", 2, 9)
+    ]),
+    message("PriceLevel", [field("price", 1, 2), field("size", 2, 1)]),
+    message("InstrumentOrderBook", [
+      field("instrument_id", 1, 9),
+      field("currency", 2, 9),
+      field("ask", 3, 11, ".handelsrepublik.mapper.PriceLevel", 3),
+      field("bid", 4, 11, ".handelsrepublik.mapper.PriceLevel", 3),
+      field("timestamp", 5, 3)
     ])
   ]
 });
@@ -2560,17 +2670,20 @@ var RequestSchema = messageDesc(file, 2);
 var ResponseSchema = messageDesc(file, 5);
 var OrderTradeSchema = messageDesc(file, 11);
 var PriceAlarmNotificationSchema = messageDesc(file, 14);
+var InstrumentOrderBookSchema = messageDesc(file, 18);
 function mapperProtobufCodec(topic, request = {}) {
   return {
     encode(subscriptionId) {
       const sub = {
         subId: subscriptionId,
         topicId: topic,
+        ...request.instrumentId ? { byInstrument: { instrumentId: request.instrumentId } } : {},
         ...request.accountNumber ? { bySecAccNo: { accountNumber: request.accountNumber } } : {}
       };
       return toBinary(RequestSchema, create(RequestSchema, { sub }));
     },
     decode(payload) {
+      if (topic === "L2") return normalizeInstrumentOrderBook(fromBinary(InstrumentOrderBookSchema, payload));
       if (topic === "orderUpdates") return normalizeOrderTrade(fromBinary(OrderTradeSchema, payload));
       return normalizePriceAlarmNotification(fromBinary(PriceAlarmNotificationSchema, payload));
     }
@@ -2589,6 +2702,23 @@ function decodeMapperProtobufEnvelope(bytes) {
     };
   }
   return { subscriptionId };
+}
+function normalizeInstrumentOrderBook(value) {
+  const source = record(value);
+  return {
+    instrumentId: source.instrumentId,
+    currency: source.currency,
+    bid: priceLevels(source.bid),
+    ask: priceLevels(source.ask),
+    timestamp: Number(source.timestamp)
+  };
+}
+function priceLevels(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((level) => {
+    const source = record(level);
+    return { price: Number(source.price), size: Number(source.size) };
+  });
 }
 function normalizeOrderTrade(value) {
   const source = record(value);
@@ -4180,8 +4310,15 @@ var MarketApi = class {
     this.resources = resources;
   }
   resources;
-  subscriptions(options = {}) {
-    return this.resources.query(marketSubscriptionsSpec, options);
+  subscriptions() {
+    return this.resources.query(marketSubscriptionsSpec, void 0);
+  }
+  entitlements(topic, options) {
+    if (!topic.trim()) throw new TypeError("Market entitlement topic must not be empty.");
+    if (options.exchangeIds.length === 0 || options.exchangeIds.some((exchangeId) => !exchangeId.trim())) {
+      throw new TypeError("Market entitlements require at least one non-empty exchange ID.");
+    }
+    return this.resources.query(marketEntitlementsSpec, { topic, options });
   }
   candleQuery(options) {
     return new CandleQuery(this.resources, options);
@@ -4211,7 +4348,7 @@ var MarketApi = class {
     return this.resources.query(availableL2BooksSpec, { assetId });
   }
   subscribeL2OrderBook(options) {
-    return this.resources.stream(l2OrderBookSpec, options);
+    return this.resources.protobufStream(l2OrderBookSpec, options);
   }
   l2OrderBook(assetId, exchangeId, options = {}) {
     return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
