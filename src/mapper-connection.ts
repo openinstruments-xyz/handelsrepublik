@@ -1,4 +1,5 @@
 import { TradeRepublicProtocolError } from './errors.js';
+import { decodeMapperProtobufEnvelope, type MapperProtobufCodec } from './mapper-protobuf.js';
 import type {
   WebSocketDisconnectEvent,
   WebSocketFactory,
@@ -57,7 +58,7 @@ export interface MapperSubscriptionOptions {
 
 interface SubscriptionState {
   id: number;
-  message: string;
+  message: string | MapperProtobufCodec;
   messages: unknown[];
   waiters: Array<{
     resolve: (value: IteratorResult<unknown>) => void;
@@ -98,7 +99,7 @@ export class MapperConnection {
 
   constructor(private readonly options: MapperConnectionOptions) {}
 
-  subscribe(message: string, options: MapperSubscriptionOptions = {}): MapperSubscription {
+  subscribe(message: string | MapperProtobufCodec, options: MapperSubscriptionOptions = {}): MapperSubscription {
     const state: SubscriptionState = {
       id: this.nextSubscriptionId++,
       message,
@@ -187,9 +188,9 @@ export class MapperConnection {
           this.handleSocketEnd(socket, 'sendFailure', [], error, true);
         }
       });
-      addListener(socket, 'message', (event: unknown) => {
+      addListener(socket, 'message', (event: unknown, isBinary?: unknown) => {
         if (this.socket !== socket) return;
-        this.handleMessage(socket, event);
+        this.handleMessage(socket, event, isBinary === true);
       });
       addListener(socket, 'error', (error: unknown) => {
         if (this.socket !== socket) return;
@@ -205,7 +206,38 @@ export class MapperConnection {
     }
   }
 
-  private handleMessage(socket: WebSocketLike, event: unknown): void {
+  private handleMessage(socket: WebSocketLike, event: unknown, isBinary = false): void {
+    const binary = socketBinary(event, isBinary);
+    if (binary) {
+      let frame;
+      try {
+        frame = decodeMapperProtobufEnvelope(binary);
+      } catch (error) {
+        logWire('error', error);
+        return;
+      }
+      const state = this.subscriptions.get(frame.subscriptionId);
+      if (!state) return;
+      if (frame.status) {
+        this.fail(state, new TradeRepublicProtocolError(`Trade Republic protobuf resource failed (${frame.status.code}): ${frame.status.message}`));
+        return;
+      }
+      if (!(frame.payload instanceof Uint8Array)) {
+        this.finish(state);
+        this.subscriptions.delete(state.id);
+        return;
+      }
+      if (typeof state.message === 'string') {
+        this.fail(state, new TradeRepublicProtocolError('Received a protobuf response for a JSON mapper subscription.'));
+        return;
+      }
+      try {
+        this.push(state, state.message.decode(frame.payload));
+      } catch (error) {
+        this.fail(state, new TradeRepublicProtocolError('Could not decode Trade Republic protobuf resource payload.', { cause: error }));
+      }
+      return;
+    }
     const message = socketText(event);
     logWire('message', message);
     if (message === 'connected') {
@@ -240,7 +272,9 @@ export class MapperConnection {
   private sendSubscription(state: SubscriptionState): void {
     const socket = this.socket;
     if (!socket || state.closed) return;
-    const message = `sub ${state.id} ${state.message}`;
+    const message = typeof state.message === 'string'
+      ? `sub ${state.id} ${state.message}`
+      : Buffer.from(state.message.encode(state.id));
     logWire('send', message);
     try {
       socket.send(message);
@@ -371,7 +405,7 @@ export class MapperConnection {
     while (state.waiters.length) state.waiters.shift()?.resolve({ done: true, value: undefined });
   }
 
-  private fail(state: SubscriptionState, error: MapperRequestError): void {
+  private fail(state: SubscriptionState, error: unknown): void {
     state.closed = true;
     state.error = error;
     this.subscriptions.delete(state.id);
@@ -463,6 +497,16 @@ function addListener(socket: WebSocketLike, event: string, listener: (...args: a
 function socketText(event: unknown): string {
   const data = typeof event === 'object' && event !== null && 'data' in event ? event.data : event;
   return Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
+}
+
+function socketBinary(event: unknown, isBinary: boolean): Uint8Array | undefined {
+  const isMessageEvent = typeof event === 'object' && event !== null && 'data' in event;
+  const data = isMessageEvent ? event.data : event;
+  if (!isBinary && !(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) return undefined;
+  if (Buffer.isBuffer(data)) return isBinary || isMessageEvent ? data : undefined;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return undefined;
 }
 
 function parseSubscriptionFrame(text: string): { id: number; payload: unknown } | undefined {

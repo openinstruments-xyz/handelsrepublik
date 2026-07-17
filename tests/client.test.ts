@@ -3,6 +3,11 @@ import { EventEmitter } from 'node:events';
 import { cpus, platform, totalmem } from 'node:os';
 import { describe, expect, it } from './test-compat.js';
 import { MapperRequestError, TradeRepublicClient } from '../src/index.js';
+import {
+  decodeMapperProtobufRequest,
+  encodeMapperProtobufDataEnvelope,
+  encodeMapperProtobufTopicPayload,
+} from '../src/mapper-protobuf.js';
 import { FakeSocket } from './fake-socket.js';
 import type { TradeRepublicDeviceInfo, WebSocketLike } from '../src/types.js';
 
@@ -813,9 +818,11 @@ describe('TradeRepublicClient', () => {
       jurisdiction: 'DE',
       lang: 'en',
       underlying: 'US1',
-      productCategory: 'knockouts',
+      productCategory: 'knockOutProduct',
       optionType: 'short',
-      pageSize: 11,
+      sortBy: 'leverage',
+      sortDirection: 'asc',
+      pageSize: null,
     });
     expect(parseSubPayload(sockets[2]?.sent[1])).toEqual({ type: 'instrument', id: 'DE3' });
   });
@@ -834,9 +841,10 @@ describe('TradeRepublicClient', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({
-      type: 'orderUpdates',
-      selector: { case: 'bySecAccNo', value: { accountNumber: '0000000000' } },
+    expect(decodeMapperProtobufRequest(sockets[0]!.binarySent[0]!)).toEqual({
+      subscriptionId: 1,
+      topic: 'orderUpdates',
+      accountNumber: '0000000000',
     });
     subscription.close();
   });
@@ -1214,9 +1222,18 @@ describe('TradeRepublicClient', () => {
           if (payload.type === 'priceAlarms') {
             socket.emit('message', `${id} priceAlarms ${JSON.stringify({ obj: { items: [{ alarmId: 'pa1', isin: 'US1', price: { value: '123.45', currency: 'EUR' } }] } })}`);
           }
-          if (payload.type === 'priceAlarmNotifications') {
-            socket.emit('message', `${id} priceAlarmNotifications ${JSON.stringify({ priceAlarms: [{ id: 'pa2', instrumentName: 'Apple', targetPrice: 150 }] })}`);
-          }
+        }, (binary) => {
+          const request = decodeMapperProtobufRequest(binary);
+          if (request.topic !== 'priceAlarmNotifications') return;
+          const payload = encodeMapperProtobufTopicPayload(request.topic, {
+            priceAlarms: [{
+              alarmId: { id: Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]) },
+              isin: 'US1',
+              name: 'Apple',
+              price: { value: { unscaled: Uint8Array.from([0x3a, 0x98]), scale: 2 }, currency: 1 },
+            }],
+          });
+          socket.emit('message', encodeMapperProtobufDataEnvelope(request.subscriptionId, payload), true);
         });
         sockets.push(socket);
         return socket;
@@ -1236,14 +1253,17 @@ describe('TradeRepublicClient', () => {
       expect.objectContaining({ id: 'pa1', isin: 'US1', price: 123.45, currency: 'EUR' }),
     ]);
     await expect(client.priceAlarms.notifications()).resolves.toEqual([
-      expect.objectContaining({ id: 'pa2', name: 'Apple', price: 150 }),
+      expect.objectContaining({ id: '00000000-0000-0000-0000-000000000002', name: 'Apple', price: 150 }),
     ]);
 
     expect(parseSubPayload(sockets[0]?.sent[1])).toEqual({ type: 'timelineActivityLog', after: 'cursor-1' });
     expect(parseSubPayload(sockets[1]?.sent[1])).toEqual({ type: 'timelineActionsV2' });
     expect(parseSubPayload(sockets[2]?.sent[1])).toEqual({ type: 'timelineDetailV2', orderId: 'order-1' });
     expect(parseSubPayload(sockets[3]?.sent[1])).toEqual({ type: 'priceAlarms' });
-    expect(parseSubPayload(sockets[4]?.sent[1])).toEqual({ type: 'priceAlarmNotifications' });
+    expect(decodeMapperProtobufRequest(sockets[4]!.binarySent[0]!)).toEqual({
+      subscriptionId: 1,
+      topic: 'priceAlarmNotifications',
+    });
   });
 
   it('exposes portfolio extras and auto-resolves securities account numbers', async () => {
@@ -1357,7 +1377,24 @@ describe('TradeRepublicClient', () => {
         jsonResponse({ cards: [] }),
         jsonResponse({ documents: [] }),
         jsonResponse({ paymentMethods: [] }),
-        jsonResponse({ iban: 'DE00' }),
+        jsonResponse({
+          relationships: [
+            {
+              customerId: 'child-1',
+              firstName: 'Child',
+              lastName: 'Account',
+              relationshipType: 'CHILD',
+              bankingInfo: { iban: 'DE11', bic: 'CHILDXXX' },
+            },
+            {
+              customerId: 'customer-1',
+              firstName: 'Example',
+              lastName: 'Person',
+              relationshipType: 'SELF',
+              bankingInfo: { iban: 'DE00', bic: 'TRBKDEBBXXX' },
+            },
+          ],
+        }),
         jsonResponse({ tax: true }),
         jsonResponse({ exemptionOrder: true }),
         jsonResponse({ taxResidencies: [] }),
@@ -1388,13 +1425,24 @@ describe('TradeRepublicClient', () => {
     await expect(client.account.cardsHome()).resolves.toEqual({ cards: [] });
     await expect(client.documents.documents()).resolves.toEqual({ documents: [] });
     await expect(client.payments.paymentMethods()).resolves.toEqual({ paymentMethods: [] });
-    await expect(client.payments.iban()).resolves.toEqual({ iban: 'DE00' });
+    await expect(client.payments.iban()).resolves.toEqual({
+      iban: 'DE00',
+      bic: 'TRBKDEBBXXX',
+      accountHolder: 'Example Person',
+      customerId: 'customer-1',
+      relationshipType: 'SELF',
+      raw: {
+        customerId: 'customer-1',
+        firstName: 'Example',
+        lastName: 'Person',
+        relationshipType: 'SELF',
+        bankingInfo: { iban: 'DE00', bic: 'TRBKDEBBXXX' },
+      },
+    });
     await expect(client.tax.taxInformation()).resolves.toEqual({ tax: true });
     await expect(client.tax.exemptionOrder()).resolves.toEqual({ exemptionOrder: true });
     await expect(client.tax.taxResidencies()).resolves.toEqual({ taxResidencies: [] });
     await expect(client.tax.taxResidencyCountries()).resolves.toEqual({ countries: [] });
-    await expect(client.payments.interestDetails()).resolves.toEqual({ interest: true });
-
     const paths = calls.map((call) => new URL(call.url).pathname);
     expect(paths).toEqual([
       '/api-gateway/instrument-universe/api/v1/exchanges-details',
@@ -1413,12 +1461,11 @@ describe('TradeRepublicClient', () => {
       '/api/v1/card/cards/home',
       '/api/v1/documents/all',
       '/api/v2/payment/methods',
-      '/api/v1/auth/account/iban',
+      '/api/v1/customer/relationships/detailed',
       '/api/v1/taxes/information',
       '/api/v1/taxes/exemptionorders',
       '/api/v1/auth/account/change/taxresidencies',
       '/api/v1/country/taxresidency',
-      '/api/v1/interest/details',
     ]);
     expect(new URL(calls[7]?.url ?? 'https://invalid.local/').searchParams.get('side')).toBe('BUY');
     expect(new URL(calls[7]?.url ?? 'https://invalid.local/').searchParams.get('jurisdiction')).toBe('DE');
@@ -1577,7 +1624,7 @@ function expectOrderCall(call: { url: string; init: RequestInit } | undefined, e
 
 function parseSubPayload(message: string | undefined): unknown {
   expect(message).toBeDefined();
-  const text = message ?? '';
+  const text = String(message ?? '');
   const secondSpace = text.indexOf(' ', text.indexOf(' ') + 1);
   return JSON.parse(text.slice(secondSpace + 1));
 }

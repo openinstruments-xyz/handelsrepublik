@@ -5,6 +5,26 @@ import { MapperRequestError, TradeRepublicClient } from '../src/index.js';
 import type { WebSocketLike } from '../src/types.js';
 
 describe('mapper connection', () => {
+  it('sends protobuf-only mapper topics as binary frames', async () => {
+    const sockets: ManualSocket[] = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new ManualSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    const subscription = client.orders.orderUpdates('0000000001');
+    sockets[0]?.emit('open');
+    sockets[0]?.emit('message', 'connected');
+
+    assert.ok(Buffer.isBuffer(sockets[0]?.sent[1]) || sockets[0]?.sent[1] instanceof Uint8Array);
+
+    subscription.close();
+    await client.close();
+  });
+
   it('multiplexes concurrent subscriptions over one shared socket', () => {
     const sockets: ManualSocket[] = [];
     const client = TradeRepublicClient.create({
@@ -181,7 +201,7 @@ describe('mapper connection', () => {
     sockets[0]?.emit('open');
     sockets[0]?.emit('message', 'connected');
     sockets[0]?.emit('close', 1006);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitFor(() => attempts === 3, 'third websocket factory attempt');
 
     expect(attempts).toBe(3);
     sockets[1]?.emit('open');
@@ -238,8 +258,8 @@ describe('mapper connection', () => {
     sockets[1]?.emit('open');
     sockets[1]?.emit('message', 'connected');
 
-    expect(sockets[1]?.sent.some((message) => message.includes('tickerV3'))).toBe(true);
-    expect(sockets[1]?.sent.some((message) => message.includes('simpleCreateOrder'))).toBe(false);
+    expect(sockets[1]?.sent.some((message) => String(message).includes('tickerV3'))).toBe(true);
+    expect(sockets[1]?.sent.some((message) => String(message).includes('simpleCreateOrder'))).toBe(false);
     read.close();
   });
 
@@ -282,6 +302,14 @@ describe('mapper connection', () => {
   });
 });
 
+async function waitFor(predicate: () => boolean, label: string, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}.`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 100): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -297,7 +325,7 @@ async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 100): Promise
 }
 
 class ManualSocket extends EventEmitter implements WebSocketLike {
-  readonly sent: string[] = [];
+  readonly sent: Array<string | ArrayBuffer | Buffer> = [];
   closed = false;
 
   constructor(private readonly shouldThrow?: (data: string | ArrayBuffer | Buffer) => boolean) {
@@ -306,7 +334,7 @@ class ManualSocket extends EventEmitter implements WebSocketLike {
 
   send(data: string | ArrayBuffer | Buffer): void {
     if (this.shouldThrow?.(data)) throw new Error('send failed');
-    this.sent.push(String(data));
+    this.sent.push(data);
   }
 
   close(): void {

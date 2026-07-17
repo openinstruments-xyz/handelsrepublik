@@ -5,9 +5,10 @@ import {
   normalizeBoard,
   normalizeExchangeDetails,
   normalizeExchangeSchedule,
+  normalizeIbanInfo,
   normalizeInstrumentStatus,
 } from './normalizers.js';
-import type { Board, ExchangeDetails, ExchangeSchedule, InstrumentStatus } from './types.js';
+import type { Board, ExchangeDetails, ExchangeSchedule, IbanInfo, InstrumentStatus } from './types.js';
 
 export const accountOperations = {
   current: endpoint('auth.account', 'auth.account'),
@@ -79,8 +80,13 @@ export const customerOperations = {
   taxResidencies: rest('tax.taxResidencies', '/api/v1/auth/account/change/taxresidencies'),
   taxResidencyCountries: rest('tax.taxResidencyCountries', '/api/v1/country/taxresidency'),
   paymentMethods: rest('payments.paymentMethods', '/api/v2/payment/methods'),
-  iban: rest('payments.iban', '/api/v1/auth/account/iban'),
-  interestDetails: rest('payments.interestDetails', '/api/v1/interest/details'),
+  iban: {
+    transport: 'rest',
+    name: 'payments.iban',
+    schemaName: 'payments.iban',
+    path: '/api/v1/customer/relationships/detailed',
+    normalize: normalizeIbanInfo,
+  } satisfies RestOperation<Record<string, never>, IbanInfo>,
 } as const;
 
 export const operationCatalog = [

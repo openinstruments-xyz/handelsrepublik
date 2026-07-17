@@ -27,6 +27,7 @@ import {
   normalizeAssetDetail,
   normalizeCash,
   normalizeDerivative,
+  normalizeIbanInfo,
   normalizeInstrumentNewsItem,
   normalizeOrder,
   normalizeOrderDestination,
@@ -55,6 +56,7 @@ import type {
   CandleTimeframe,
   CashSummary,
   Derivative,
+  IbanInfo,
   InstrumentNewsItem,
   L2OrderBook,
   L2OrderBookOptions,
@@ -402,22 +404,62 @@ export class DerivativesApi {
     return arrayPayload(raw).map(normalizeDerivative);
   }
 
-  async listForUnderlying(underlyingId: string, options: { direction?: 'long' | 'short'; productType?: string; limit?: number } = {}): Promise<Derivative[]> {
-    const raw = await validated(this.validateRaw, 'derivatives.listForUnderlying', this.raw.query({
-      type: 'derivatives',
-      jurisdiction: 'DE',
-      lang: 'en',
-      underlying: underlyingId,
-      productCategory: options.productType,
-      optionType: options.direction,
-      pageSize: options.limit ?? null,
-    }));
-    return arrayPayload(raw).map(normalizeDerivative);
+  async listForUnderlying(underlyingId: string, options: {
+    direction?: 'long' | 'short' | 'call' | 'put';
+    productType?: 'knockouts' | 'warrants' | 'factors' | 'knockOutProduct' | 'vanillaWarrant' | 'factorCertificate';
+    limit?: number;
+  } = {}): Promise<Derivative[]> {
+    const category = options.productType ? derivativeCategory(options.productType) : undefined;
+    const categories = category ? [category] : DERIVATIVE_CATEGORIES;
+    const requests = categories.flatMap((item) => {
+      const directions = options.direction ? [options.direction] : item.directions;
+      if (directions.some((direction) => !item.directions.includes(direction))) {
+        throw new TypeError(`${options.direction} is not valid for derivative category ${item.name}.`);
+      }
+      return directions.map((direction) => ({
+        type: 'derivatives',
+        jurisdiction: 'DE',
+        lang: 'en',
+        underlying: underlyingId,
+        productCategory: item.resourceValue,
+        optionType: direction,
+        sortBy: item.sortBy,
+        sortDirection: 'asc',
+        pageSize: null,
+      }));
+    });
+    const rawPages = await Promise.all(requests.map((request) => validated(
+      this.validateRaw,
+      'derivatives.listForUnderlying',
+      this.raw.query(request),
+    )));
+    return rawPages.flatMap(arrayPayload).map(normalizeDerivative).slice(0, options.limit);
   }
 
   async get(derivativeId: string): Promise<Derivative> {
     return normalizeDerivative(await validated(this.validateRaw, 'assets.get', this.raw.query({ type: 'instrument', id: derivativeId })));
   }
+}
+
+type DerivativeDirection = 'long' | 'short' | 'call' | 'put';
+
+interface DerivativeCategorySpec {
+  name: 'knockouts' | 'warrants' | 'factors';
+  resourceValue: 'knockOutProduct' | 'vanillaWarrant' | 'factorCertificate';
+  directions: readonly DerivativeDirection[];
+  sortBy: 'leverage' | 'delta' | 'factor';
+}
+
+const DERIVATIVE_CATEGORIES: readonly DerivativeCategorySpec[] = [
+  { name: 'knockouts', resourceValue: 'knockOutProduct', directions: ['long', 'short'], sortBy: 'leverage' },
+  { name: 'warrants', resourceValue: 'vanillaWarrant', directions: ['call', 'put'], sortBy: 'delta' },
+  { name: 'factors', resourceValue: 'factorCertificate', directions: ['long', 'short'], sortBy: 'factor' },
+];
+
+function derivativeCategory(value: NonNullable<Parameters<DerivativesApi['listForUnderlying']>[1]>['productType']): DerivativeCategorySpec {
+  const category = DERIVATIVE_CATEGORIES.find((item) => item.name === value || item.resourceValue === value);
+  if (!category) throw new TypeError(`Unknown derivative category: ${value}`);
+  return category;
 }
 
 export class OrdersApi {
@@ -500,18 +542,17 @@ export class OrdersApi {
   }
 
   orderUpdates(secAccNo: string): Subscription<unknown> {
-    return toSubscription(this.raw.subscribeResource({
-      type: 'orderUpdates',
-      selector: { case: 'bySecAccNo', value: { accountNumber: secAccNo } },
-    })).map((raw) => this.validateRaw('orders.orderUpdates', raw));
+    return toSubscription(this.raw.subscribeProtobufResource('orderUpdates', { accountNumber: secAccNo }))
+      .map((raw) => this.validateRaw('orders.orderUpdates', raw));
   }
 
   async rawOrderUpdates(secAccNo?: string): Promise<unknown> {
     const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
-    return validated(this.validateRaw, 'orders.orderUpdates', this.raw.query({
-      type: 'orderUpdates',
-      selector: { case: 'bySecAccNo', value: { accountNumber } },
-    }));
+    return validated(
+      this.validateRaw,
+      'orders.orderUpdates',
+      this.raw.queryProtobufResource('orderUpdates', { accountNumber }),
+    );
   }
 
   async prepare(options: CreateOrderOptions): Promise<PreparedOrder> {
@@ -1170,7 +1211,11 @@ export class PriceAlarmsApi {
   }
 
   rawNotifications(options: { timeoutMs?: number } = {}): Promise<unknown> {
-    return validated(this.validateRaw, 'priceAlarms.notifications', this.raw.query({ type: 'priceAlarmNotifications' }, pickTimeoutOptions(options)));
+    return validated(
+      this.validateRaw,
+      'priceAlarms.notifications',
+      this.raw.queryProtobufResource('priceAlarmNotifications', {}, pickTimeoutOptions(options)),
+    );
   }
 
   create(options: { isin: string; price: number; timeoutMs?: number }): Promise<unknown> {
@@ -1443,10 +1488,11 @@ export class WebApi {
   }
 
   tape(isin: string, exchangeId: string, unit = 'EUR'): Subscription<unknown> {
-    return this.subscribe({ type: 'tape', isin, exchangeId, unit });
+    const mapperUnit = unit === 'PKT' ? 'PTS' : unit === 'PRZ' ? 'PCT' : unit;
+    return this.subscribe({ type: 'tape', isin, exchangeId, unit: mapperUnit });
   }
 
-  tradeAggregateHistory(isin: string, exchangeId: string, resolution: string, from: string, until?: string): Promise<unknown> {
+  tradeAggregateHistory(isin: string, exchangeId: string, resolution: number, from: number, until?: number): Promise<unknown> {
     return this.query({ type: 'tradeAggregateHistory', isin, exchangeId, resolution, from, until });
   }
 
@@ -1518,8 +1564,12 @@ export class WebApi {
     return this.request('GET', '/api/v2/payment/methods');
   }
 
-  iban(): Promise<unknown> {
-    return this.request('GET', '/api/v1/auth/account/iban');
+  async iban(): Promise<IbanInfo> {
+    return normalizeIbanInfo(await this.rawIban());
+  }
+
+  rawIban(): Promise<unknown> {
+    return this.request('GET', '/api/v1/customer/relationships/detailed');
   }
 
   taxInformation(): Promise<unknown> {
@@ -1536,10 +1586,6 @@ export class WebApi {
 
   taxResidencyCountries(): Promise<unknown> {
     return this.request('GET', '/api/v1/country/taxresidency');
-  }
-
-  interestDetails(): Promise<unknown> {
-    return this.request('GET', '/api/v1/interest/details');
   }
 
   watchlists(): Promise<unknown> {

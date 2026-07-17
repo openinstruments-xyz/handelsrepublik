@@ -43,6 +43,7 @@ export type {
   ExchangeDetails,
   ExchangeSchedule,
   HttpMethod,
+  IbanInfo,
   InstrumentNewsItem,
   InstrumentStatus,
   InstantLoginChallenge,

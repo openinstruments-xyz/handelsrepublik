@@ -9,6 +9,7 @@ import type {
   Derivative,
   ExchangeDetails,
   ExchangeSchedule,
+  IbanInfo,
   InstrumentNewsItem,
   InstrumentStatus,
   L2OrderBook,
@@ -66,6 +67,32 @@ export function arrayPayload(value: unknown): unknown[] {
   if (Array.isArray(nestedData.data)) return nestedData.data;
   if (Array.isArray(nestedData.items)) return nestedData.items;
   return [];
+}
+
+export function normalizeIbanInfo(value: unknown): IbanInfo {
+  const root = asRecord(value);
+  const relationships = Array.isArray(root.relationships) ? root.relationships : [];
+  const withIban = relationships.filter((relationship) => {
+    const bankingInfo = asRecord(asRecord(relationship).bankingInfo);
+    return optionalString(bankingInfo.iban) !== undefined;
+  });
+  const relationship = withIban.find((candidate) => asRecord(candidate).relationshipType === 'SELF') ?? withIban[0];
+  const record = asRecord(relationship);
+  const bankingInfo = asRecord(record.bankingInfo);
+  const iban = optionalString(bankingInfo.iban);
+  if (!iban) throw new TypeError('Trade Republic account relationships response did not contain an IBAN.');
+
+  const accountHolder = [optionalString(record.firstName), optionalString(record.lastName)]
+    .filter((part): part is string => part !== undefined)
+    .join(' ');
+  return {
+    iban,
+    bic: optionalString(bankingInfo.bic),
+    accountHolder: accountHolder || undefined,
+    customerId: optionalString(record.customerId),
+    relationshipType: optionalString(record.relationshipType),
+    raw: relationship,
+  };
 }
 
 export function normalizeAsset(value: unknown): Asset {

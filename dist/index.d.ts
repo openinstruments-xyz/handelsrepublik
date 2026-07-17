@@ -43,6 +43,14 @@ interface TradeRepublicClientOptions {
     onRawSchemaValidationFailure?: ((failure: RawSchemaValidationFailure) => void) | undefined;
 }
 type RawSchemaValidator = (schemaName: string, value: unknown) => unknown;
+interface IbanInfo {
+    iban: string;
+    bic?: string | undefined;
+    accountHolder?: string | undefined;
+    customerId?: string | undefined;
+    relationshipType?: string | undefined;
+    raw: unknown;
+}
 interface Board {
     id: string;
     name?: string | undefined;
@@ -646,6 +654,8 @@ declare class TradeRepublicSchemaError extends TradeRepublicError {
     constructor(message: string, schemaName: string, issues: unknown, rawSummary: unknown, cause?: unknown);
 }
 
+type MapperProtobufTopic = 'orderUpdates' | 'priceAlarmNotifications';
+
 type MapperDeliveryState = 'notSent' | 'sent';
 type MapperRequestFailureReason = 'clientClosed' | 'connectFailure' | 'disconnect' | 'handshakeTimeout' | 'sendFailure' | 'sessionRefresh' | 'timeout';
 declare class MapperRequestError extends TradeRepublicProtocolError {
@@ -694,8 +704,14 @@ declare class RawApi {
     subscribe(topic: string, payload?: unknown, options?: RawSubscriptionOptions): RawSubscription;
     subscribeLegacy(topic: string, payload?: unknown, options?: RawSubscriptionOptions): RawSubscription;
     subscribeResource(payload: Record<string, unknown>, options?: RawSubscriptionOptions): RawSubscription;
+    subscribeProtobufResource(topic: MapperProtobufTopic, request?: {
+        accountNumber?: string | undefined;
+    }, options?: RawSubscriptionOptions): RawSubscription;
     query<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
     queryResource<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
+    queryProtobufResource<T = unknown>(topic: MapperProtobufTopic, request?: {
+        accountNumber?: string | undefined;
+    }, options?: RawQueryOptions): Promise<T>;
     /** Reconnect active subscriptions after session or browser-context changes. */
     refreshSession(): void;
     close(): void;
@@ -843,10 +859,8 @@ declare class PaymentsApi {
     constructor(operations: OperationClient);
     paymentMethods(): Promise<unknown>;
     rawPaymentMethods(): Promise<unknown>;
-    iban(): Promise<unknown>;
+    iban(): Promise<IbanInfo>;
     rawIban(): Promise<unknown>;
-    interestDetails(): Promise<unknown>;
-    rawInterestDetails(): Promise<unknown>;
 }
 
 declare class DiscoveryApi {
@@ -950,8 +964,8 @@ declare class DerivativesApi {
         limit?: number;
     }): Promise<Derivative[]>;
     listForUnderlying(underlyingId: string, options?: {
-        direction?: 'long' | 'short';
-        productType?: string;
+        direction?: 'long' | 'short' | 'call' | 'put';
+        productType?: 'knockouts' | 'warrants' | 'factors' | 'knockOutProduct' | 'vanillaWarrant' | 'factorCertificate';
         limit?: number;
     }): Promise<Derivative[]>;
     get(derivativeId: string): Promise<Derivative>;
@@ -1201,7 +1215,7 @@ declare class WebApi {
     fixedSavingsValuation(instrumentId: string, secAccNo?: string): Promise<unknown>;
     privateMarketsPositions(secAccNo?: string): Promise<unknown>;
     tape(isin: string, exchangeId: string, unit?: string): Subscription<unknown>;
-    tradeAggregateHistory(isin: string, exchangeId: string, resolution: string, from: string, until?: string): Promise<unknown>;
+    tradeAggregateHistory(isin: string, exchangeId: string, resolution: number, from: number, until?: number): Promise<unknown>;
     priceForOrder(options: {
         isin: string;
         exchangeId: string;
@@ -1224,12 +1238,12 @@ declare class WebApi {
     accountSettings(): Promise<unknown>;
     appUsageConsents(): Promise<unknown>;
     paymentMethods(): Promise<unknown>;
-    iban(): Promise<unknown>;
+    iban(): Promise<IbanInfo>;
+    rawIban(): Promise<unknown>;
     taxInformation(): Promise<unknown>;
     exemptionOrder(): Promise<unknown>;
     taxResidencies(): Promise<unknown>;
     taxResidencyCountries(): Promise<unknown>;
-    interestDetails(): Promise<unknown>;
     watchlists(): Promise<unknown>;
     screeners(): Promise<unknown>;
     screenerOptions(): Promise<unknown>;
@@ -1313,12 +1327,11 @@ interface TradeRepublicSchemaEntry {
     responseSchema: ZodType<unknown>;
     variants?: string[] | undefined;
     live?: {
-        optionalStatuses?: number[] | undefined;
         sample?: 'once' | 'stream' | 'cleanup' | undefined;
     } | undefined;
 }
-declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
+declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+export { type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, MapperConnectionLostError, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketQuote, type MarketSubscription, type MarketSubscriptionsOptions, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PrivateMarketsOrdersOptions, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };

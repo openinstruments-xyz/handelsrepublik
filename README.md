@@ -25,6 +25,8 @@ The package provides:
   timeline, instruments, discovery, documents, tax, and payments.
 - Shared mapper-websocket subscriptions with observable disconnect and reconnect
   events.
+- Binary protobuf support for current order-update and price-alarm-notification
+  streams, alongside JSON mapper resources.
 - Configurable validation of covered raw responses before normalization.
 - Order previews plus explicit order submission and cancellation methods.
 - Raw REST and mapper escape hatches for private resources without a typed SDK
@@ -467,18 +469,18 @@ does not yet have a first-class SDK method.
 | `tr.account` | Current account, web session, settings, personal details, relationships, and cards. |
 | `tr.boards` | List and load trading boards. |
 | `tr.assets` | Search, list, and load stocks, ETFs, funds, crypto, bonds, and other instruments. |
-| `tr.derivatives` | Search derivatives, list products for an underlying, and load details. |
+| `tr.derivatives` | Search derivatives, list knockout, warrant, and factor products for an underlying, and load details. |
 | `tr.portfolio` | Portfolio, cash, mark-to-market value, savings plans, private-market positions, and chart data. |
 | `tr.orders` | List, filter, preview, prepare, submit, cancel, and stream order updates. |
 | `tr.trading` | Order prices, available size, destinations, trades, and daily PnL. |
 | `tr.market` | Quotes, candles, live feeds, subscriptions, and L2 order books. |
 | `tr.timeline` | Timeline entries, actions, and details. |
-| `tr.priceAlarms` | List, create, and cancel price alarms. |
+| `tr.priceAlarms` | List, create, cancel, and read protobuf price-alarm notifications. |
 | `tr.instruments` | News and ETF, fund, crypto, composition, and yield details. |
 | `tr.discovery` | Exchanges, schedules, instrument status, watchlists, screeners, and preferences. |
 | `tr.documents` | Account documents. |
 | `tr.tax` | Tax information, exemption orders, and tax residencies. |
-| `tr.payments` | Payment methods, IBAN, and interest details. |
+| `tr.payments` | Payment methods and typed IBAN information from the account relationship. |
 | `tr.raw` | Low-level REST and mapper access using the SDK transport. |
 | `tr.web` | Debugging-oriented REST and mapper convenience methods. |
 
@@ -548,6 +550,11 @@ try {
   updates.close();
 }
 ```
+
+`orders.orderUpdates()` and `priceAlarms.notifications()` use the current binary
+protobuf mapper protocol. The SDK performs request framing, response-envelope
+decoding, and normalization internally; callers receive ordinary SDK values and
+do not need protobuf-generated classes.
 
 ## Raw APIs and schema drift
 
@@ -687,9 +694,8 @@ order preparation, submission, and cancellation remain explicit workflows.
 `MapperConnection` owns multiplexing and reconnect behavior.
 
 Unit tests use mocked HTTP and websocket transports. Live integration tests are
-opt-in, reuse a saved demo session, and must remain free of order submissions,
-order cancellations, money movement, document acceptance, and account-security
-mutations:
+opt-in, reuse a saved demo session, and run read-only Trade Republic operations
+by default:
 
 ```powershell
 $env:TR_INTEGRATION = '1'
@@ -697,8 +703,14 @@ $env:TR_SESSION_FILE = './demo/.demo-session.json'
 npm run test:integration
 ```
 
-The live suite may use disposable low-risk price-alarm and watchlist mutations
-with cleanup. High-risk trading paths remain mocked-only.
+Disposable price-alarm and watchlist mutations require the separate
+`TR_INTEGRATION_LOW_RISK_MUTATIONS=1` opt-in and always include cleanup. Closed
+exchange rejection contracts for classic stock and ETF orders require
+`TR_INTEGRATION_CLOSED_ORDER_REJECTIONS=1`; the test refuses to submit unless
+LSX explicitly reports `open: false`, and it cancels any unexpectedly created
+order. This opt-in is ignored whenever `GITHUB_ACTIONS=true`, making order tests
+local-only. Savings-plan, money-movement, document-acceptance, and
+account-security mutations are never exercised.
 
 GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on every
 push and when the workflows are started manually. A separate account integration
@@ -709,10 +721,11 @@ session, and the repository owner can also start it manually. Those times keep
 the scheduled AAPL/LSX L2 test inside 07:00-23:00 German time even when GitHub
 starts the workflow up to an hour late.
 
-The live suite fails on endpoint errors, but skips the unsupported rename and
-clone operations for Trade Republic's built-in default watchlist. It never
-submits, changes, cancels, or intentionally fails an order. Its only writes are
-disposable low-risk price-alarm and watchlist probes with cleanup.
+The GitHub workflow explicitly sets both mutation opt-ins to `0`, and the suite
+independently blocks order tests on GitHub Actions. Scheduled and manual GitHub
+runs therefore remain read-only. The live suite fails on all endpoint errors;
+optional local mutation probes skip unsupported rename and clone operations for
+Trade Republic's built-in default watchlist.
 
 When the GitHub Environment session expires, renew it from a maintainer machine:
 

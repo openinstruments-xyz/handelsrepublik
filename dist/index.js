@@ -1,15 +1,15 @@
 // src/errors.ts
 var TradeRepublicError = class extends Error {
-  constructor(message, cause) {
-    super(message);
+  constructor(message2, cause) {
+    super(message2);
     this.cause = cause;
     this.name = "TradeRepublicError";
   }
   cause;
 };
 var TradeRepublicHttpError = class extends TradeRepublicError {
-  constructor(message, status, responseBody) {
-    super(message);
+  constructor(message2, status, responseBody) {
+    super(message2);
     this.status = status;
     this.responseBody = responseBody;
     this.name = "TradeRepublicHttpError";
@@ -18,14 +18,14 @@ var TradeRepublicHttpError = class extends TradeRepublicError {
   responseBody;
 };
 var TradeRepublicProtocolError = class extends TradeRepublicError {
-  constructor(message, cause) {
-    super(message, cause);
+  constructor(message2, cause) {
+    super(message2, cause);
     this.name = "TradeRepublicProtocolError";
   }
 };
 var TradeRepublicSchemaError = class extends TradeRepublicError {
-  constructor(message, schemaName, issues, rawSummary, cause) {
-    super(message, cause);
+  constructor(message2, schemaName, issues, rawSummary, cause) {
+    super(message2, cause);
     this.schemaName = schemaName;
     this.issues = issues;
     this.rawSummary = rawSummary;
@@ -39,7 +39,7 @@ var TradeRepublicSchemaError = class extends TradeRepublicError {
 // src/normalizers.ts
 function arrayPayload(value) {
   if (Array.isArray(value)) return value;
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   for (const key of [
     "items",
     "data",
@@ -61,29 +61,51 @@ function arrayPayload(value) {
     "trades",
     "destinations"
   ]) {
-    const candidate = record[key];
+    const candidate = record2[key];
     if (Array.isArray(candidate)) return candidate;
   }
-  const objItems = asRecord(record.obj).items;
+  const objItems = asRecord(record2.obj).items;
   if (Array.isArray(objItems)) return objItems;
-  const nestedData = asRecord(record.data);
+  const nestedData = asRecord(record2.data);
   if (Array.isArray(nestedData.data)) return nestedData.data;
   if (Array.isArray(nestedData.items)) return nestedData.items;
   return [];
 }
-function normalizeAsset(value) {
-  const record = asRecord(value);
-  const instrument = asRecord(record.instrument);
-  const core = asRecord(record.core);
+function normalizeIbanInfo(value) {
+  const root = asRecord(value);
+  const relationships = Array.isArray(root.relationships) ? root.relationships : [];
+  const withIban = relationships.filter((relationship2) => {
+    const bankingInfo2 = asRecord(asRecord(relationship2).bankingInfo);
+    return optionalString(bankingInfo2.iban) !== void 0;
+  });
+  const relationship = withIban.find((candidate) => asRecord(candidate).relationshipType === "SELF") ?? withIban[0];
+  const record2 = asRecord(relationship);
+  const bankingInfo = asRecord(record2.bankingInfo);
+  const iban = optionalString(bankingInfo.iban);
+  if (!iban) throw new TypeError("Trade Republic account relationships response did not contain an IBAN.");
+  const accountHolder = [optionalString(record2.firstName), optionalString(record2.lastName)].filter((part) => part !== void 0).join(" ");
   return {
-    id: stringValue(record.id, record.instrumentId, record.isin, instrument.id, instrument.instrumentId, instrument.isin, record.slug),
-    isin: optionalString(record.isin, record.instrumentId, instrument.isin, instrument.instrumentId),
+    iban,
+    bic: optionalString(bankingInfo.bic),
+    accountHolder: accountHolder || void 0,
+    customerId: optionalString(record2.customerId),
+    relationshipType: optionalString(record2.relationshipType),
+    raw: relationship
+  };
+}
+function normalizeAsset(value) {
+  const record2 = asRecord(value);
+  const instrument = asRecord(record2.instrument);
+  const core = asRecord(record2.core);
+  return {
+    id: stringValue(record2.id, record2.instrumentId, record2.isin, instrument.id, instrument.instrumentId, instrument.isin, record2.slug),
+    isin: optionalString(record2.isin, record2.instrumentId, instrument.isin, instrument.instrumentId),
     name: optionalString(
-      record.name,
-      record.shortName,
-      record.title,
-      record["core.shortName"],
-      record["core.officialName"],
+      record2.name,
+      record2.shortName,
+      record2.title,
+      record2["core.shortName"],
+      record2["core.officialName"],
       core.shortName,
       core.officialName,
       instrument.name,
@@ -91,90 +113,90 @@ function normalizeAsset(value) {
       instrument.title
     ),
     type: optionalString(
-      record.typeId,
-      record.type,
-      record.instrumentType,
-      record.assetType,
+      record2.typeId,
+      record2.type,
+      record2.instrumentType,
+      record2.assetType,
       instrument.typeId,
       instrument.type,
       instrument.instrumentType,
       instrument.assetType
     ),
     exchangeIds: uniqueStrings(
-      arrayOfStrings(record.exchangeIds, record.exchanges, record.tradingVenues),
+      arrayOfStrings(record2.exchangeIds, record2.exchanges, record2.tradingVenues),
       arrayOfStrings(instrument.exchangeIds, instrument.exchanges, instrument.tradingVenues)
     ),
     raw: value
   };
 }
 function normalizeWatchlistItem(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
     ...normalizeAsset(value),
-    rank: optionalNumber(record.rank, record.itemRank, record.item_rank)
+    rank: optionalNumber(record2.rank, record2.itemRank, record2.item_rank)
   };
 }
 function normalizeWatchlist(value, items = []) {
-  const record = asRecord(value);
-  const inlineItems = Array.isArray(record.items) ? record.items : items;
+  const record2 = asRecord(value);
+  const inlineItems = Array.isArray(record2.items) ? record2.items : items;
   return {
-    id: stringValue(record.id, record.watchlistId, record.slug),
-    name: optionalString(record.name, record.title),
+    id: stringValue(record2.id, record2.watchlistId, record2.slug),
+    name: optionalString(record2.name, record2.title),
     items: inlineItems.map(normalizeWatchlistItem).sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER)),
     raw: value
   };
 }
 function normalizeAssetDetail(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   const asset = normalizeAsset(value);
   return {
     ...asset,
-    issuer: optionalString(record.issuer, asRecord(record.issuer).name),
-    createdAt: optionalString(record.createdAt, record.created, record.issueDate),
-    endsAt: optionalString(record.endsAt, record.endDate, record.expiry, record.expiryDate),
-    knockout: optionalNumber(record.knockout, record.knockoutPrice, record.knockOut),
-    entryPrice: optionalNumber(record.entryPrice, record.strike, record.strikePrice),
-    direction: normalizeDirection(record.direction, record.side),
-    leverage: optionalNumber(record.leverage)
+    issuer: optionalString(record2.issuer, asRecord(record2.issuer).name),
+    createdAt: optionalString(record2.createdAt, record2.created, record2.issueDate),
+    endsAt: optionalString(record2.endsAt, record2.endDate, record2.expiry, record2.expiryDate),
+    knockout: optionalNumber(record2.knockout, record2.knockoutPrice, record2.knockOut),
+    entryPrice: optionalNumber(record2.entryPrice, record2.strike, record2.strikePrice),
+    direction: normalizeDirection(record2.direction, record2.side),
+    leverage: optionalNumber(record2.leverage)
   };
 }
 function normalizeDerivative(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
     ...normalizeAssetDetail(value),
-    underlyingId: optionalString(record.underlyingId, asRecord(record.underlying).id),
-    productType: optionalString(record.productType, record.derivativeType, record.type)
+    underlyingId: optionalString(record2.underlyingId, asRecord(record2.underlying).id),
+    productType: optionalString(record2.productType, record2.derivativeType, record2.type)
   };
 }
 function normalizeOrder(value) {
-  const record = asRecord(value);
-  const instrument = asRecord(record.instrument);
-  const amount = moneyAmount(record.amount) ?? moneyAmount(record.cashQuantity) ?? optionalNumber(record.amount, asRecord(record.amount).value, asRecord(record.cashQuantity).amount);
-  const currency = moneyCurrency(record.amount) ?? moneyCurrency(record.cashQuantity) ?? optionalString(record.currency, record.currencyId, asRecord(record.amount).currency, asRecord(record.cashQuantity).currency);
-  const executedAt = optionalString(record.executedAt);
-  const cancelledAt = optionalString(record.cancelledAt, record.canceledAt);
-  const expiredAt = optionalString(record.expiredAt);
-  const rejectedAt = optionalString(record.rejectedAt);
-  const executions = normalizeExecutions(record.trades, record.executions, record.fills);
-  const executedQuantity = optionalNumber(record.executedQuantity, record.executedSize, record.filledQuantity, record.filledSize) ?? (executions.length ? executions.reduce((sum, execution) => sum + execution.size, 0) : void 0);
-  const executionPrice = optionalNumber(record.executionPrice, record.executedPrice, record.averageExecutionPrice, record.averagePrice) ?? weightedExecutionPrice(executions);
+  const record2 = asRecord(value);
+  const instrument = asRecord(record2.instrument);
+  const amount = moneyAmount(record2.amount) ?? moneyAmount(record2.cashQuantity) ?? optionalNumber(record2.amount, asRecord(record2.amount).value, asRecord(record2.cashQuantity).amount);
+  const currency = moneyCurrency(record2.amount) ?? moneyCurrency(record2.cashQuantity) ?? optionalString(record2.currency, record2.currencyId, asRecord(record2.amount).currency, asRecord(record2.cashQuantity).currency);
+  const executedAt = optionalString(record2.executedAt);
+  const cancelledAt = optionalString(record2.cancelledAt, record2.canceledAt);
+  const expiredAt = optionalString(record2.expiredAt);
+  const rejectedAt = optionalString(record2.rejectedAt);
+  const executions = normalizeExecutions(record2.trades, record2.executions, record2.fills);
+  const executedQuantity = optionalNumber(record2.executedQuantity, record2.executedSize, record2.filledQuantity, record2.filledSize) ?? (executions.length ? executions.reduce((sum, execution) => sum + execution.size, 0) : void 0);
+  const executionPrice = optionalNumber(record2.executionPrice, record2.executedPrice, record2.averageExecutionPrice, record2.averagePrice) ?? weightedExecutionPrice(executions);
   return {
-    id: stringValue(record.id, record.orderId),
-    status: optionalString(record.status, record.state) ?? inferOrderStatus(record),
-    isin: optionalString(record.isin, record.instrumentId, instrument.isin, instrument.instrumentId),
-    instrumentId: optionalString(record.instrumentId, record.isin, instrument.instrumentId, instrument.isin),
-    name: optionalString(record.name, record.instrumentName, instrument.name, instrument.shortName),
-    side: optionalString(record.side, record.action),
-    type: optionalString(record.type, record.mode, record.orderType),
-    createdAt: optionalString(record.createdAt, record.created, record.createdTime, record.submittedAt),
-    submittedAt: optionalString(record.submittedAt),
-    updatedAt: optionalString(record.updatedAt),
-    closedAt: optionalString(record.closedAt, executedAt, cancelledAt, expiredAt, rejectedAt),
+    id: stringValue(record2.id, record2.orderId),
+    status: optionalString(record2.status, record2.state) ?? inferOrderStatus(record2),
+    isin: optionalString(record2.isin, record2.instrumentId, instrument.isin, instrument.instrumentId),
+    instrumentId: optionalString(record2.instrumentId, record2.isin, instrument.instrumentId, instrument.isin),
+    name: optionalString(record2.name, record2.instrumentName, instrument.name, instrument.shortName),
+    side: optionalString(record2.side, record2.action),
+    type: optionalString(record2.type, record2.mode, record2.orderType),
+    createdAt: optionalString(record2.createdAt, record2.created, record2.createdTime, record2.submittedAt),
+    submittedAt: optionalString(record2.submittedAt),
+    updatedAt: optionalString(record2.updatedAt),
+    closedAt: optionalString(record2.closedAt, executedAt, cancelledAt, expiredAt, rejectedAt),
     executedAt: executedAt ?? executions.map((execution) => execution.time).filter((time) => Boolean(time)).sort().at(-1),
     cancelledAt,
     expiredAt,
     rejectedAt,
-    quantity: optionalNumber(record.quantity, record.size, record.estimatedSize),
+    quantity: optionalNumber(record2.quantity, record2.size, record2.estimatedSize),
     executedQuantity,
     executionPrice,
     amount,
@@ -186,13 +208,13 @@ function normalizeExecutions(...values) {
   for (const value of values) {
     if (!Array.isArray(value)) continue;
     const executions = value.flatMap((item) => {
-      const record = asRecord(item);
-      const size = optionalNumber(record.executionSize, record.executedSize, record.quantity, record.size);
+      const record2 = asRecord(item);
+      const size = optionalNumber(record2.executionSize, record2.executedSize, record2.quantity, record2.size);
       if (size === void 0 || size <= 0) return [];
       return [{
         size,
-        price: optionalNumber(record.executionPrice, record.price, record.executedPrice),
-        time: optionalString(record.executedAt, record.executionTime, record.createdAt, record.time)
+        price: optionalNumber(record2.executionPrice, record2.price, record2.executedPrice),
+        time: optionalString(record2.executedAt, record2.executionTime, record2.createdAt, record2.time)
       }];
     });
     if (executions.length) return executions;
@@ -204,12 +226,12 @@ function weightedExecutionPrice(executions) {
   const size = priced.reduce((sum, execution) => sum + execution.size, 0);
   return size > 0 ? priced.reduce((sum, execution) => sum + execution.price * execution.size, 0) / size : void 0;
 }
-function inferOrderStatus(record) {
-  if (optionalString(record.executedAt)) return "executed";
-  if (optionalString(record.cancelledAt, record.canceledAt)) return "canceled";
-  if (optionalString(record.expiredAt)) return "expired";
-  if (optionalString(record.rejectedAt)) return "rejected";
-  const executionSize = sumExecutionSize(record.trades);
+function inferOrderStatus(record2) {
+  if (optionalString(record2.executedAt)) return "executed";
+  if (optionalString(record2.cancelledAt, record2.canceledAt)) return "canceled";
+  if (optionalString(record2.expiredAt)) return "expired";
+  if (optionalString(record2.rejectedAt)) return "rejected";
+  const executionSize = sumExecutionSize(record2.trades);
   return executionSize && executionSize > 0 ? "partiallyFilled" : "open";
 }
 function sumExecutionSize(value) {
@@ -225,43 +247,43 @@ function sumExecutionSize(value) {
   return sawSize ? total : void 0;
 }
 function normalizeBoard(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.boardId),
-    name: optionalString(record.name, record.title),
-    widgets: arrayPayload(record.widgets).map(normalizeBoardWidget),
+    id: stringValue(record2.id, record2.boardId),
+    name: optionalString(record2.name, record2.title),
+    widgets: arrayPayload(record2.widgets).map(normalizeBoardWidget),
     raw: value
   };
 }
 function normalizeBoardWidget(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.widgetId),
-    type: stringValue(record.type, record.widgetType),
-    settings: objectPayload(record.settings),
+    id: stringValue(record2.id, record2.widgetId),
+    type: stringValue(record2.type, record2.widgetType),
+    settings: objectPayload(record2.settings),
     raw: value
   };
 }
 function normalizePortfolio(value) {
-  const record = asRecord(value);
-  const source = Array.isArray(record.categories) ? record.categories : arrayPayload(value);
+  const record2 = asRecord(value);
+  const source = Array.isArray(record2.categories) ? record2.categories : arrayPayload(value);
   const positions = source.flatMap((item) => {
-    const record2 = asRecord(item);
-    if (Array.isArray(record2.positions)) return record2.positions.map((position) => normalizePortfolioPosition({ ...asRecord(position), categoryType: record2.categoryType }));
+    const record3 = asRecord(item);
+    if (Array.isArray(record3.positions)) return record3.positions.map((position) => normalizePortfolioPosition({ ...asRecord(position), categoryType: record3.categoryType }));
     return [normalizePortfolioPosition(item)];
   });
   return { positions, raw: value };
 }
 function normalizePortfolioPosition(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.instrumentId, record.isin),
-    isin: optionalString(record.isin, record.instrumentId),
-    name: optionalString(record.name, record.instrumentName),
-    quantity: optionalNumber(record.quantity, record.shares, record.size),
-    value: optionalNumber(record.value, record.netValue, asRecord(record.marketValue).amount),
-    currency: optionalString(record.currency, asRecord(record.marketValue).currency),
-    categoryType: optionalString(record.categoryType),
+    id: stringValue(record2.id, record2.instrumentId, record2.isin),
+    isin: optionalString(record2.isin, record2.instrumentId),
+    name: optionalString(record2.name, record2.instrumentName),
+    quantity: optionalNumber(record2.quantity, record2.shares, record2.size),
+    value: optionalNumber(record2.value, record2.netValue, asRecord(record2.marketValue).amount),
+    currency: optionalString(record2.currency, asRecord(record2.marketValue).currency),
+    categoryType: optionalString(record2.categoryType),
     raw: value
   };
 }
@@ -281,59 +303,59 @@ function normalizeCash(value) {
   };
 }
 function normalizeTimelineItem(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.timelineId, record.activityId, record.orderId, record.savingsPlanId),
-    type: optionalString(record.type, record.activityType, record.eventType),
-    title: optionalString(record.title, record.name, asRecord(record.display).title),
-    subtitle: optionalString(record.subtitle, record.description, asRecord(record.display).subtitle),
-    createdAt: optionalString(record.createdAt, record.created, record.timestamp, record.date),
-    updatedAt: optionalString(record.updatedAt, record.updated),
-    instrumentId: optionalString(record.instrumentId, record.isin, asRecord(record.instrument).id),
-    orderId: optionalString(record.orderId),
-    savingsPlanId: optionalString(record.savingsPlanId),
+    id: stringValue(record2.id, record2.timelineId, record2.activityId, record2.orderId, record2.savingsPlanId),
+    type: optionalString(record2.type, record2.activityType, record2.eventType),
+    title: optionalString(record2.title, record2.name, asRecord(record2.display).title),
+    subtitle: optionalString(record2.subtitle, record2.description, asRecord(record2.display).subtitle),
+    createdAt: optionalString(record2.createdAt, record2.created, record2.timestamp, record2.date),
+    updatedAt: optionalString(record2.updatedAt, record2.updated),
+    instrumentId: optionalString(record2.instrumentId, record2.isin, asRecord(record2.instrument).id),
+    orderId: optionalString(record2.orderId),
+    savingsPlanId: optionalString(record2.savingsPlanId),
     raw: value
   };
 }
 function normalizeTimelineAction(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.actionId, record.type),
-    type: optionalString(record.type, record.actionType),
-    title: optionalString(record.title, record.name, record.label),
+    id: stringValue(record2.id, record2.actionId, record2.type),
+    type: optionalString(record2.type, record2.actionType),
+    title: optionalString(record2.title, record2.name, record2.label),
     raw: value
   };
 }
 function normalizeTimelineDetail(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.timelineId, record.activityId, record.orderId, record.savingsPlanId),
-    type: optionalString(record.type, record.activityType, record.eventType),
+    id: stringValue(record2.id, record2.timelineId, record2.activityId, record2.orderId, record2.savingsPlanId),
+    type: optionalString(record2.type, record2.activityType, record2.eventType),
     raw: value
   };
 }
 function normalizePriceAlarm(value) {
-  const record = asRecord(value);
-  const price = moneyAmount(record.price) ?? moneyAmount(record.targetPrice) ?? optionalNumber(record.price, record.targetPrice, asRecord(record.price).value, asRecord(record.targetPrice).value);
-  const currency = moneyCurrency(record.price) ?? moneyCurrency(record.targetPrice) ?? optionalString(record.currency, record.currencyId, asRecord(record.price).currency, asRecord(record.targetPrice).currency);
+  const record2 = asRecord(value);
+  const price = moneyAmount(record2.price) ?? moneyAmount(record2.targetPrice) ?? optionalNumber(record2.price, record2.targetPrice, asRecord(record2.price).value, asRecord(record2.targetPrice).value);
+  const currency = moneyCurrency(record2.price) ?? moneyCurrency(record2.targetPrice) ?? optionalString(record2.currency, record2.currencyId, asRecord(record2.price).currency, asRecord(record2.targetPrice).currency);
   return {
-    id: stringValue(record.id, record.alarmId, record.priceAlarmId),
-    isin: optionalString(record.isin, record.instrumentId),
-    name: optionalString(record.name, record.instrumentName, record.title),
+    id: stringValue(record2.id, record2.alarmId, record2.priceAlarmId),
+    isin: optionalString(record2.isin, record2.instrumentId),
+    name: optionalString(record2.name, record2.instrumentName, record2.title),
     price,
     currency,
-    triggeredAt: optionalString(record.triggeredAt, record.triggered, record.notificationSentAt),
+    triggeredAt: optionalString(record2.triggeredAt, record2.triggered, record2.notificationSentAt),
     raw: value
   };
 }
 function normalizeSavingsPlan(value) {
-  const record = asRecord(value);
-  const amount = moneyAmount(record.amount) ?? moneyAmount(record.rate) ?? optionalNumber(record.amount, record.rate);
-  const currency = moneyCurrency(record.amount) ?? moneyCurrency(record.rate) ?? optionalString(record.currency, record.currencyId);
+  const record2 = asRecord(value);
+  const amount = moneyAmount(record2.amount) ?? moneyAmount(record2.rate) ?? optionalNumber(record2.amount, record2.rate);
+  const currency = moneyCurrency(record2.amount) ?? moneyCurrency(record2.rate) ?? optionalString(record2.currency, record2.currencyId);
   return {
-    id: stringValue(record.id, record.savingsPlanId),
-    isin: optionalString(record.isin, record.instrumentId),
-    name: optionalString(record.name, record.instrumentName, record.title),
+    id: stringValue(record2.id, record2.savingsPlanId),
+    isin: optionalString(record2.isin, record2.instrumentId),
+    name: optionalString(record2.name, record2.instrumentName, record2.title),
     amount,
     currency,
     raw: value
@@ -346,93 +368,93 @@ function normalizePortfolioChart(value) {
   };
 }
 function normalizeInstrumentNewsItem(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.newsId, record.url),
-    title: optionalString(record.title, record.headline),
-    publishedAt: optionalString(record.publishedAt, record.createdAt, record.date),
+    id: stringValue(record2.id, record2.newsId, record2.url),
+    title: optionalString(record2.title, record2.headline),
+    publishedAt: optionalString(record2.publishedAt, record2.createdAt, record2.date),
     raw: value
   };
 }
 function normalizeOrderDestination(value) {
-  const record = asRecord(value);
-  const exchange = asRecord(record.exchange);
+  const record2 = asRecord(value);
+  const exchange = asRecord(record2.exchange);
   return {
-    id: stringValue(record.id, record.exchangeId, record.destinationId, record.venue),
-    name: optionalString(record.name, record.title, record.exchangeName, exchange.name),
-    type: optionalString(record.type),
-    orderModes: optionalStringArray(record.orderModes),
-    orderExpiries: optionalStringArray(record.orderExpiries),
-    listingId: optionalString(record.listingId),
-    currencyId: optionalString(record.currencyId, asRecord(record.currency).id),
-    open: optionalBoolean(record.open),
-    openTimeOffsetMillis: optionalNumber(record.openTimeOffsetMillis),
-    closeTimeOffsetMillis: optionalNumber(record.closeTimeOffsetMillis),
-    timeZoneId: optionalString(record.timeZoneId, exchange.timeZoneId),
-    ..."maintenanceWindow" in record ? { maintenanceWindow: record.maintenanceWindow } : {},
-    ongoingOutage: optionalBoolean(record.ongoingOutage),
-    priority: optionalNumber(record.priority),
-    tickSizes: optionalNumberMatrix(record.tickSizes),
+    id: stringValue(record2.id, record2.exchangeId, record2.destinationId, record2.venue),
+    name: optionalString(record2.name, record2.title, record2.exchangeName, exchange.name),
+    type: optionalString(record2.type),
+    orderModes: optionalStringArray(record2.orderModes),
+    orderExpiries: optionalStringArray(record2.orderExpiries),
+    listingId: optionalString(record2.listingId),
+    currencyId: optionalString(record2.currencyId, asRecord(record2.currency).id),
+    open: optionalBoolean(record2.open),
+    openTimeOffsetMillis: optionalNumber(record2.openTimeOffsetMillis),
+    closeTimeOffsetMillis: optionalNumber(record2.closeTimeOffsetMillis),
+    timeZoneId: optionalString(record2.timeZoneId, exchange.timeZoneId),
+    ..."maintenanceWindow" in record2 ? { maintenanceWindow: record2.maintenanceWindow } : {},
+    ongoingOutage: optionalBoolean(record2.ongoingOutage),
+    priority: optionalNumber(record2.priority),
+    tickSizes: optionalNumberMatrix(record2.tickSizes),
     raw: value
   };
 }
 function normalizeOrderPriceQuote(value, options, instrumentId) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
     instrumentId,
     exchangeId: options.exchangeId,
     side: options.side.toLowerCase(),
-    price: optionalNumber(record.price),
-    bid: optionalNumber(record.bidPrice, record.bid),
-    ask: optionalNumber(record.askPrice, record.ask),
-    unit: optionalString(record.unit, record.currency),
-    time: normalizeTimestamp(optionalString(record.time, record.timestamp) ?? optionalNumber(record.time, record.timestamp)),
+    price: optionalNumber(record2.price),
+    bid: optionalNumber(record2.bidPrice, record2.bid),
+    ask: optionalNumber(record2.askPrice, record2.ask),
+    unit: optionalString(record2.unit, record2.currency),
+    time: normalizeTimestamp(optionalString(record2.time, record2.timestamp) ?? optionalNumber(record2.time, record2.timestamp)),
     raw: value
   };
 }
 function normalizeTrade(value) {
-  const record = asRecord(value);
-  const amount = moneyAmount(record.amount) ?? moneyAmount(record.cashQuantity) ?? optionalNumber(record.amount, asRecord(record.amount).value);
-  const currency = moneyCurrency(record.amount) ?? moneyCurrency(record.cashQuantity) ?? optionalString(record.currency, record.currencyId, asRecord(record.amount).currency);
+  const record2 = asRecord(value);
+  const amount = moneyAmount(record2.amount) ?? moneyAmount(record2.cashQuantity) ?? optionalNumber(record2.amount, asRecord(record2.amount).value);
+  const currency = moneyCurrency(record2.amount) ?? moneyCurrency(record2.cashQuantity) ?? optionalString(record2.currency, record2.currencyId, asRecord(record2.amount).currency);
   return {
-    id: stringValue(record.id, record.tradeId, record.orderId),
-    isin: optionalString(record.isin, record.instrumentId),
-    side: optionalString(record.side, record.action),
-    quantity: optionalNumber(record.quantity, record.size, record.executionSize),
+    id: stringValue(record2.id, record2.tradeId, record2.orderId),
+    isin: optionalString(record2.isin, record2.instrumentId),
+    side: optionalString(record2.side, record2.action),
+    quantity: optionalNumber(record2.quantity, record2.size, record2.executionSize),
     amount,
     currency,
-    executedAt: optionalString(record.executedAt, record.executionTime, record.createdAt),
+    executedAt: optionalString(record2.executedAt, record2.executionTime, record2.createdAt),
     raw: value
   };
 }
 function normalizeExchangeDetails(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.exchangeId, record.slug),
-    name: optionalString(record.name, record.title),
+    id: stringValue(record2.id, record2.exchangeId, record2.slug),
+    name: optionalString(record2.name, record2.title),
     raw: value
   };
 }
 function normalizeExchangeSchedule(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    exchangeId: optionalString(record.exchangeId, record.exchange, record.id),
+    exchangeId: optionalString(record2.exchangeId, record2.exchange, record2.id),
     raw: value
   };
 }
 function normalizeInstrumentStatus(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    isin: optionalString(record.isin, record.instrumentId),
-    exchangeId: optionalString(record.exchangeId, record.exchange),
-    status: optionalString(record.status, record.state, record.tradingStatus),
+    isin: optionalString(record2.isin, record2.instrumentId),
+    exchangeId: optionalString(record2.exchangeId, record2.exchange),
+    status: optionalString(record2.status, record2.state, record2.tradingStatus),
     raw: value
   };
 }
 function normalizeCashItem(value) {
-  const record = asRecord(value);
-  const amount = moneyAmount(record.amount) ?? moneyAmount(record.cash) ?? moneyAmount(record.availableCash) ?? moneyAmount(record.available) ?? optionalNumber(record.amount, record.cash, record.availableCash, asRecord(record.available).amount, record.value);
-  const currency = moneyCurrency(record.amount) ?? moneyCurrency(record.cash) ?? moneyCurrency(record.availableCash) ?? moneyCurrency(record.available) ?? optionalString(record.currency, record.currencyId, asRecord(record.available).currency);
+  const record2 = asRecord(value);
+  const amount = moneyAmount(record2.amount) ?? moneyAmount(record2.cash) ?? moneyAmount(record2.availableCash) ?? moneyAmount(record2.available) ?? optionalNumber(record2.amount, record2.cash, record2.availableCash, asRecord(record2.available).amount, record2.value);
+  const currency = moneyCurrency(record2.amount) ?? moneyCurrency(record2.cash) ?? moneyCurrency(record2.availableCash) ?? moneyCurrency(record2.available) ?? optionalString(record2.currency, record2.currencyId, asRecord(record2.available).currency);
   return {
     amount,
     currency
@@ -451,77 +473,77 @@ function normalizeCandle(value) {
       raw: value
     };
   }
-  const record = asRecord(value);
-  const time = normalizeTimestamp(optionalString(record.time, record.timestamp, record.date) ?? optionalNumber(record.time, record.timestamp, record.date)) ?? stringValue(record.time, record.timestamp, record.date);
+  const record2 = asRecord(value);
+  const time = normalizeTimestamp(optionalString(record2.time, record2.timestamp, record2.date) ?? optionalNumber(record2.time, record2.timestamp, record2.date)) ?? stringValue(record2.time, record2.timestamp, record2.date);
   return {
     time,
-    open: numberValue(record.open),
-    high: numberValue(record.high),
-    low: numberValue(record.low),
-    close: numberValue(record.close),
-    volume: optionalNumber(record.volume),
+    open: numberValue(record2.open),
+    high: numberValue(record2.high),
+    low: numberValue(record2.low),
+    close: numberValue(record2.close),
+    volume: optionalNumber(record2.volume),
     raw: value
   };
 }
 function normalizeCandleSeries(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    resolutionMs: numberValue(record.resolution),
-    expectedClosingTime: normalizeTimestamp(optionalString(record.expectedClosingTime) ?? optionalNumber(record.expectedClosingTime)),
-    lastAggregateEndTime: normalizeTimestamp(optionalString(record.lastAggregateEndTime) ?? optionalNumber(record.lastAggregateEndTime)),
-    unit: optionalString(record.unit, record.currency),
+    resolutionMs: numberValue(record2.resolution),
+    expectedClosingTime: normalizeTimestamp(optionalString(record2.expectedClosingTime) ?? optionalNumber(record2.expectedClosingTime)),
+    lastAggregateEndTime: normalizeTimestamp(optionalString(record2.lastAggregateEndTime) ?? optionalNumber(record2.lastAggregateEndTime)),
+    unit: optionalString(record2.unit, record2.currency),
     candles: arrayPayload(value).map(normalizeCandle),
     raw: value
   };
 }
 function normalizeSubscription(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    id: stringValue(record.id, record.subscriptionId),
-    assetId: optionalString(record.assetId, record.instrumentId, record.isin),
-    exchangeId: optionalString(record.exchangeId, record.exchange),
-    type: optionalString(record.type),
+    id: stringValue(record2.id, record2.subscriptionId),
+    assetId: optionalString(record2.assetId, record2.instrumentId, record2.isin),
+    exchangeId: optionalString(record2.exchangeId, record2.exchange),
+    type: optionalString(record2.type),
     raw: value
   };
 }
 function normalizeLiveFeedEvent(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    type: stringValue(record.type, record.eventType, "message"),
-    assetId: optionalString(record.assetId, record.instrumentId, record.isin),
-    exchangeId: optionalString(record.exchangeId, record.exchange),
+    type: stringValue(record2.type, record2.eventType, "message"),
+    assetId: optionalString(record2.assetId, record2.instrumentId, record2.isin),
+    exchangeId: optionalString(record2.exchangeId, record2.exchange),
     raw: value
   };
 }
 function normalizeMarketQuote(value, assetId, exchangeId) {
-  const record = asRecord(value);
-  const last = asRecord(record.last);
-  const bid = asRecord(record.bid);
-  const ask = asRecord(record.ask);
-  const timeValue = optionalString(record.time, record.timestamp, record.updatedAt, last.time, bid.time, ask.time) ?? optionalNumber(record.time, record.timestamp, last.time, bid.time, ask.time);
+  const record2 = asRecord(value);
+  const last = asRecord(record2.last);
+  const bid = asRecord(record2.bid);
+  const ask = asRecord(record2.ask);
+  const timeValue = optionalString(record2.time, record2.timestamp, record2.updatedAt, last.time, bid.time, ask.time) ?? optionalNumber(record2.time, record2.timestamp, last.time, bid.time, ask.time);
   return {
     assetId,
     exchangeId,
-    currency: optionalString(record.currency, record.unit, last.currency, bid.currency, ask.currency),
-    last: priceValue(record.last, record.price),
-    lastSize: sizeValue(record.last, record.lastSize, record.size),
-    bid: priceValue(record.bid),
-    bidSize: sizeValue(record.bid, record.bidSize),
-    ask: priceValue(record.ask),
-    askSize: sizeValue(record.ask, record.askSize),
+    currency: optionalString(record2.currency, record2.unit, last.currency, bid.currency, ask.currency),
+    last: priceValue(record2.last, record2.price),
+    lastSize: sizeValue(record2.last, record2.lastSize, record2.size),
+    bid: priceValue(record2.bid),
+    bidSize: sizeValue(record2.bid, record2.bidSize),
+    ask: priceValue(record2.ask),
+    askSize: sizeValue(record2.ask, record2.askSize),
     time: normalizeTimestamp(timeValue),
     raw: value
   };
 }
 function normalizeL2Venues(value) {
-  const record = asRecord(value);
-  const instrument = asRecord(record.instrument);
+  const record2 = asRecord(value);
+  const instrument = asRecord(record2.instrument);
   const candidates = [
-    record.exchangeIds,
-    record.exchanges,
-    record.tradingVenues,
-    record.availableExchanges,
-    record.venues,
+    record2.exchangeIds,
+    record2.exchanges,
+    record2.tradingVenues,
+    record2.availableExchanges,
+    record2.venues,
     instrument.exchangeIds,
     instrument.exchanges,
     instrument.tradingVenues
@@ -530,24 +552,24 @@ function normalizeL2Venues(value) {
     if (!Array.isArray(candidate)) return [];
     return candidate.map((item) => typeof item === "string" ? normalizeL2Venue({ exchangeId: item }) : normalizeL2Venue(item));
   });
-  const exchange = asRecord(record.exchange);
-  const direct = optionalString(record.exchangeId, exchange.id, exchange.exchangeId);
+  const exchange = asRecord(record2.exchange);
+  const direct = optionalString(record2.exchangeId, exchange.id, exchange.exchangeId);
   if (direct) venues.unshift(normalizeL2Venue({ exchangeId: direct, name: exchange.name }));
   return venues.filter((venue, index) => venue.exchangeId && venues.findIndex((candidate) => candidate.exchangeId === venue.exchangeId) === index);
 }
 function normalizeL2Venue(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    exchangeId: stringValue(record.exchangeId, record.exchange, record.id),
-    name: optionalString(record.name, record.title),
+    exchangeId: stringValue(record2.exchangeId, record2.exchange, record2.id),
+    name: optionalString(record2.name, record2.title),
     raw: value
   };
 }
 function normalizeL2OrderBook(value) {
-  const record = asRecord(value);
+  const record2 = asRecord(value);
   return {
-    bids: normalizeLevels(record.bids, record.bid),
-    asks: normalizeLevels(record.asks, record.ask),
+    bids: normalizeLevels(record2.bids, record2.bid),
+    asks: normalizeLevels(record2.asks, record2.ask),
     raw: value
   };
 }
@@ -556,8 +578,8 @@ function normalizeLevels(...values) {
     if (!Array.isArray(value)) continue;
     const levels = value.flatMap((level) => {
       if (Array.isArray(level)) return [[Number(level[0]), Number(level[1])]];
-      const record = asRecord(level);
-      return [[numberValue(record.price), numberValue(record.size, record.quantity, record.volume)]];
+      const record2 = asRecord(level);
+      return [[numberValue(record2.price), numberValue(record2.size, record2.quantity, record2.volume)]];
     }).filter(([price, size]) => Number.isFinite(price) && Number.isFinite(size));
     if (levels.length) return levels;
   }
@@ -609,8 +631,8 @@ function arrayOfStrings(...values) {
     if (Array.isArray(value)) {
       const strings = value.flatMap((item) => {
         if (typeof item === "string") return [item];
-        const record = asRecord(item);
-        return optionalString(record.id, record.exchangeId, record.exchange, record.slug) ? [optionalString(record.id, record.exchangeId, record.exchange, record.slug)] : [];
+        const record2 = asRecord(item);
+        return optionalString(record2.id, record2.exchangeId, record2.exchange, record2.slug) ? [optionalString(record2.id, record2.exchangeId, record2.exchange, record2.slug)] : [];
       });
       if (strings.length) return strings;
     }
@@ -649,12 +671,12 @@ function objectPayload(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 }
 function moneyAmount(value) {
-  const record = asRecord(value);
-  return optionalNumber(record.amount, record.value, record.float, record.decimal);
+  const record2 = asRecord(value);
+  return optionalNumber(record2.amount, record2.value, record2.float, record2.decimal);
 }
 function moneyCurrency(value) {
-  const record = asRecord(value);
-  return optionalString(record.currency, record.currencyId);
+  const record2 = asRecord(value);
+  return optionalString(record2.currency, record2.currencyId);
 }
 function normalizeDirection(...values) {
   const value = optionalString(...values)?.toLowerCase();
@@ -878,9 +900,9 @@ function normalizeHeaders(headers) {
     Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), value.trim()]).filter(([key, value]) => key.length > 0 && value.length > 0)
   );
 }
-function normalizeRecord(record) {
+function normalizeRecord(record2) {
   return Object.fromEntries(
-    Object.entries(record ?? {}).filter(([key, value]) => key.length > 0 && value.length > 0)
+    Object.entries(record2 ?? {}).filter(([key, value]) => key.length > 0 && value.length > 0)
   );
 }
 function normalizeString(value) {
@@ -1184,43 +1206,43 @@ var AuthApi = class {
   }
 };
 function normalizeChallenge(raw, serverTime) {
-  const record = asRecord(raw);
-  const id = stringValue2(record.id, record.challengeId, record.processId);
+  const record2 = asRecord(raw);
+  const id = stringValue2(record2.id, record2.challengeId, record2.processId);
   return {
     id,
-    qrCode: optionalString2(record.qrCode, record.qrCodePayload, record.qr, record.code),
-    qrCodeDataUrl: optionalString2(record.qrCodeDataUrl, record.qrDataUrl),
-    deepLink: optionalString2(record.deepLink, record.loginUrl, record.url),
-    expiresAt: optionalString2(record.expiresAt, record.challengeExpiresAt, record.qrCodeTokenExpiresAt, record.expiration),
+    qrCode: optionalString2(record2.qrCode, record2.qrCodePayload, record2.qr, record2.code),
+    qrCodeDataUrl: optionalString2(record2.qrCodeDataUrl, record2.qrDataUrl),
+    deepLink: optionalString2(record2.deepLink, record2.loginUrl, record2.url),
+    expiresAt: optionalString2(record2.expiresAt, record2.challengeExpiresAt, record2.qrCodeTokenExpiresAt, record2.expiration),
     serverTime: serverTime ?? void 0,
     raw
   };
 }
 function extractSession(raw) {
-  const record = asRecord(raw);
-  const sessionRecord = asRecord(record.session);
-  const accessToken = optionalString2(record.accessToken, sessionRecord.accessToken, record.token);
+  const record2 = asRecord(raw);
+  const sessionRecord = asRecord(record2.session);
+  const accessToken = optionalString2(record2.accessToken, sessionRecord.accessToken, record2.token);
   const sessionToken = optionalString2(
-    record.sessionToken,
+    record2.sessionToken,
     sessionRecord.sessionToken,
-    record.connectionToken,
+    record2.connectionToken,
     sessionRecord.connectionToken,
-    record.webSocketToken,
+    record2.webSocketToken,
     sessionRecord.webSocketToken,
-    record.websocketToken,
+    record2.websocketToken,
     sessionRecord.websocketToken,
-    record.mapperToken,
+    record2.mapperToken,
     sessionRecord.mapperToken
   );
-  const refreshToken = optionalString2(record.refreshToken, sessionRecord.refreshToken);
+  const refreshToken = optionalString2(record2.refreshToken, sessionRecord.refreshToken);
   if (!accessToken && !sessionToken && !refreshToken) return void 0;
   return {
     accessToken,
     refreshToken,
     sessionToken,
-    expiresAt: optionalString2(record.expiresAt, sessionRecord.expiresAt),
-    accountId: optionalString2(record.accountId, sessionRecord.accountId),
-    deviceId: optionalString2(record.deviceId, sessionRecord.deviceId),
+    expiresAt: optionalString2(record2.expiresAt, sessionRecord.expiresAt),
+    accountId: optionalString2(record2.accountId, sessionRecord.accountId),
+    deviceId: optionalString2(record2.deviceId, sessionRecord.deviceId),
     metadata: { source: "instant-login" }
   };
 }
@@ -1265,10 +1287,10 @@ function extractCookieSession(headers) {
   };
 }
 function extractLoginProgressState(raw) {
-  const record = asRecord(raw);
+  const record2 = asRecord(raw);
   return {
-    status: optionalString2(record.status, record.state),
-    processId: optionalString2(record.processId, record.id),
+    status: optionalString2(record2.status, record2.state),
+    processId: optionalString2(record2.processId, record2.id),
     session: extractSession(raw)
   };
 }
@@ -1529,16 +1551,6 @@ var emptyObject = z.strictObject({});
 var optionalNullableString = z.string().nullable().optional();
 var optionalNullableNumber = z.number().nullable().optional();
 var optionalNullableBoolean = z.boolean().nullable().optional();
-var errorItemSchema = z.strictObject({
-  errorCode: optionalNullableString,
-  errorField: optionalNullableString,
-  errorMessage: optionalNullableString,
-  meta: jsonValue.optional()
-});
-var emptyOrErrorResponse = z.union([
-  emptyObject,
-  z.strictObject({ errors: z.array(errorItemSchema) })
-]);
 var availableCashItemSchema = z.strictObject({
   accountNumber: z.string(),
   currencyId: z.string(),
@@ -1553,6 +1565,7 @@ var normalizedArrayWrappers = z.union([
   z.array(jsonValue),
   z.strictObject({ data: z.array(jsonValue) }),
   z.strictObject({ items: z.array(jsonValue) }),
+  z.strictObject({ items: z.array(jsonValue), total: z.number() }),
   z.strictObject({ results: z.array(jsonValue) }),
   z.strictObject({ results: z.array(jsonValue), resultCount: z.number().optional(), correlationId: z.string().optional() }),
   z.strictObject({ orders: z.array(jsonValue) }),
@@ -1574,6 +1587,42 @@ var normalizedArrayWrappers = z.union([
   z.strictObject({ accounts: z.array(jsonValue) }),
   z.strictObject({ obj: z.strictObject({ items: z.array(jsonValue) }) })
 ]);
+var derivativesForUnderlyingResponseSchema = z.strictObject({
+  results: z.array(jsonValue),
+  resultCount: z.number().optional(),
+  issuerCount: z.record(z.string(), z.number()).optional(),
+  cursors: z.strictObject({
+    before: z.string().nullable(),
+    after: z.string().nullable()
+  }).optional()
+});
+var timelineActivityResponseSchema = z.union([
+  z.strictObject({
+    items: z.array(jsonValue),
+    cursors: z.strictObject({
+      before: z.string().nullable(),
+      after: z.string().nullable()
+    })
+  }),
+  z.strictObject({ activities: z.array(jsonValue) })
+]);
+var accountRelationshipSchema = z.object({
+  customerId: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  relationshipType: z.string().optional(),
+  bankingInfo: z.object({
+    iban: z.string().optional(),
+    bic: z.string().optional()
+  }).passthrough().optional()
+}).passthrough();
+var accountRelationshipsSchema = z.object({
+  relationships: z.array(accountRelationshipSchema)
+}).passthrough();
+var ibanRelationshipsSchema = accountRelationshipsSchema.refine(
+  (value) => value.relationships.some((relationship) => Boolean(relationship.bankingInfo?.iban)),
+  { message: "Expected at least one account relationship with bankingInfo.iban." }
+);
 var orderDestinationsResponseSchema = z.union([
   normalizedArrayWrappers,
   z.strictObject({
@@ -1633,25 +1682,72 @@ var watchlistMutationSchema = z.union([
   emptyObject,
   jsonRecord
 ]);
+var orderMutationStatusSchema = z.enum([
+  "received",
+  "waiting",
+  "confirmationNeeded",
+  "succeeded",
+  "failed"
+]);
+var orderMutationErrorSchema = z.object({
+  code: z.string().optional(),
+  message: z.string().optional(),
+  details: jsonRecord.optional()
+}).passthrough();
+var orderMutationResponseSchema = z.object({
+  status: orderMutationStatusSchema,
+  orderId: z.string().optional(),
+  id: z.string().optional(),
+  message: z.string().optional(),
+  error: z.union([z.string(), orderMutationErrorSchema, z.array(jsonValue)]).optional()
+}).strict();
+var orderMutationVariants = [
+  "received",
+  "waiting",
+  "confirmationNeeded",
+  "succeeded",
+  "failed: exchangeClosed (observed live)",
+  "failed: cashMissing",
+  "failed: currentQuoteMissing",
+  "failed: instrumentSuspended",
+  "failed: internalError",
+  "failed: invalidSecurityDerivative",
+  "failed: invalidSecurityNonDerivative",
+  "failed: limitDenied",
+  "failed: maxQuantityExceeded",
+  "failed: noRefPriceAvailable",
+  "failed: noRouteToMarket",
+  "failed: orderAlreadyDeleted",
+  "failed: orderAlreadyExists",
+  "failed: orderNotFound (observed live cancellation)",
+  "failed: orderRejectedAtExchange",
+  "failed: portfolioInactive",
+  "failed: quoteMissing",
+  "failed: savingsplanSharesMissingToday",
+  "failed: sharesMissing",
+  "failed: shortPositionNotAllowed",
+  "failed: timeoutError",
+  "failed: unknownInstrument"
+];
 var schemaRegistry = [
   entry("auth.session", "Auth web session", "rest", "read", "GET /api/v1/auth/web/session", sessionSchema),
   entry("auth.account", "Auth account", "rest", "read", "GET /api/v2/auth/account", accountSchema),
   entry("account.personalDetails", "Personal details", "rest", "read", "GET /api/v1/customer/personal-details", jsonRecord),
-  entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", jsonRecord),
-  entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord, { live: { optionalStatuses: [404, 500] } }),
+  entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", accountRelationshipsSchema),
+  entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord),
   entry("boards.list", "Boards list", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards", normalizedArrayWrappers),
   entry("boards.detail", "Board detail", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards/{boardId}", jsonRecord),
   entry("assets.search", "Asset search", "websocket", "read", "neonSearch", normalizedArrayWrappers, { variants: ["stock", "crypto", "etf -> fund", "mutualFund", "privateFund", "bond", "synthetic"] }),
   entry("assets.get", "Instrument detail", "websocket", "read", "instrument", jsonRecord),
   entry("derivatives.search", "Derivative search", "websocket", "read", "neonSearch type=derivative", normalizedArrayWrappers),
-  entry("derivatives.listForUnderlying", "Derivatives for underlying", "websocket", "read", "derivatives", normalizedArrayWrappers),
+  entry("derivatives.listForUnderlying", "Derivatives for underlying", "websocket", "read", "derivatives", derivativesForUnderlyingResponseSchema),
   entry("orders.all", "Orders list", "rest", "read", "GET /web-trading-gateway/api/customer/v1/orders", normalizedArrayWrappers),
   entry("orders.mutualFunds", "Mutual fund orders", "rest", "read", "GET /api-gateway/mutual-funds/api/v1/orders", normalizedArrayWrappers),
   entry("orders.privateMarkets", "Private market orders", "rest", "read", "GET /api/v1/private-markets/orders/all", normalizedArrayWrappers),
   entry("orders.orderUpdates", "Order update stream", "websocket", "read", "orderUpdates", jsonValue, { live: { sample: "stream" } }),
   entry("orders.fees", "Order fee preview", "websocket", "read", "orderFeesV2", jsonValue),
-  entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", jsonValue),
-  entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", jsonValue),
+  entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", orderMutationResponseSchema, { variants: orderMutationVariants }),
+  entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", orderMutationResponseSchema, { variants: orderMutationVariants }),
   entry("portfolio.current", "Portfolio positions", "websocket", "read", "compactPortfolioByTypeV2", z.union([jsonRecord, normalizedArrayWrappers])),
   entry("portfolio.cash", "Available cash", "websocket", "read", "availableCash", z.array(availableCashItemSchema)),
   entry("portfolio.markToMarketValue", "Portfolio status", "websocket", "read", "portfolioStatus", jsonValue),
@@ -1664,7 +1760,7 @@ var schemaRegistry = [
   entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
   entry("market.availableL2Books", "Available L2 books", "websocket", "read", "instrument", jsonValue),
   entry("market.l2OrderBook", "L2 order book stream", "websocket", "read", "L2", jsonValue, { live: { sample: "stream" } }),
-  entry("timeline.list", "Timeline activity", "websocket", "read", "timelineActivityLog", normalizedArrayWrappers),
+  entry("timeline.list", "Timeline activity", "websocket", "read", "timelineActivityLog", timelineActivityResponseSchema),
   entry("timeline.actions", "Timeline actions", "websocket", "read", "timelineActionsV2", normalizedArrayWrappers),
   entry("timeline.detail", "Timeline detail", "websocket", "read", "timelineDetailV2", jsonRecord),
   entry("priceAlarms.list", "Price alarms", "websocket", "read", "priceAlarms", normalizedArrayWrappers),
@@ -1689,8 +1785,8 @@ var schemaRegistry = [
   entry("discovery.instrumentStatus", "Instrument status", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}", jsonRecord),
   entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", jsonValue),
   entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", jsonValue),
-  entry("discovery.watchlists.clone", "Clone watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone", watchlistMutationSchema, { live: { sample: "cleanup", optionalStatuses: [404] } }),
-  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup", optionalStatuses: [404] } }),
+  entry("discovery.watchlists.clone", "Clone watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone", watchlistMutationSchema, { live: { sample: "cleanup" } }),
+  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.delete", "Delete watchlist", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.addItem", "Add watchlist item", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.removeItem", "Remove watchlist item", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
@@ -1700,11 +1796,10 @@ var schemaRegistry = [
   entry("documents.documents", "Documents", "rest", "read", "GET /api/v1/documents/all", jsonValue),
   entry("tax.taxInformation", "Tax information", "rest", "read", "GET /api/v1/taxes/information", jsonValue),
   entry("tax.exemptionOrder", "Tax exemption order", "rest", "read", "GET /api/v1/taxes/exemptionorders", jsonValue),
-  entry("tax.taxResidencies", "Tax residencies", "rest", "read", "GET /api/v1/auth/account/change/taxresidencies", jsonValue, { live: { optionalStatuses: [404, 500] } }),
+  entry("tax.taxResidencies", "Tax residencies", "rest", "read", "GET /api/v1/auth/account/change/taxresidencies", jsonValue),
   entry("tax.taxResidencyCountries", "Tax residency countries", "rest", "read", "GET /api/v1/country/taxresidency", jsonValue),
   entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
-  entry("payments.iban", "IBAN", "rest", "read", "GET /api/v1/auth/account/iban", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
-  entry("payments.interestDetails", "Interest details", "rest", "read", "GET /api/v1/interest/details", z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
+  entry("payments.iban", "IBAN information", "rest", "read", "GET /api/v1/customer/relationships/detailed", ibanRelationshipsSchema),
   entry("blocked.orderMutations", "Unsupported legacy order change/confirm resources", "websocket", "blockedMutation", "confirmOrder|changeOrder", jsonValue),
   entry("blocked.bankTransfers", "Payouts and bank transfers", "rest", "blockedMutation", "POST /api/v1/payout and payment authorization paths", jsonValue),
   entry("blocked.documentAcceptance", "Document acceptance", "rest", "blockedMutation", "api/v1/documents/group/accept and terms accept paths", jsonValue),
@@ -1747,10 +1842,10 @@ function entry(name, title, transport, risk, request, responseSchema, options = 
 function summarizeRaw(value) {
   if (Array.isArray(value)) return { kind: "array", length: value.length, first: summarizeRaw(value[0]) };
   if (!value || typeof value !== "object") return value;
-  const record = value;
+  const record2 = value;
   return {
     kind: "object",
-    keys: Object.keys(record).slice(0, 40)
+    keys: Object.keys(record2).slice(0, 40)
   };
 }
 
@@ -1908,9 +2003,9 @@ function firstStringByKey(value, key) {
     return void 0;
   }
   if (!value || typeof value !== "object") return void 0;
-  const record = value;
-  if (typeof record[key] === "string" && record[key].length > 0) return record[key];
-  for (const item of Object.values(record)) {
+  const record2 = value;
+  if (typeof record2[key] === "string" && record2[key].length > 0) return record2[key];
+  for (const item of Object.values(record2)) {
     const match = firstStringByKey(item, key);
     if (match) return match;
   }
@@ -2030,8 +2125,13 @@ var customerOperations = {
   taxResidencies: rest("tax.taxResidencies", "/api/v1/auth/account/change/taxresidencies"),
   taxResidencyCountries: rest("tax.taxResidencyCountries", "/api/v1/country/taxresidency"),
   paymentMethods: rest("payments.paymentMethods", "/api/v2/payment/methods"),
-  iban: rest("payments.iban", "/api/v1/auth/account/iban"),
-  interestDetails: rest("payments.interestDetails", "/api/v1/interest/details")
+  iban: {
+    transport: "rest",
+    name: "payments.iban",
+    schemaName: "payments.iban",
+    path: "/api/v1/customer/relationships/detailed",
+    normalize: normalizeIbanInfo
+  }
 };
 var operationCatalog = [
   ...Object.values(accountOperations),
@@ -2150,16 +2250,10 @@ var PaymentsApi = class {
     return this.operations.executeRaw(customerOperations.paymentMethods, {});
   }
   iban() {
-    return this.rawIban();
+    return this.operations.execute(customerOperations.iban, {});
   }
   rawIban() {
     return this.operations.executeRaw(customerOperations.iban, {});
-  }
-  interestDetails() {
-    return this.rawInterestDetails();
-  }
-  rawInterestDetails() {
-    return this.operations.executeRaw(customerOperations.interestDetails, {});
   }
 };
 
@@ -2379,10 +2473,263 @@ async function parseResponseBody(response) {
   }
 }
 
+// src/mapper-protobuf.ts
+import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { boot, messageDesc } from "@bufbuild/protobuf/codegenv2";
+var file = boot({
+  name: "handelsrepublik/mapper.proto",
+  package: "handelsrepublik.mapper",
+  syntax: "proto3",
+  enumType: [],
+  messageType: [
+    message("SecAccNoSelector", [field("account_number", 1, 9)]),
+    message("SubscribeRequest", [
+      field("sub_id", 1, 5),
+      field("topic_id", 2, 9),
+      field("by_sec_acc_no", 4, 11, ".handelsrepublik.mapper.SecAccNoSelector")
+    ]),
+    message("Request", [field("sub", 1, 11, ".handelsrepublik.mapper.SubscribeRequest")]),
+    message("DataResponse", [field("data", 1, 12), field("completed", 2, 8)]),
+    message("Status", [field("code", 1, 5), field("message", 2, 9)]),
+    message("Response", [
+      field("sub_id", 1, 5),
+      field("data", 2, 11, ".handelsrepublik.mapper.DataResponse"),
+      field("status", 3, 11, ".handelsrepublik.mapper.Status")
+    ]),
+    message("Uuid", [field("id", 1, 12)]),
+    message("Decimal", [field("unscaled", 1, 12), field("scale", 2, 5)]),
+    message("Money", [
+      field("value", 1, 11, ".handelsrepublik.mapper.Decimal"),
+      field("currency", 2, 5)
+    ]),
+    message("UnitValue", [
+      field("value", 1, 11, ".handelsrepublik.mapper.Decimal"),
+      field("unit", 2, 9)
+    ]),
+    message("Trade", [
+      field("id", 1, 11, ".handelsrepublik.mapper.Uuid"),
+      field("group_id", 2, 11, ".handelsrepublik.mapper.Uuid"),
+      field("trade_type", 3, 5),
+      field("execution_size", 4, 11, ".handelsrepublik.mapper.Decimal"),
+      field("execution_price", 5, 11, ".handelsrepublik.mapper.Money"),
+      field("execution_fees", 6, 11, ".handelsrepublik.mapper.Money"),
+      field("executed_at", 7, 3),
+      field("gross_profit", 8, 11, ".handelsrepublik.mapper.Money"),
+      field("net_profit", 9, 11, ".handelsrepublik.mapper.Money")
+    ]),
+    message("OrderTrade", [
+      field("id", 1, 11, ".handelsrepublik.mapper.Uuid"),
+      field("sec_acc_no", 2, 9),
+      field("user_id", 3, 11, ".handelsrepublik.mapper.Uuid"),
+      field("exchange_id", 4, 9),
+      field("instrument_id", 5, 9),
+      field("type", 6, 5),
+      field("side", 7, 5),
+      field("order_usecase", 8, 5),
+      field("expiry", 9, 5),
+      field("group_id", 10, 9),
+      field("size", 11, 11, ".handelsrepublik.mapper.Decimal"),
+      field("amount", 12, 11, ".handelsrepublik.mapper.UnitValue"),
+      field("stop", 13, 11, ".handelsrepublik.mapper.UnitValue"),
+      field("limit", 14, 11, ".handelsrepublik.mapper.UnitValue"),
+      field("created_at", 15, 3),
+      field("updated_at", 16, 3),
+      field("received_at", 17, 3),
+      field("submitted_at", 18, 3),
+      field("opened_at", 19, 3),
+      field("executed_at", 20, 3),
+      field("expired_at", 21, 3),
+      field("canceled_at", 22, 3),
+      field("rejected_at", 23, 3),
+      field("trades", 24, 11, ".handelsrepublik.mapper.Trade", 3)
+    ]),
+    message("Timestamp", [field("seconds", 1, 3), field("nanos", 2, 5)]),
+    message("PriceAlarm", [
+      field("alarm_id", 1, 11, ".handelsrepublik.mapper.Uuid"),
+      field("isin", 2, 9),
+      field("name", 3, 9),
+      field("price", 4, 11, ".handelsrepublik.mapper.Money"),
+      field("triggered_at", 5, 11, ".handelsrepublik.mapper.Timestamp")
+    ]),
+    message("PriceAlarmNotification", [
+      field("price_alarms", 1, 11, ".handelsrepublik.mapper.PriceAlarm", 3)
+    ])
+  ]
+});
+var RequestSchema = messageDesc(file, 2);
+var ResponseSchema = messageDesc(file, 5);
+var OrderTradeSchema = messageDesc(file, 11);
+var PriceAlarmNotificationSchema = messageDesc(file, 14);
+function mapperProtobufCodec(topic, request = {}) {
+  return {
+    encode(subscriptionId) {
+      const sub = {
+        subId: subscriptionId,
+        topicId: topic,
+        ...request.accountNumber ? { bySecAccNo: { accountNumber: request.accountNumber } } : {}
+      };
+      return toBinary(RequestSchema, create(RequestSchema, { sub }));
+    },
+    decode(payload) {
+      if (topic === "orderUpdates") return normalizeOrderTrade(fromBinary(OrderTradeSchema, payload));
+      return normalizePriceAlarmNotification(fromBinary(PriceAlarmNotificationSchema, payload));
+    }
+  };
+}
+function decodeMapperProtobufEnvelope(bytes) {
+  const response = fromBinary(ResponseSchema, bytes);
+  const subscriptionId = Number(response.subId);
+  const data = record(response.data);
+  if (data.data instanceof Uint8Array) return { subscriptionId, payload: data.data };
+  const status = record(response.status);
+  if (Object.keys(status).length) {
+    return {
+      subscriptionId,
+      status: { code: Number(status.code ?? 0), message: String(status.message ?? "Mapper protobuf request failed") }
+    };
+  }
+  return { subscriptionId };
+}
+function normalizeOrderTrade(value) {
+  const source = record(value);
+  return compact({
+    id: uuid(source.id),
+    secAccNo: source.secAccNo,
+    userId: uuid(source.userId),
+    exchangeId: source.exchangeId,
+    instrumentId: source.instrumentId,
+    type: enumName(source.type, ["unspecified", "market", "limit", "stop", "trailingStop"]),
+    side: enumName(source.side, ["unspecified", "buy", "sell"]),
+    orderUsecase: enumName(source.orderUsecase, [
+      "unspecified",
+      "blockOrder",
+      "regularOrder",
+      "savingsPlan",
+      "tradingPerk",
+      "proprietary",
+      "spareChange",
+      "saveback",
+      "switch",
+      "externalSwitch",
+      "kindergeld",
+      "onePercentBonus"
+    ]),
+    expiry: enumName(source.expiry, ["unspecified", "day", "gtc", "gtd", "eom"]),
+    groupId: source.groupId,
+    size: decimal(source.size),
+    amount: unitValue(source.amount),
+    stop: unitValue(source.stop),
+    limit: unitValue(source.limit),
+    createdAt: epochMillis(source.createdAt),
+    updatedAt: epochMillis(source.updatedAt),
+    receivedAt: epochMillis(source.receivedAt),
+    submittedAt: epochMillis(source.submittedAt),
+    openedAt: epochMillis(source.openedAt),
+    executedAt: epochMillis(source.executedAt),
+    expiredAt: epochMillis(source.expiredAt),
+    cancelledAt: epochMillis(source.canceledAt),
+    rejectedAt: epochMillis(source.rejectedAt),
+    trades: Array.isArray(source.trades) ? source.trades.map(normalizeTrade2) : []
+  });
+}
+function normalizeTrade2(value) {
+  const source = record(value);
+  return compact({
+    id: uuid(source.id),
+    groupId: uuid(source.groupId),
+    tradeType: enumName(source.tradeType, ["unspecified", "sell", "buy"]),
+    executionSize: decimal(source.executionSize),
+    executionPrice: money(source.executionPrice),
+    executionFees: money(source.executionFees),
+    executedAt: epochMillis(source.executedAt),
+    grossProfit: money(source.grossProfit),
+    netProfit: money(source.netProfit)
+  });
+}
+function normalizePriceAlarmNotification(value) {
+  const source = record(value);
+  const priceAlarms = Array.isArray(source.priceAlarms) ? source.priceAlarms.map((item) => {
+    const alarm = record(item);
+    return compact({
+      alarmId: uuid(alarm.alarmId),
+      isin: alarm.isin,
+      name: alarm.name,
+      price: money(alarm.price),
+      triggeredAt: timestamp(alarm.triggeredAt)
+    });
+  }) : [];
+  return { priceAlarms };
+}
+function message(name, fields) {
+  return { name, field: fields };
+}
+function field(name, number, type, typeName = "", label = 1) {
+  return { name, number, type, typeName, label };
+}
+function record(value) {
+  return value && typeof value === "object" ? value : {};
+}
+function compact(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== void 0));
+}
+function uuid(value) {
+  const bytes = record(value).id;
+  if (!(bytes instanceof Uint8Array) || bytes.length !== 16) return void 0;
+  const hex = Buffer.from(bytes).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+function decimal(value) {
+  const source = record(value);
+  const bytes = source.unscaled;
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) return void 0;
+  let unscaled = 0n;
+  for (const byte of bytes) unscaled = unscaled << 8n | BigInt(byte);
+  if ((bytes[0] ?? 0) & 128) unscaled -= 1n << BigInt(bytes.length * 8);
+  const scale = Number(source.scale ?? 0);
+  const negative = unscaled < 0n;
+  const digits = (negative ? -unscaled : unscaled).toString().padStart(scale + 1, "0");
+  const text = scale > 0 ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits;
+  return negative ? `-${text}` : text;
+}
+function money(value) {
+  const source = record(value);
+  if (!Object.keys(source).length) return void 0;
+  return compact({ value: decimal(source.value), currency: currencyName(source.currency) });
+}
+function unitValue(value) {
+  const source = record(value);
+  if (!Object.keys(source).length) return void 0;
+  return compact({ value: decimal(source.value), unit: source.unit });
+}
+function currencyName(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return void 0;
+  return number === 1 ? "EUR" : number === 2 ? "PLN" : number === 5 ? "USD" : String(number);
+}
+function enumName(value, names) {
+  const number = Number(value);
+  return Number.isInteger(number) ? names[number] ?? String(number) : void 0;
+}
+function epochMillis(value) {
+  if (typeof value !== "bigint" && typeof value !== "number") return void 0;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return void 0;
+  const date = new Date(number);
+  return Number.isNaN(date.getTime()) ? String(number) : date.toISOString();
+}
+function timestamp(value) {
+  const source = record(value);
+  const seconds = source.seconds;
+  if (typeof seconds !== "bigint" && typeof seconds !== "number") return void 0;
+  const milliseconds = Number(seconds) * 1e3 + Math.floor(Number(source.nanos ?? 0) / 1e6);
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? void 0 : date.toISOString();
+}
+
 // src/mapper-connection.ts
 var MapperRequestError = class extends TradeRepublicProtocolError {
-  constructor(message, reason, deliveryState, connectionLoss, cause) {
-    super(message, cause);
+  constructor(message2, reason, deliveryState, connectionLoss, cause) {
+    super(message2, cause);
     this.reason = reason;
     this.deliveryState = deliveryState;
     this.connectionLoss = connectionLoss;
@@ -2419,10 +2766,10 @@ var MapperConnection = class {
   reconnectTimer;
   handshakeTimer;
   outage;
-  subscribe(message, options = {}) {
+  subscribe(message2, options = {}) {
     const state = {
       id: this.nextSubscriptionId++,
-      message,
+      message: message2,
       messages: [],
       waiters: [],
       closed: false,
@@ -2496,17 +2843,17 @@ var MapperConnection = class {
     try {
       addListener(socket, "open", () => {
         if (this.socket !== socket) return;
-        const message = `connect 34 ${JSON.stringify(connectPayload())}`;
-        logWire("send", message);
+        const message2 = `connect 34 ${JSON.stringify(connectPayload())}`;
+        logWire("send", message2);
         try {
-          socket.send(message);
+          socket.send(message2);
         } catch (error) {
           this.handleSocketEnd(socket, "sendFailure", [], error, true);
         }
       });
-      addListener(socket, "message", (event) => {
+      addListener(socket, "message", (event, isBinary) => {
         if (this.socket !== socket) return;
-        this.handleMessage(socket, event);
+        this.handleMessage(socket, event, isBinary === true);
       });
       addListener(socket, "error", (error) => {
         if (this.socket !== socket) return;
@@ -2521,10 +2868,41 @@ var MapperConnection = class {
       this.handleSocketEnd(socket, "connectFailure", [], error, true);
     }
   }
-  handleMessage(socket, event) {
-    const message = socketText(event);
-    logWire("message", message);
-    if (message === "connected") {
+  handleMessage(socket, event, isBinary = false) {
+    const binary = socketBinary(event, isBinary);
+    if (binary) {
+      let frame2;
+      try {
+        frame2 = decodeMapperProtobufEnvelope(binary);
+      } catch (error) {
+        logWire("error", error);
+        return;
+      }
+      const state2 = this.subscriptions.get(frame2.subscriptionId);
+      if (!state2) return;
+      if (frame2.status) {
+        this.fail(state2, new TradeRepublicProtocolError(`Trade Republic protobuf resource failed (${frame2.status.code}): ${frame2.status.message}`));
+        return;
+      }
+      if (!(frame2.payload instanceof Uint8Array)) {
+        this.finish(state2);
+        this.subscriptions.delete(state2.id);
+        return;
+      }
+      if (typeof state2.message === "string") {
+        this.fail(state2, new TradeRepublicProtocolError("Received a protobuf response for a JSON mapper subscription."));
+        return;
+      }
+      try {
+        this.push(state2, state2.message.decode(frame2.payload));
+      } catch (error) {
+        this.fail(state2, new TradeRepublicProtocolError("Could not decode Trade Republic protobuf resource payload.", { cause: error }));
+      }
+      return;
+    }
+    const message2 = socketText(event);
+    logWire("message", message2);
+    if (message2 === "connected") {
       this.clearHandshakeTimer();
       this.connected = true;
       for (const state2 of [...this.subscriptions.values()]) {
@@ -2546,8 +2924,8 @@ var MapperConnection = class {
       }
       return;
     }
-    if (message.startsWith("echo") || message.startsWith("connected")) return;
-    const frame = parseSubscriptionFrame(message);
+    if (message2.startsWith("echo") || message2.startsWith("connected")) return;
+    const frame = parseSubscriptionFrame(message2);
     if (!frame) return;
     const state = this.subscriptions.get(frame.id);
     if (state) this.push(state, frame.payload);
@@ -2555,10 +2933,10 @@ var MapperConnection = class {
   sendSubscription(state) {
     const socket = this.socket;
     if (!socket || state.closed) return;
-    const message = `sub ${state.id} ${state.message}`;
-    logWire("send", message);
+    const message2 = typeof state.message === "string" ? `sub ${state.id} ${state.message}` : Buffer.from(state.message.encode(state.id));
+    logWire("send", message2);
     try {
-      socket.send(message);
+      socket.send(message2);
       state.sent = true;
     } catch (error) {
       this.handleSocketEnd(socket, "sendFailure", [], error, true);
@@ -2601,9 +2979,9 @@ var MapperConnection = class {
     if (state.closed) return;
     if (this.connected && this.socket && state.sent) {
       try {
-        const message = `unsub ${state.id}`;
-        logWire("send", message);
-        this.socket.send(message);
+        const message2 = `unsub ${state.id}`;
+        logWire("send", message2);
+        this.socket.send(message2);
       } catch {
       }
     }
@@ -2727,6 +3105,15 @@ function socketText(event) {
   const data = typeof event === "object" && event !== null && "data" in event ? event.data : event;
   return Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
 }
+function socketBinary(event, isBinary) {
+  const isMessageEvent = typeof event === "object" && event !== null && "data" in event;
+  const data = isMessageEvent ? event.data : event;
+  if (!isBinary && !(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) return void 0;
+  if (Buffer.isBuffer(data)) return isBinary || isMessageEvent ? data : void 0;
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  return void 0;
+}
 function parseSubscriptionFrame(text) {
   const firstSpace = text.indexOf(" ");
   if (firstSpace <= 0) return void 0;
@@ -2802,6 +3189,9 @@ var RawApi = class {
       { replayOnReconnect: operation === "mutation" ? false : options.replayOnReconnect }
     );
   }
+  subscribeProtobufResource(topic, request = {}, options = {}) {
+    return this.openSubscription(mapperProtobufCodec(topic, request), options);
+  }
   query(payload, options = {}) {
     return this.queryResource(payload, options);
   }
@@ -2817,6 +3207,22 @@ var RawApi = class {
         throw mapperTimeoutError(String(payload.type ?? "unknown"), subscription.deliveryState);
       }
       assertNoResourceErrors(result.value, payload);
+      return result.value;
+    } finally {
+      subscription.close();
+    }
+  }
+  async queryProtobufResource(topic, request = {}, options = {}) {
+    const subscription = this.subscribeProtobufResource(topic, request, options);
+    const iterator = subscription[Symbol.asyncIterator]();
+    try {
+      const result = await Promise.race([
+        iterator.next(),
+        delay2(options.timeoutMs ?? 15e3).then(() => ({ done: true, value: void 0, timedOut: true }))
+      ]);
+      if (result.done || "timedOut" in result && result.timedOut) {
+        throw mapperTimeoutError(topic, subscription.deliveryState);
+      }
       return result.value;
     } finally {
       subscription.close();
@@ -3170,21 +3576,46 @@ var DerivativesApi = class {
     return arrayPayload(raw).map(normalizeDerivative);
   }
   async listForUnderlying(underlyingId, options = {}) {
-    const raw = await validated(this.validateRaw, "derivatives.listForUnderlying", this.raw.query({
-      type: "derivatives",
-      jurisdiction: "DE",
-      lang: "en",
-      underlying: underlyingId,
-      productCategory: options.productType,
-      optionType: options.direction,
-      pageSize: options.limit ?? null
-    }));
-    return arrayPayload(raw).map(normalizeDerivative);
+    const category = options.productType ? derivativeCategory(options.productType) : void 0;
+    const categories = category ? [category] : DERIVATIVE_CATEGORIES;
+    const requests = categories.flatMap((item) => {
+      const directions = options.direction ? [options.direction] : item.directions;
+      if (directions.some((direction) => !item.directions.includes(direction))) {
+        throw new TypeError(`${options.direction} is not valid for derivative category ${item.name}.`);
+      }
+      return directions.map((direction) => ({
+        type: "derivatives",
+        jurisdiction: "DE",
+        lang: "en",
+        underlying: underlyingId,
+        productCategory: item.resourceValue,
+        optionType: direction,
+        sortBy: item.sortBy,
+        sortDirection: "asc",
+        pageSize: null
+      }));
+    });
+    const rawPages = await Promise.all(requests.map((request) => validated(
+      this.validateRaw,
+      "derivatives.listForUnderlying",
+      this.raw.query(request)
+    )));
+    return rawPages.flatMap(arrayPayload).map(normalizeDerivative).slice(0, options.limit);
   }
   async get(derivativeId) {
     return normalizeDerivative(await validated(this.validateRaw, "assets.get", this.raw.query({ type: "instrument", id: derivativeId })));
   }
 };
+var DERIVATIVE_CATEGORIES = [
+  { name: "knockouts", resourceValue: "knockOutProduct", directions: ["long", "short"], sortBy: "leverage" },
+  { name: "warrants", resourceValue: "vanillaWarrant", directions: ["call", "put"], sortBy: "delta" },
+  { name: "factors", resourceValue: "factorCertificate", directions: ["long", "short"], sortBy: "factor" }
+];
+function derivativeCategory(value) {
+  const category = DERIVATIVE_CATEGORIES.find((item) => item.name === value || item.resourceValue === value);
+  if (!category) throw new TypeError(`Unknown derivative category: ${value}`);
+  return category;
+}
 var OrdersApi = class {
   constructor(runtime) {
     this.runtime = runtime;
@@ -3256,17 +3687,15 @@ var OrdersApi = class {
     }));
   }
   orderUpdates(secAccNo) {
-    return toSubscription(this.raw.subscribeResource({
-      type: "orderUpdates",
-      selector: { case: "bySecAccNo", value: { accountNumber: secAccNo } }
-    })).map((raw) => this.validateRaw("orders.orderUpdates", raw));
+    return toSubscription(this.raw.subscribeProtobufResource("orderUpdates", { accountNumber: secAccNo })).map((raw) => this.validateRaw("orders.orderUpdates", raw));
   }
   async rawOrderUpdates(secAccNo) {
     const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
-    return validated(this.validateRaw, "orders.orderUpdates", this.raw.query({
-      type: "orderUpdates",
-      selector: { case: "bySecAccNo", value: { accountNumber } }
-    }));
+    return validated(
+      this.validateRaw,
+      "orders.orderUpdates",
+      this.raw.queryProtobufResource("orderUpdates", { accountNumber })
+    );
   }
   async prepare(options) {
     const normalizedOptions = options.amount !== void 0 && options.sizeStep === void 0 ? { ...options, sizeStep: await this.resolveAmountSizeStep(options.instrumentId, options.exchangeId) } : options;
@@ -3602,12 +4031,12 @@ function firstNestedStringByKeys(value, ...keys) {
     }
     return void 0;
   }
-  const record = value;
+  const record2 = value;
   for (const key of keys) {
-    const direct = record[key];
+    const direct = record2[key];
     if (typeof direct === "string" && direct.trim()) return direct.trim();
   }
-  for (const item of Object.values(record)) {
+  for (const item of Object.values(record2)) {
     const found = firstNestedStringByKeys(item, ...keys);
     if (found) return found;
   }
@@ -3622,9 +4051,9 @@ function findNestedRecordById(value, id) {
     }
     return void 0;
   }
-  const record = value;
-  if ([record.id, record.exchangeId, record.slug, record.destinationId].some((candidate) => candidate === id)) return record;
-  for (const item of Object.values(record)) {
+  const record2 = value;
+  if ([record2.id, record2.exchangeId, record2.slug, record2.destinationId].some((candidate) => candidate === id)) return record2;
+  for (const item of Object.values(record2)) {
     const found = findNestedRecordById(item, id);
     if (found) return found;
   }
@@ -3833,7 +4262,11 @@ var PriceAlarmsApi = class {
     return arrayPayload(await this.rawNotifications(options)).map(normalizePriceAlarm);
   }
   rawNotifications(options = {}) {
-    return validated(this.validateRaw, "priceAlarms.notifications", this.raw.query({ type: "priceAlarmNotifications" }, pickTimeoutOptions(options)));
+    return validated(
+      this.validateRaw,
+      "priceAlarms.notifications",
+      this.raw.queryProtobufResource("priceAlarmNotifications", {}, pickTimeoutOptions(options))
+    );
   }
   create(options) {
     const { timeoutMs, isin, price } = options;
@@ -4047,7 +4480,8 @@ var WebApi = class {
     return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "privateMarketsPositions", secAccNo: accountNumber }));
   }
   tape(isin, exchangeId, unit = "EUR") {
-    return this.subscribe({ type: "tape", isin, exchangeId, unit });
+    const mapperUnit = unit === "PKT" ? "PTS" : unit === "PRZ" ? "PCT" : unit;
+    return this.subscribe({ type: "tape", isin, exchangeId, unit: mapperUnit });
   }
   tradeAggregateHistory(isin, exchangeId, resolution, from, until) {
     return this.query({ type: "tradeAggregateHistory", isin, exchangeId, resolution, from, until });
@@ -4103,8 +4537,11 @@ var WebApi = class {
   paymentMethods() {
     return this.request("GET", "/api/v2/payment/methods");
   }
-  iban() {
-    return this.request("GET", "/api/v1/auth/account/iban");
+  async iban() {
+    return normalizeIbanInfo(await this.rawIban());
+  }
+  rawIban() {
+    return this.request("GET", "/api/v1/customer/relationships/detailed");
   }
   taxInformation() {
     return this.request("GET", "/api/v1/taxes/information");
@@ -4117,9 +4554,6 @@ var WebApi = class {
   }
   taxResidencyCountries() {
     return this.request("GET", "/api/v1/country/taxresidency");
-  }
-  interestDetails() {
-    return this.request("GET", "/api/v1/interest/details");
   }
   watchlists() {
     return this.request("GET", "/api-gateway/watchlists/api/v2/watchlists");

@@ -14,7 +14,6 @@ export interface TradeRepublicSchemaEntry {
   responseSchema: ZodType<unknown>;
   variants?: string[] | undefined;
   live?: {
-    optionalStatuses?: number[] | undefined;
     sample?: 'once' | 'stream' | 'cleanup' | undefined;
   } | undefined;
 }
@@ -26,18 +25,6 @@ const emptyObject = z.strictObject({});
 const optionalNullableString = z.string().nullable().optional();
 const optionalNullableNumber = z.number().nullable().optional();
 const optionalNullableBoolean = z.boolean().nullable().optional();
-
-const errorItemSchema = z.strictObject({
-  errorCode: optionalNullableString,
-  errorField: optionalNullableString,
-  errorMessage: optionalNullableString,
-  meta: jsonValue.optional(),
-});
-
-const emptyOrErrorResponse = z.union([
-  emptyObject,
-  z.strictObject({ errors: z.array(errorItemSchema) }),
-]);
 
 const availableCashItemSchema = z.strictObject({
   accountNumber: z.string(),
@@ -55,6 +42,7 @@ const normalizedArrayWrappers = z.union([
   z.array(jsonValue),
   z.strictObject({ data: z.array(jsonValue) }),
   z.strictObject({ items: z.array(jsonValue) }),
+  z.strictObject({ items: z.array(jsonValue), total: z.number() }),
   z.strictObject({ results: z.array(jsonValue) }),
   z.strictObject({ results: z.array(jsonValue), resultCount: z.number().optional(), correlationId: z.string().optional() }),
   z.strictObject({ orders: z.array(jsonValue) }),
@@ -76,6 +64,47 @@ const normalizedArrayWrappers = z.union([
   z.strictObject({ accounts: z.array(jsonValue) }),
   z.strictObject({ obj: z.strictObject({ items: z.array(jsonValue) }) }),
 ]);
+
+const derivativesForUnderlyingResponseSchema = z.strictObject({
+  results: z.array(jsonValue),
+  resultCount: z.number().optional(),
+  issuerCount: z.record(z.string(), z.number()).optional(),
+  cursors: z.strictObject({
+    before: z.string().nullable(),
+    after: z.string().nullable(),
+  }).optional(),
+});
+
+const timelineActivityResponseSchema = z.union([
+  z.strictObject({
+    items: z.array(jsonValue),
+    cursors: z.strictObject({
+      before: z.string().nullable(),
+      after: z.string().nullable(),
+    }),
+  }),
+  z.strictObject({ activities: z.array(jsonValue) }),
+]);
+
+const accountRelationshipSchema = z.object({
+  customerId: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  relationshipType: z.string().optional(),
+  bankingInfo: z.object({
+    iban: z.string().optional(),
+    bic: z.string().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+const accountRelationshipsSchema = z.object({
+  relationships: z.array(accountRelationshipSchema),
+}).passthrough();
+
+const ibanRelationshipsSchema = accountRelationshipsSchema.refine(
+  (value) => value.relationships.some((relationship) => Boolean(relationship.bankingInfo?.iban)),
+  { message: 'Expected at least one account relationship with bankingInfo.iban.' },
+);
 
 const orderDestinationsResponseSchema = z.union([
   normalizedArrayWrappers,
@@ -141,25 +170,76 @@ const watchlistMutationSchema = z.union([
   jsonRecord,
 ]);
 
+const orderMutationStatusSchema = z.enum([
+  'received',
+  'waiting',
+  'confirmationNeeded',
+  'succeeded',
+  'failed',
+]);
+
+const orderMutationErrorSchema = z.object({
+  code: z.string().optional(),
+  message: z.string().optional(),
+  details: jsonRecord.optional(),
+}).passthrough();
+
+const orderMutationResponseSchema = z.object({
+  status: orderMutationStatusSchema,
+  orderId: z.string().optional(),
+  id: z.string().optional(),
+  message: z.string().optional(),
+  error: z.union([z.string(), orderMutationErrorSchema, z.array(jsonValue)]).optional(),
+}).strict();
+
+const orderMutationVariants = [
+  'received',
+  'waiting',
+  'confirmationNeeded',
+  'succeeded',
+  'failed: exchangeClosed (observed live)',
+  'failed: cashMissing',
+  'failed: currentQuoteMissing',
+  'failed: instrumentSuspended',
+  'failed: internalError',
+  'failed: invalidSecurityDerivative',
+  'failed: invalidSecurityNonDerivative',
+  'failed: limitDenied',
+  'failed: maxQuantityExceeded',
+  'failed: noRefPriceAvailable',
+  'failed: noRouteToMarket',
+  'failed: orderAlreadyDeleted',
+  'failed: orderAlreadyExists',
+  'failed: orderNotFound (observed live cancellation)',
+  'failed: orderRejectedAtExchange',
+  'failed: portfolioInactive',
+  'failed: quoteMissing',
+  'failed: savingsplanSharesMissingToday',
+  'failed: sharesMissing',
+  'failed: shortPositionNotAllowed',
+  'failed: timeoutError',
+  'failed: unknownInstrument',
+];
+
 export const schemaRegistry = [
   entry('auth.session', 'Auth web session', 'rest', 'read', 'GET /api/v1/auth/web/session', sessionSchema),
   entry('auth.account', 'Auth account', 'rest', 'read', 'GET /api/v2/auth/account', accountSchema),
   entry('account.personalDetails', 'Personal details', 'rest', 'read', 'GET /api/v1/customer/personal-details', jsonRecord),
-  entry('account.relationships', 'Account relationships', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', jsonRecord),
-  entry('account.cardsHome', 'Cards home', 'rest', 'read', 'GET /api/v1/card/cards/home', jsonRecord, { live: { optionalStatuses: [404, 500] } }),
+  entry('account.relationships', 'Account relationships', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', accountRelationshipsSchema),
+  entry('account.cardsHome', 'Cards home', 'rest', 'read', 'GET /api/v1/card/cards/home', jsonRecord),
   entry('boards.list', 'Boards list', 'rest', 'read', 'GET /api-gateway/pro-trading/api/v2/boards', normalizedArrayWrappers),
   entry('boards.detail', 'Board detail', 'rest', 'read', 'GET /api-gateway/pro-trading/api/v2/boards/{boardId}', jsonRecord),
   entry('assets.search', 'Asset search', 'websocket', 'read', 'neonSearch', normalizedArrayWrappers, { variants: ['stock', 'crypto', 'etf -> fund', 'mutualFund', 'privateFund', 'bond', 'synthetic'] }),
   entry('assets.get', 'Instrument detail', 'websocket', 'read', 'instrument', jsonRecord),
   entry('derivatives.search', 'Derivative search', 'websocket', 'read', 'neonSearch type=derivative', normalizedArrayWrappers),
-  entry('derivatives.listForUnderlying', 'Derivatives for underlying', 'websocket', 'read', 'derivatives', normalizedArrayWrappers),
+  entry('derivatives.listForUnderlying', 'Derivatives for underlying', 'websocket', 'read', 'derivatives', derivativesForUnderlyingResponseSchema),
   entry('orders.all', 'Orders list', 'rest', 'read', 'GET /web-trading-gateway/api/customer/v1/orders', normalizedArrayWrappers),
   entry('orders.mutualFunds', 'Mutual fund orders', 'rest', 'read', 'GET /api-gateway/mutual-funds/api/v1/orders', normalizedArrayWrappers),
   entry('orders.privateMarkets', 'Private market orders', 'rest', 'read', 'GET /api/v1/private-markets/orders/all', normalizedArrayWrappers),
   entry('orders.orderUpdates', 'Order update stream', 'websocket', 'read', 'orderUpdates', jsonValue, { live: { sample: 'stream' } }),
   entry('orders.fees', 'Order fee preview', 'websocket', 'read', 'orderFeesV2', jsonValue),
-  entry('orders.submit', 'Submit brokerage order', 'websocket', 'highRiskMutation', 'simpleCreateOrder', jsonValue),
-  entry('orders.cancel', 'Cancel brokerage order', 'websocket', 'highRiskMutation', 'cancelOrder', jsonValue),
+  entry('orders.submit', 'Submit brokerage order', 'websocket', 'highRiskMutation', 'simpleCreateOrder', orderMutationResponseSchema, { variants: orderMutationVariants }),
+  entry('orders.cancel', 'Cancel brokerage order', 'websocket', 'highRiskMutation', 'cancelOrder', orderMutationResponseSchema, { variants: orderMutationVariants }),
   entry('portfolio.current', 'Portfolio positions', 'websocket', 'read', 'compactPortfolioByTypeV2', z.union([jsonRecord, normalizedArrayWrappers])),
   entry('portfolio.cash', 'Available cash', 'websocket', 'read', 'availableCash', z.array(availableCashItemSchema)),
   entry('portfolio.markToMarketValue', 'Portfolio status', 'websocket', 'read', 'portfolioStatus', jsonValue),
@@ -172,7 +252,7 @@ export const schemaRegistry = [
   entry('market.liveFeed', 'Live quote feed', 'websocket', 'read', 'tickerV3', jsonValue, { variants: ['stock', 'crypto'], live: { sample: 'stream' } }),
   entry('market.availableL2Books', 'Available L2 books', 'websocket', 'read', 'instrument', jsonValue),
   entry('market.l2OrderBook', 'L2 order book stream', 'websocket', 'read', 'L2', jsonValue, { live: { sample: 'stream' } }),
-  entry('timeline.list', 'Timeline activity', 'websocket', 'read', 'timelineActivityLog', normalizedArrayWrappers),
+  entry('timeline.list', 'Timeline activity', 'websocket', 'read', 'timelineActivityLog', timelineActivityResponseSchema),
   entry('timeline.actions', 'Timeline actions', 'websocket', 'read', 'timelineActionsV2', normalizedArrayWrappers),
   entry('timeline.detail', 'Timeline detail', 'websocket', 'read', 'timelineDetailV2', jsonRecord),
   entry('priceAlarms.list', 'Price alarms', 'websocket', 'read', 'priceAlarms', normalizedArrayWrappers),
@@ -197,8 +277,8 @@ export const schemaRegistry = [
   entry('discovery.instrumentStatus', 'Instrument status', 'rest', 'read', 'GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}', jsonRecord),
   entry('discovery.watchlists', 'Watchlists', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists', jsonValue),
   entry('discovery.watchlists.items', 'Watchlist items', 'rest', 'read', 'GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', jsonValue),
-  entry('discovery.watchlists.clone', 'Clone watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone', watchlistMutationSchema, { live: { sample: 'cleanup', optionalStatuses: [404] } }),
-  entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup', optionalStatuses: [404] } }),
+  entry('discovery.watchlists.clone', 'Clone watchlist', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
+  entry('discovery.watchlists.rename', 'Rename watchlist', 'rest', 'lowRiskMutation', 'PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.delete', 'Delete watchlist', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.addItem', 'Add watchlist item', 'rest', 'lowRiskMutation', 'POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
   entry('discovery.watchlists.removeItem', 'Remove watchlist item', 'rest', 'lowRiskMutation', 'DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}', watchlistMutationSchema, { live: { sample: 'cleanup' } }),
@@ -208,11 +288,10 @@ export const schemaRegistry = [
   entry('documents.documents', 'Documents', 'rest', 'read', 'GET /api/v1/documents/all', jsonValue),
   entry('tax.taxInformation', 'Tax information', 'rest', 'read', 'GET /api/v1/taxes/information', jsonValue),
   entry('tax.exemptionOrder', 'Tax exemption order', 'rest', 'read', 'GET /api/v1/taxes/exemptionorders', jsonValue),
-  entry('tax.taxResidencies', 'Tax residencies', 'rest', 'read', 'GET /api/v1/auth/account/change/taxresidencies', jsonValue, { live: { optionalStatuses: [404, 500] } }),
+  entry('tax.taxResidencies', 'Tax residencies', 'rest', 'read', 'GET /api/v1/auth/account/change/taxresidencies', jsonValue),
   entry('tax.taxResidencyCountries', 'Tax residency countries', 'rest', 'read', 'GET /api/v1/country/taxresidency', jsonValue),
   entry('payments.paymentMethods', 'Payment methods', 'rest', 'read', 'GET /api/v2/payment/methods', jsonValue),
-  entry('payments.iban', 'IBAN', 'rest', 'read', 'GET /api/v1/auth/account/iban', z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
-  entry('payments.interestDetails', 'Interest details', 'rest', 'read', 'GET /api/v1/interest/details', z.union([jsonRecord, emptyOrErrorResponse]), { live: { optionalStatuses: [404, 500] } }),
+  entry('payments.iban', 'IBAN information', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', ibanRelationshipsSchema),
   entry('blocked.orderMutations', 'Unsupported legacy order change/confirm resources', 'websocket', 'blockedMutation', 'confirmOrder|changeOrder', jsonValue),
   entry('blocked.bankTransfers', 'Payouts and bank transfers', 'rest', 'blockedMutation', 'POST /api/v1/payout and payment authorization paths', jsonValue),
   entry('blocked.documentAcceptance', 'Document acceptance', 'rest', 'blockedMutation', 'api/v1/documents/group/accept and terms accept paths', jsonValue),

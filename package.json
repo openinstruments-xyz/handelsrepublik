@@ -25,8 +25,7 @@
     "test:integration": "node --import tsx --test tests/integration/*.test.ts",
     "ci:reauth": "node --import tsx scripts/reauth-ci.ts",
     "typecheck": "tsc --noEmit",
-    "schemas:doc": "node --import tsx scripts/generate-schema-catalog.ts",
-    "reference:download": "node ../../references/traderepublic-web/download-bundles.mjs"
+    "schemas:doc": "node --import tsx scripts/generate-schema-catalog.ts"
   },
   "keywords": [
     "handelsrepublik",
@@ -46,6 +45,7 @@
   },
   "homepage": "https://github.com/VIEWVIEWVIEW/handelsrepublik#readme",
   "dependencies": {
+    "@bufbuild/protobuf": "^2.12.1",
     "eventemitter3": "^5.0.1",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0",

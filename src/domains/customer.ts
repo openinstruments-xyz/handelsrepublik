@@ -1,5 +1,6 @@
 import { customerOperations } from '../operation-specs.js';
 import type { OperationClient } from '../operations.js';
+import type { IbanInfo } from '../types.js';
 
 export class DocumentsApi {
   constructor(private readonly operations: OperationClient) {}
@@ -60,19 +61,11 @@ export class PaymentsApi {
     return this.operations.executeRaw(customerOperations.paymentMethods, {});
   }
 
-  iban(): Promise<unknown> {
-    return this.rawIban();
+  iban(): Promise<IbanInfo> {
+    return this.operations.execute(customerOperations.iban, {});
   }
 
   rawIban(): Promise<unknown> {
     return this.operations.executeRaw(customerOperations.iban, {});
-  }
-
-  interestDetails(): Promise<unknown> {
-    return this.rawInterestDetails();
-  }
-
-  rawInterestDetails(): Promise<unknown> {
-    return this.operations.executeRaw(customerOperations.interestDetails, {});
   }
 }

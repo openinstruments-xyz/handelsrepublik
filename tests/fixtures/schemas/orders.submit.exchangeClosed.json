@@ -1,0 +1,14 @@
+{
+  "status": "failed",
+  "message": "Exchange 'Lang & Schwarz Exchange' is closed",
+  "error": {
+    "code": "exchangeClosed",
+    "message": "Exchange 'Lang & Schwarz Exchange' is closed",
+    "details": {
+      "exchangeId": "LSX",
+      "isin": "DE0007164600",
+      "isNostro": false,
+      "clientProcessId": "00000000-0000-4000-8000-000000000000"
+    }
+  }
+}

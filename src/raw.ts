@@ -6,6 +6,11 @@ import {
   type MapperSubscriptionOptions,
 } from './mapper-connection.js';
 import { TradeRepublicProtocolError } from './errors.js';
+import {
+  mapperProtobufCodec,
+  type MapperProtobufCodec,
+  type MapperProtobufTopic,
+} from './mapper-protobuf.js';
 import type { HttpClient } from './http.js';
 import type {
   RawRequest,
@@ -71,6 +76,14 @@ export class RawApi {
     );
   }
 
+  subscribeProtobufResource(
+    topic: MapperProtobufTopic,
+    request: { accountNumber?: string | undefined } = {},
+    options: RawSubscriptionOptions = {},
+  ): RawSubscription {
+    return this.openSubscription(mapperProtobufCodec(topic, request), options);
+  }
+
   query<T = unknown>(payload: Record<string, unknown>, options: RawQueryOptions = {}): Promise<T> {
     return this.queryResource(payload, options);
   }
@@ -93,6 +106,27 @@ export class RawApi {
     }
   }
 
+  async queryProtobufResource<T = unknown>(
+    topic: MapperProtobufTopic,
+    request: { accountNumber?: string | undefined } = {},
+    options: RawQueryOptions = {},
+  ): Promise<T> {
+    const subscription = this.subscribeProtobufResource(topic, request, options);
+    const iterator = subscription[Symbol.asyncIterator]();
+    try {
+      const result = await Promise.race([
+        iterator.next(),
+        delay(options.timeoutMs ?? 15_000).then(() => ({ done: true as const, value: undefined, timedOut: true })),
+      ]);
+      if (result.done || ('timedOut' in result && result.timedOut)) {
+        throw mapperTimeoutError(topic, subscription.deliveryState);
+      }
+      return result.value as T;
+    } finally {
+      subscription.close();
+    }
+  }
+
   /** Reconnect active subscriptions after session or browser-context changes. */
   refreshSession(): void {
     this.sharedConnection?.refreshHeaders();
@@ -105,7 +139,7 @@ export class RawApi {
     this.isolatedConnections.clear();
   }
 
-  private openSubscription(subscriptionMessage: string, options: RawSubscriptionOptions = {}): RawSubscription {
+  private openSubscription(subscriptionMessage: string | MapperProtobufCodec, options: RawSubscriptionOptions = {}): RawSubscription {
     if (this.sharedConnection) return this.sharedConnection.subscribe(subscriptionMessage, options);
     let connection: MapperConnection;
     connection = this.createConnection(() => this.isolatedConnections.delete(connection));

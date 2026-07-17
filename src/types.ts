@@ -78,6 +78,15 @@ export interface Account {
   raw: unknown;
 }
 
+export interface IbanInfo {
+  iban: string;
+  bic?: string | undefined;
+  accountHolder?: string | undefined;
+  customerId?: string | undefined;
+  relationshipType?: string | undefined;
+  raw: unknown;
+}
+
 export interface Board {
   id: string;
   name?: string | undefined;

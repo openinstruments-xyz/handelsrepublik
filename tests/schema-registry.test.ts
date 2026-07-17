@@ -19,6 +19,8 @@ describe('schema registry', () => {
       ['discovery.watchlists', 'discovery.watchlists.json'],
       ['market.candles', 'market.candles.json'],
       ['trading.orderDestinations', 'trading.orderDestinations.json'],
+      ['orders.submit', 'orders.submit.exchangeClosed.json'],
+      ['orders.cancel', 'orders.cancel.orderNotFound.json'],
     ] as const) {
       assert.doesNotThrow(() => validateRawResponse(fixture[0], readFixture(fixture[1])), fixture[0]);
     }
@@ -29,6 +31,83 @@ describe('schema registry', () => {
       () => validateRawResponse('portfolio.cash', [
         { accountNumber: '0000000002', currencyId: 'EUR', amount: 12.5, unknown: true },
       ]),
+      TradeRepublicSchemaError,
+    );
+  });
+
+  it('accepts paginated item wrappers with a total', () => {
+    const response = {
+      items: [],
+      total: 0,
+    };
+
+    assert.deepEqual(validateRawResponse('orders.mutualFunds', response), response);
+    assert.deepEqual(validateRawResponse('boards.list', response), response);
+    assert.throws(
+      () => validateRawResponse('orders.mutualFunds', { ...response, unknown: true }),
+      TradeRepublicSchemaError,
+    );
+  });
+
+  it('validates the current derivative screener envelope', () => {
+    const response = {
+      results: [],
+      resultCount: 0,
+      issuerCount: { SOC_GEN: 0, HSBC: 0 },
+      cursors: { before: null, after: null },
+    };
+
+    assert.deepEqual(validateRawResponse('derivatives.listForUnderlying', response), response);
+    assert.throws(
+      () => validateRawResponse('derivatives.listForUnderlying', { ...response, unknown: true }),
+      TradeRepublicSchemaError,
+    );
+  });
+
+  it('validates timeline activity cursors', () => {
+    const response = {
+      items: [],
+      cursors: { before: 'previous', after: 'next' },
+    };
+
+    assert.deepEqual(validateRawResponse('timeline.list', response), response);
+    assert.throws(
+      () => validateRawResponse('timeline.list', { ...response, cursors: { ...response.cursors, unknown: true } }),
+      TradeRepublicSchemaError,
+    );
+  });
+
+  it('validates IBAN information through account relationships', () => {
+    const response = {
+      relationships: [{
+        relationshipType: 'SELF',
+        bankingInfo: { iban: 'DE00', bic: 'TRBKDEBBXXX' },
+      }],
+    };
+
+    assert.deepEqual(validateRawResponse('payments.iban', response), response);
+    assert.throws(
+      () => validateRawResponse('payments.iban', { iban: 'DE00' }),
+      TradeRepublicSchemaError,
+    );
+    assert.throws(
+      () => validateRawResponse('payments.iban', { relationships: [] }),
+      TradeRepublicSchemaError,
+    );
+  });
+
+  it('validates known order mutation states and rejects unknown ones', () => {
+    assert.doesNotThrow(() => validateRawResponse('orders.submit', { status: 'received' }));
+    assert.doesNotThrow(() => validateRawResponse('orders.submit', { status: 'waiting' }));
+    assert.doesNotThrow(() => validateRawResponse('orders.submit', { status: 'confirmationNeeded' }));
+    assert.doesNotThrow(() => validateRawResponse('orders.submit', { status: 'succeeded', orderId: 'order-1' }));
+    assert.doesNotThrow(() => validateRawResponse('orders.cancel', { status: 'failed', error: 'already closed' }));
+    assert.throws(
+      () => validateRawResponse('orders.submit', { status: 'queued' }),
+      TradeRepublicSchemaError,
+    );
+    assert.throws(
+      () => validateRawResponse('orders.submit', { status: 'failed', unknown: true }),
       TradeRepublicSchemaError,
     );
   });

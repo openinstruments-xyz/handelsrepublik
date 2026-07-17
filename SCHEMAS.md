@@ -20,8 +20,8 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `orders.privateMarkets` | `read` | `rest` | `GET /api/v1/private-markets/orders/all` |  |
 | `orders.orderUpdates` | `read` | `websocket` | `orderUpdates` |  |
 | `orders.fees` | `read` | `websocket` | `orderFeesV2` |  |
-| `orders.submit` | `highRiskMutation` | `websocket` | `simpleCreateOrder` |  |
-| `orders.cancel` | `highRiskMutation` | `websocket` | `cancelOrder` |  |
+| `orders.submit` | `highRiskMutation` | `websocket` | `simpleCreateOrder` | received, waiting, confirmationNeeded, succeeded, failed: exchangeClosed (observed live), failed: cashMissing, failed: currentQuoteMissing, failed: instrumentSuspended, failed: internalError, failed: invalidSecurityDerivative, failed: invalidSecurityNonDerivative, failed: limitDenied, failed: maxQuantityExceeded, failed: noRefPriceAvailable, failed: noRouteToMarket, failed: orderAlreadyDeleted, failed: orderAlreadyExists, failed: orderNotFound (observed live cancellation), failed: orderRejectedAtExchange, failed: portfolioInactive, failed: quoteMissing, failed: savingsplanSharesMissingToday, failed: sharesMissing, failed: shortPositionNotAllowed, failed: timeoutError, failed: unknownInstrument |
+| `orders.cancel` | `highRiskMutation` | `websocket` | `cancelOrder` | received, waiting, confirmationNeeded, succeeded, failed: exchangeClosed (observed live), failed: cashMissing, failed: currentQuoteMissing, failed: instrumentSuspended, failed: internalError, failed: invalidSecurityDerivative, failed: invalidSecurityNonDerivative, failed: limitDenied, failed: maxQuantityExceeded, failed: noRefPriceAvailable, failed: noRouteToMarket, failed: orderAlreadyDeleted, failed: orderAlreadyExists, failed: orderNotFound (observed live cancellation), failed: orderRejectedAtExchange, failed: portfolioInactive, failed: quoteMissing, failed: savingsplanSharesMissingToday, failed: sharesMissing, failed: shortPositionNotAllowed, failed: timeoutError, failed: unknownInstrument |
 | `portfolio.current` | `read` | `websocket` | `compactPortfolioByTypeV2` |  |
 | `portfolio.cash` | `read` | `websocket` | `availableCash` |  |
 | `portfolio.markToMarketValue` | `read` | `websocket` | `portfolioStatus` |  |
@@ -73,8 +73,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `tax.taxResidencies` | `read` | `rest` | `GET /api/v1/auth/account/change/taxresidencies` |  |
 | `tax.taxResidencyCountries` | `read` | `rest` | `GET /api/v1/country/taxresidency` |  |
 | `payments.paymentMethods` | `read` | `rest` | `GET /api/v2/payment/methods` |  |
-| `payments.iban` | `read` | `rest` | `GET /api/v1/auth/account/iban` |  |
-| `payments.interestDetails` | `read` | `rest` | `GET /api/v1/interest/details` |  |
+| `payments.iban` | `read` | `rest` | `GET /api/v1/customer/relationships/detailed` |  |
 | `blocked.orderMutations` | `blockedMutation` | `websocket` | `confirmOrder\|changeOrder` |  |
 | `blocked.bankTransfers` | `blockedMutation` | `rest` | `POST /api/v1/payout and payment authorization paths` |  |
 | `blocked.documentAcceptance` | `blockedMutation` | `rest` | `api/v1/documents/group/accept and terms accept paths` |  |

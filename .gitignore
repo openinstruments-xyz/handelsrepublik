@@ -31,6 +31,8 @@ scratchpad-challenge.js
 .scratchpad-debug-*/
 
 # Local Trade Republic captures and downloaded web bundles
+web-reference/*
+!web-reference/README.md
 trade republic flows
 *.har
 *.mitm

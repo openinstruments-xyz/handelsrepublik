@@ -1,0 +1,13 @@
+{
+  "status": "failed",
+  "orderId": "00000000-0000-4000-8000-000000000000",
+  "message": "Could not find the order",
+  "error": {
+    "code": "orderNotFound",
+    "message": "Order not found",
+    "details": {
+      "orderId": "00000000-0000-4000-8000-000000000000",
+      "userId": "00000000-0000-4000-8000-000000000001"
+    }
+  }
+}
