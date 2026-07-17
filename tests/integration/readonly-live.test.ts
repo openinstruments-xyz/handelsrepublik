@@ -23,8 +23,8 @@ const defaultWatchlistId = '00000000-0000-0000-0000-000000000000';
 const bitcoinAssetId = 'XF000BTC0017';
 const bitcoinExchangeId = 'BHS';
 const appleAssetId = 'US0378331005';
-const appleL2ExchangeId = 'LSX';
-const runGermanMarketHoursTests = isGermanMarketHours();
+const appleL2ExchangeId = 'XETRA';
+const runXetraMarketHoursTests = isXetraMarketHours();
 const runningOnGitHubActions = process.env.GITHUB_ACTIONS === 'true';
 const runClosedExchangeOrderTests = !runningOnGitHubActions
   && process.env.TR_INTEGRATION_CLOSED_ORDER_REJECTIONS === '1';
@@ -209,17 +209,17 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     }
   });
 
-  liveIt('streams AAPL L2 market data on LSX during German market hours', {
+  liveIt('streams AAPL L2 market data on Xetra during German market hours', {
     timeout: 30_000,
-    skip: runGermanMarketHoursTests ? false : 'runs only from 07:00 until 23:00 Europe/Berlin',
+    skip: runXetraMarketHoursTests ? false : 'runs only during Xetra market hours (weekdays, 09:00-17:30 Europe/Berlin)',
   }, async () => {
     const { client } = await createLiveClient();
     const subscription = client.market.l2OrderBook(appleAssetId, appleL2ExchangeId, {
       depth: 5,
     });
     try {
-      const orderBook = await nextStreamValue(subscription, 'AAPL/LSX L2 order book');
-      assert.ok(orderBook.bids.length + orderBook.asks.length > 0, 'expected at least one AAPL/LSX L2 level');
+      const orderBook = await nextStreamValue(subscription, 'AAPL/XETRA L2 order book');
+      assert.ok(orderBook.bids.length + orderBook.asks.length > 0, 'expected at least one AAPL/XETRA L2 level');
     } finally {
       subscription.close();
     }
@@ -491,13 +491,18 @@ async function nextStreamValue<T>(
   }
 }
 
-function isGermanMarketHours(now = new Date()): boolean {
-  const hour = Number(new Intl.DateTimeFormat('en-GB', {
+function isXetraMarketHours(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Berlin',
+    weekday: 'short',
     hour: '2-digit',
+    minute: '2-digit',
     hourCycle: 'h23',
-  }).format(now));
-  return hour >= 7 && hour < 23;
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes): string | undefined => parts.find((item) => item.type === type)?.value;
+  const weekday = part('weekday');
+  const minutes = Number(part('hour')) * 60 + Number(part('minute'));
+  return weekday !== undefined && !['Sat', 'Sun'].includes(weekday) && minutes >= 9 * 60 && minutes < 17 * 60 + 30;
 }
 
 function firstStringByKey(value: unknown, ...keys: string[]): string | undefined {

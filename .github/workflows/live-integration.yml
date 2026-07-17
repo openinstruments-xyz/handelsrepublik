@@ -2,9 +2,9 @@ name: live-integration
 
 on:
   schedule:
-    # Both runs stay inside the 07:00-23:00 L2 test window even when GitHub
+    # Both weekday runs stay inside the 09:00-17:30 Xetra L2 test window even when GitHub
     # starts a scheduled workflow up to an hour late.
-    - cron: "15 8,20 * * *"
+    - cron: "15 10,16 * * 1-5"
       timezone: Europe/Berlin
   workflow_dispatch:
 

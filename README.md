@@ -246,9 +246,7 @@ These callbacks are observational:
 - Expected closes, including `tr.close()`, do not emit an outage pair.
 - A failed reconnect is retried while the outage remains active.
 
-Initial connection failures and stalled handshakes reject pending requests. The
-legacy connection-per-subscription behavior remains available for protocol
-troubleshooting with `websocketMode: 'isolated'`.
+Initial connection failures and stalled handshakes reject pending requests.
 
 Reconnecting the transport does not reconcile or replay a mutation that may
 already have reached the broker.
@@ -286,7 +284,7 @@ const preview = await tr.orders.preview({
   exchangeId,
   side: 'buy',
   mode: 'market',
-  amount: 25,
+  size: 1, // One share/unit, not EUR 1.
   lastClientPrice,
 });
 
@@ -317,31 +315,89 @@ switch (result.status) {
 }
 ```
 
-Use `size` instead of `amount` for a quantity order. Limit orders require
-`mode: 'limit'` and `limit`; stop-market orders require `mode: 'stopMarket'` and
-`stop`. Amount orders derive the venue's size step where possible. Pass
-`sizeStep` explicitly when the instrument payload does not expose enough
-metadata.
+Provide exactly one of `size` and `amount`:
+
+- `size: 3` requests three shares or units.
+- `amount: 25` requests a cash-value order of EUR 25. The SDK converts that
+  budget into a size, rounded down to the venue's `sizeStep`.
+
+The example above is a quantity order and therefore uses `size`. For an
+amount-based market order, replace it with `amount: 25`; keep
+`lastClientPrice`, because the SDK needs that price to derive the size. A limit
+order uses its `limit` as the conversion price, and a stop-market order uses its
+`stop`. The SDK reads the venue's size step where possible; pass `sizeStep`
+explicitly when the instrument response does not expose enough metadata.
+
+`mode: 'limit'` requires `limit`; `mode: 'stopMarket'` requires `stop`; and a
+market order must contain neither.
 
 Order validity can be expressed through broker-facing presets:
 
 ```ts
-await tr.orders.prepare({
+const stopOrder = {
   instrumentId,
   exchangeId,
-  side: 'sell',
-  mode: 'stopMarket',
+  side: 'sell' as const,
+  mode: 'stopMarket' as const,
   size: 3,
   stop: 0.8,
-  validity: 'month',
-});
+};
+
+const day = await tr.orders.prepare({
+  ...stopOrder,
+  validity: 'day',
+}); // expiry: { type: 'gfd' }
+
+const month = await tr.orders.prepare({
+  ...stopOrder,
+  validity: { type: 'month', referenceDate: '2026-07-16' },
+}); // expiry: { type: 'gtd', value: '2026-08-15' }
+
+const year = await tr.orders.prepare({
+  ...stopOrder,
+  validity: { type: 'year', referenceDate: '2026-07-16' },
+}); // expiry: { type: 'gtd', value: '2027-07-16' }
+
+const untilCancelled = await tr.orders.prepare({
+  ...stopOrder,
+  validity: 'goodTillCancelled',
+}); // expiry: { type: 'gtc' }; use only when the venue advertises gtc
 ```
 
 `day` maps to `gfd`, `month` and `year` map to dated `gtd` expiries 30
 and 365 days from the reference date, and `goodTillCancelled` maps to `gtc`.
 Protocol-shaped `expiry` remains available when the exact broker expiry is
-already known. Do not provide both fields, and inspect the destination's
-`orderModes` and `orderExpiries` first.
+already known. Do not provide both fields.
+
+`orderModes` and `orderExpiries` describe what one specific destination says it
+supports; they are not global capabilities. For example, a captured Lang &
+Schwarz Exchange (`LSX`) destination for a stock returned:
+
+```ts
+{
+  orderModes: ['limit', 'market', 'stopMarket', 'trailingStopMarket'],
+  orderExpiries: ['gfd', 'gtd'],
+}
+```
+
+For that destination, a market, limit, or stop-market order can use `day`
+(`gfd`), while `month` and `year` are represented by a dated `gtd`. It did not
+advertise `gtc`, so `goodTillCancelled` should not be submitted there. The
+venue advertised `trailingStopMarket`, but the SDK does not construct it because
+its live mutation payload has not been verified. A captured crypto venue was
+more restrictive and advertised only `market` with `gfd`.
+
+Check the exact selected destination before preparing the order:
+
+```ts
+const destination = destinations.find((item) => item.id === exchangeId);
+if (!destination?.orderModes?.includes('stopMarket')) {
+  throw new Error(`${exchangeId} does not support stop-market orders`);
+}
+if (!destination.orderExpiries?.includes('gtd')) {
+  throw new Error(`${exchangeId} does not support month/year dated expiries`);
+}
+```
 
 See
 [`docs/brokerage-orders-and-candles.md`](docs/brokerage-orders-and-candles.md)
@@ -638,18 +694,6 @@ const tr = TradeRepublicClient.create({
 });
 ```
 
-Older SDK surfaces also support endpoint overrides:
-
-```ts
-import { TradeRepublicClient } from 'handelsrepublik';
-
-const tr = TradeRepublicClient.create({
-  endpoints: {
-    'orders.all': '/web-trading-gateway/api/customer/v1/orders',
-  },
-});
-```
-
 ## Demo applications
 
 The repository includes an interactive Node REPL and a terminal UI:
@@ -716,10 +760,10 @@ GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on ever
 push and when the workflows are started manually. A separate account integration
 workflow has no push or pull-request trigger. It runs `npm run test:integration`
 only on `main`, only for the repository owner, and only after its unit-test gate
-passes. It runs at 08:15 and 20:15 Europe/Berlin each day to refresh the account
-session, and the repository owner can also start it manually. Those times keep
-the scheduled AAPL/LSX L2 test inside 07:00-23:00 German time even when GitHub
-starts the workflow up to an hour late.
+passes. It runs at 10:15 and 16:15 Europe/Berlin on weekdays to refresh the
+account session, and the repository owner can also start it manually. Those
+times keep the scheduled AAPL/XETRA L2 test inside Xetra's 09:00-17:30 German
+market hours even when GitHub starts the workflow up to an hour late.
 
 The GitHub workflow explicitly sets both mutation opt-ins to `0`, and the suite
 independently blocks order tests on GitHub Actions. Scheduled and manual GitHub
