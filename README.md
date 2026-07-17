@@ -643,9 +643,8 @@ That relationship remains an inference, not a verified protocol contract.
 The current SDK records `confirmationNeeded` in the submission's `updates` and
 continues waiting for `succeeded` or `failed`. If no definitive update arrives,
 the call can eventually return `outcomeUnknown`. The SDK does not currently
-expose a suitability questionnaire, a typed `actionRequired` result, or a public
-order-confirmation method. Do not fabricate warning identifiers or assume that
-a legacy `confirmOrder` resource is the correct continuation.
+expose a suitability questionnaire or a typed `actionRequired` result. Do not
+fabricate warning identifiers.
 
 ## Durability and order journals
 

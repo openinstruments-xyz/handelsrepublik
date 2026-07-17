@@ -1,7 +1,7 @@
 import { z, type ZodType } from 'zod';
 import { TradeRepublicSchemaError } from '../errors.js';
 
-export type SchemaRisk = 'read' | 'lowRiskMutation' | 'highRiskMutation' | 'blockedMutation';
+export type SchemaRisk = 'read' | 'lowRiskMutation' | 'highRiskMutation';
 export type SchemaTransport = 'rest' | 'websocket';
 
 export interface TradeRepublicSchemaEntry {
@@ -335,10 +335,6 @@ export const schemaRegistry = [
   entry('tax.taxResidencyCountries', 'Tax residency countries', 'rest', 'read', 'GET /api/v1/country/taxresidency', jsonValue),
   entry('payments.paymentMethods', 'Payment methods', 'rest', 'read', 'GET /api/v2/payment/methods', jsonValue),
   entry('payments.iban', 'IBAN information', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', ibanRelationshipsSchema),
-  entry('blocked.orderConfirmation', 'Unsupported legacy order confirmation resource', 'websocket', 'blockedMutation', 'confirmOrder', jsonValue),
-  entry('blocked.bankTransfers', 'Payouts and bank transfers', 'rest', 'blockedMutation', 'POST /api/v1/payout and payment authorization paths', jsonValue),
-  entry('blocked.documentAcceptance', 'Document acceptance', 'rest', 'blockedMutation', 'api/v1/documents/group/accept and terms accept paths', jsonValue),
-  entry('blocked.accountSecurity', 'Account identity, tax, PIN, login security mutations', 'rest', 'blockedMutation', 'change account/tax/security paths', jsonValue),
 ] as const satisfies readonly TradeRepublicSchemaEntry[];
 
 export type SchemaName = (typeof schemaRegistry)[number]['name'];
@@ -372,7 +368,7 @@ export function schemaCatalogMarkdown(): string {
     lines.push(`| \`${entry.name}\` | \`${entry.risk}\` | \`${entry.transport}\` | \`${entry.request.replaceAll('|', '\\|')}\` | ${entry.variants?.join(', ') ?? ''} |`);
   }
   lines.push('');
-  lines.push('`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.');
+  lines.push('`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests.');
   return `${lines.join('\n')}\n`;
 }
 

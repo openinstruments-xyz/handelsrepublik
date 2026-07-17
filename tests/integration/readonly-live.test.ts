@@ -228,16 +228,9 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     }
   });
 
-  liveIt('classifies high-risk and blocked mutations', () => {
-    const blocked = schemaRegistry.filter((entry) => entry.risk === 'blockedMutation').map((entry) => entry.name);
+  liveIt('classifies high-risk mutations', () => {
     const highRisk = schemaRegistry.filter((entry) => entry.risk === 'highRiskMutation').map((entry) => entry.name);
     assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.replace', 'orders.submit']);
-    assert.deepEqual(blocked.sort(), [
-      'blocked.accountSecurity',
-      'blocked.bankTransfers',
-      'blocked.documentAcceptance',
-      'blocked.orderConfirmation',
-    ].sort());
   });
 
   liveIt('captures closed-exchange order rejections for a stock and ETF', {

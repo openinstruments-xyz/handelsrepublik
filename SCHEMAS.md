@@ -76,9 +76,5 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `tax.taxResidencyCountries` | `read` | `rest` | `GET /api/v1/country/taxresidency` |  |
 | `payments.paymentMethods` | `read` | `rest` | `GET /api/v2/payment/methods` |  |
 | `payments.iban` | `read` | `rest` | `GET /api/v1/customer/relationships/detailed` |  |
-| `blocked.orderConfirmation` | `blockedMutation` | `websocket` | `confirmOrder` |  |
-| `blocked.bankTransfers` | `blockedMutation` | `rest` | `POST /api/v1/payout and payment authorization paths` |  |
-| `blocked.documentAcceptance` | `blockedMutation` | `rest` | `api/v1/documents/group/accept and terms accept paths` |  |
-| `blocked.accountSecurity` | `blockedMutation` | `rest` | `change account/tax/security paths` |  |
 
-`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.
+`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests.

@@ -112,10 +112,9 @@ describe('schema registry', () => {
     );
   });
 
-  it('documents live-safe and blocked mutation risk classes', () => {
+  it('documents supported mutation risk classes', () => {
     const lowRisk = schemaRegistry.filter((entry) => entry.risk === 'lowRiskMutation').map((entry) => entry.name);
     const highRisk = schemaRegistry.filter((entry) => entry.risk === 'highRiskMutation').map((entry) => entry.name);
-    const blocked = schemaRegistry.filter((entry) => entry.risk === 'blockedMutation').map((entry) => entry.name);
 
     assert.deepEqual(lowRisk.sort(), [
       'discovery.watchlists.addItem',
@@ -127,10 +126,6 @@ describe('schema registry', () => {
       'priceAlarms.create',
     ].sort());
     assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.replace', 'orders.submit']);
-    assert.ok(blocked.includes('blocked.orderConfirmation'));
-    assert.ok(blocked.includes('blocked.bankTransfers'));
-    assert.ok(blocked.includes('blocked.documentAcceptance'));
-    assert.ok(blocked.includes('blocked.accountSecurity'));
   });
 
   it('has request and response schemas for every entry', () => {
@@ -151,8 +146,8 @@ describe('schema registry', () => {
   it('generates a catalog that includes transport and risk metadata', () => {
     const catalog = schemaCatalogMarkdown();
     assert.match(catalog, /`portfolio\.cash`/);
-    assert.match(catalog, /`blockedMutation`/);
     assert.match(catalog, /`highRiskMutation`/);
+    assert.doesNotMatch(catalog, /`blockedMutation`/);
     assert.match(catalog, /websocket/);
   });
 });

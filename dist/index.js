@@ -1900,11 +1900,7 @@ var schemaRegistry = [
   entry("tax.taxResidencies", "Tax residencies", "rest", "read", "GET /api/v1/auth/account/change/taxresidencies", jsonValue),
   entry("tax.taxResidencyCountries", "Tax residency countries", "rest", "read", "GET /api/v1/country/taxresidency", jsonValue),
   entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
-  entry("payments.iban", "IBAN information", "rest", "read", "GET /api/v1/customer/relationships/detailed", ibanRelationshipsSchema),
-  entry("blocked.orderConfirmation", "Unsupported legacy order confirmation resource", "websocket", "blockedMutation", "confirmOrder", jsonValue),
-  entry("blocked.bankTransfers", "Payouts and bank transfers", "rest", "blockedMutation", "POST /api/v1/payout and payment authorization paths", jsonValue),
-  entry("blocked.documentAcceptance", "Document acceptance", "rest", "blockedMutation", "api/v1/documents/group/accept and terms accept paths", jsonValue),
-  entry("blocked.accountSecurity", "Account identity, tax, PIN, login security mutations", "rest", "blockedMutation", "change account/tax/security paths", jsonValue)
+  entry("payments.iban", "IBAN information", "rest", "read", "GET /api/v1/customer/relationships/detailed", ibanRelationshipsSchema)
 ];
 var schemasByName = new Map(schemaRegistry.map((item) => [item.name, item]));
 function validateRawResponse(schemaName, value) {
@@ -1933,7 +1929,7 @@ function schemaCatalogMarkdown() {
     lines.push(`| \`${entry2.name}\` | \`${entry2.risk}\` | \`${entry2.transport}\` | \`${entry2.request.replaceAll("|", "\\|")}\` | ${entry2.variants?.join(", ") ?? ""} |`);
   }
   lines.push("");
-  lines.push("`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests. `blockedMutation` entries remain unsupported.");
+  lines.push("`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests.");
   return `${lines.join("\n")}
 `;
 }
