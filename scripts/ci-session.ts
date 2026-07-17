@@ -14,7 +14,7 @@ const sessionPath = resolve(fileArgument);
 
 if (command === 'materialize') {
   const serialized = process.env.TR_SESSION_JSON;
-  assert.ok(serialized, 'The TR_SESSION_JSON GitHub Environment secret is missing or empty.');
+  assert.ok(serialized, 'The TR_SESSION_JSON GitHub repository secret is missing or empty.');
 
   const session = parseSession(serialized);
   assertAuthMaterial(session);

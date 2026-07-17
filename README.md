@@ -968,7 +968,7 @@ runs therefore remain read-only. The live suite fails on all endpoint errors;
 optional local mutation probes skip unsupported rename and clone operations for
 Trade Republic's built-in default watchlist.
 
-When the GitHub Environment session expires, renew it from a maintainer machine:
+When the GitHub repository session secret expires, renew it from a maintainer machine:
 
 ```powershell
 npm run ci:reauth
@@ -978,11 +978,17 @@ The command verifies the local GitHub CLI login, opens a browser briefly to
 collect the matching Trade Republic web/WAF context, renders a QR code in the
 terminal, and waits for approval in the Trade Republic app. Short-lived QR
 challenges are replaced automatically until approval or the overall timeout. It
-then updates the `TR_SESSION_JSON` secret in the protected
-`trade-republic-tests` Environment, dispatches `live-integration.yml` on `main`, and watches
-the new workflow run. The new session is held in memory and is not written to
-the repository.
+then updates the repository-level `TR_SESSION_JSON` secret, dispatches
+`live-integration.yml` on `main`, and watches the new workflow run. The new
+session is held in memory and is not written to the repository. Keeping the
+live job free of a GitHub `environment` prevents test runs from appearing as
+deployments.
+
+The live workflow also expects the repository-level
+`GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` secret. It must contain a token allowed
+to update Actions secrets for this repository so the refreshed session can be
+rotated after each run.
 
 Use `npm run ci:reauth -- --no-watch` to return after dispatching, or
-`npm run ci:reauth -- --help` to see repository, Environment, workflow, branch,
+`npm run ci:reauth -- --help` to see repository, workflow, branch,
 timeout, and diagnostic overrides.

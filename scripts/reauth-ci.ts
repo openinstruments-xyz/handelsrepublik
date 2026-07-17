@@ -31,7 +31,6 @@ const { PNG } = require('pngjs') as {
 
 interface Options {
   repo?: string;
-  environment: string;
   secret: string;
   workflow: string;
   ref: string;
@@ -67,14 +66,12 @@ async function run(): Promise<void> {
     console.log('Trade Republic login approved.');
 
     const serialized = `${JSON.stringify(session, null, 2)}\n`;
-    console.log(`Updating ${options.environment}/${options.secret}...`);
+    console.log(`Updating repository secret ${repo}/${options.secret}...`);
     await gh(
       [
         'secret',
         'set',
         options.secret,
-        '--env',
-        options.environment,
         '--repo',
         repo,
       ],
@@ -314,7 +311,6 @@ function gh(args: string[], input?: string, capture = false): Promise<string> {
 
 function parseOptions(args: string[]): Options {
   const options: Options = {
-    environment: 'trade-republic-tests',
     secret: 'TR_SESSION_JSON',
     workflow: 'live-integration.yml',
     ref: 'main',
@@ -328,7 +324,6 @@ function parseOptions(args: string[]): Options {
     if (argument === '--no-watch') options.watch = false;
     else if (argument === '--debug') options.debug = true;
     else if (argument === '--repo') options.repo = requiredValue(args, ++index, argument);
-    else if (argument === '--environment') options.environment = requiredValue(args, ++index, argument);
     else if (argument === '--secret') options.secret = requiredValue(args, ++index, argument);
     else if (argument === '--workflow') options.workflow = requiredValue(args, ++index, argument);
     else if (argument === '--ref') options.ref = requiredValue(args, ++index, argument);
@@ -342,8 +337,7 @@ function parseOptions(args: string[]): Options {
 
 Options:
   --repo OWNER/REPO       GitHub repository (defaults to the current repo)
-  --environment NAME      GitHub Environment (default: trade-republic-tests)
-  --secret NAME           Environment secret (default: TR_SESSION_JSON)
+  --secret NAME           Repository secret (default: TR_SESSION_JSON)
   --workflow FILE         Workflow file/name (default: live-integration.yml)
   --ref BRANCH            Branch to dispatch (default: main)
   --device-name NAME      Trade Republic device label

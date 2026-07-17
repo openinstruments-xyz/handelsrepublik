@@ -40,7 +40,6 @@ jobs:
     needs: unit-gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: trade-republic-tests
     env:
       TR_INTEGRATION: "1"
       # Keep every GitHub-hosted live run read-only. The integration suite also
@@ -69,7 +68,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
         run: |
           for attempt in 1 2 3 4 5; do
-            if gh secret set TR_SESSION_JSON --env trade-republic-tests --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
+            if gh secret set TR_SESSION_JSON --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
               exit 0
             fi
             if [ "$attempt" -eq 5 ]; then
