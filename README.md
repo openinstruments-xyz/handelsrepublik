@@ -140,8 +140,112 @@ try {
 } finally {
   tr.close();
 }
+```
 
-// Do some basic operations
+### Search for and buy a stock
+
+The following example assumes `tr` is authenticated and still open. It searches
+for Apple, fetches its normalized instrument details, and previews a market order
+for one share. Pass `true` only after separately confirming the displayed order
+preview; doing so submits a real order.
+
+```ts
+async function buyOneAppleShare(confirmLiveOrder = false) {
+const APPLE_ISIN = 'US0378331005';
+const searchResults = await tr.assets.search('AAPL', {
+  type: 'stock',
+  limit: 10,
+});
+
+// Avoid accidentally buying a similarly named search result.
+const apple = searchResults.find(
+  ({ id, isin }) => id === APPLE_ISIN || isin === APPLE_ISIN,
+);
+
+if (!apple) {
+  throw new Error('Apple (AAPL) was not found.');
+}
+
+// Fetch normalized basic instrument information.
+const info = await tr.assets.get(apple.id);
+console.log('Instrument:', {
+  id: info.id,
+  isin: info.isin,
+  name: info.name,
+  type: info.type,
+  issuer: info.issuer,
+  exchangeIds: info.exchangeIds,
+});
+
+// Find an open venue supporting market orders.
+const destinations = await tr.trading.orderDestinations(apple.id, {
+  productContext: 'stock',
+});
+
+const destination = destinations.find(
+  ({ open, orderModes }) =>
+    open === true && orderModes?.includes('market'),
+);
+
+if (!destination) {
+  throw new Error('No open venue supporting market orders is available.');
+}
+
+const quote = await tr.trading.priceForOrder({
+  instrumentId: apple.id,
+  exchangeId: destination.id,
+  side: 'buy',
+});
+
+const lastClientPrice = quote.ask ?? quote.price;
+
+if (lastClientPrice === undefined) {
+  throw new Error('No current ask price is available.');
+}
+
+// Preview buying one share, including estimated costs and fees.
+const preview = await tr.orders.preview({
+  instrumentId: apple.id,
+  exchangeId: destination.id,
+  side: 'buy',
+  mode: 'market',
+  size: 1,
+  lastClientPrice,
+});
+
+console.log('Order preview:', {
+  venue: destination.name,
+  price: lastClientPrice,
+  fees: preview.fees,
+  totalFees: preview.totalFees,
+  estimatedTotal: preview.estimatedTotal,
+});
+
+if (!confirmLiveOrder) {
+  console.log('Preview only — no order was submitted.');
+  return { info, preview };
+}
+
+// This submits a real order.
+const result = await tr.orders.submit(preview.order);
+
+if (result.status === 'outcomeUnknown') {
+  console.error(
+    'Order outcome is unknown. Do not submit it again automatically.',
+    result,
+  );
+} else {
+  console.log('Order result:', result);
+}
+
+  return { info, preview, result };
+}
+
+// Preview only:
+await buyOneAppleShare();
+
+// After separately confirming the preview, submit the real order:
+// await buyOneAppleShare(true);
 ```
 
 ## WAF context collection
