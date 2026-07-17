@@ -21,6 +21,7 @@
     "build": "tsup src/index.ts --format esm --dts --sourcemap",
     "demo:repl": "npm run build && node ./demo/repl.mjs",
     "demo:tui": "npm run build && node ./demo/tui.mjs",
+    "demo:scratchpad": "node --import tsx ./demo/scratchpad.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:integration": "node --import tsx --test tests/integration/*.test.ts",
     "ci:reauth": "node --import tsx scripts/reauth-ci.ts",

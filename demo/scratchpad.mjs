@@ -80,7 +80,6 @@ try {
 
   const result = await client.orders.submit(preview.order);
   console.log("=== Order Result ===");
-  console.log(result);
   switch (result.status) {
     case 'succeeded':
       // Order successfully submitted; the order ID is available for reconciliation.

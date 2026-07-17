@@ -6,21 +6,20 @@
 
 ## Overview
 
-`handelsrepublik` is an unofficial, ESM-only TypeScript SDK for the private Trade
+`handelsrepublik` is an unofficial, ESM TypeScript SDK for the private Trade
 Republic web API. It gives applications one client for authentication, account
 and portfolio data, market data, documents, and explicitly invoked brokerage
 operations across Trade Republic's REST and mapper-websocket transports.
 
-The SDK is designed to keep broker outcomes separate from transport outcomes.
-Read subscriptions can reconnect automatically, while order submissions and
-other mutations are never replayed automatically. If a mutation may have crossed
-the network boundary without a definitive broker response, the SDK reports
-`outcomeUnknown`. The application must reconcile that result instead of treating
-the request as safely retryable.
+
+> The SDK does not automatically retry order submissions. If the connection is lost before the broker acknowledges the request, the outcome is indeterminate (`outcomeUnknown`): the order may or may not have been accepted. The calling application is responsible for reconciling the order state and deciding whether it is safe to retry.
+
+Read subscriptions can reconnect automatically. Order submissions and other high-risk mutations are not retried, as described above.
+
 
 The package provides:
 
-- QR-code web login, session persistence, and refresh helpers.
+- login based on the web based QR code method, session persistence, and refresh helpers.
 - Typed domain namespaces for account, portfolio, orders, trading, market data,
   timeline, instruments, discovery, documents, tax, and payments.
 - Shared mapper-websocket subscriptions with observable disconnect and reconnect
@@ -53,26 +52,26 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 
 ## Installation
 
+Development happens on the main branch. Please only use tagged releases (e.g. `#v0.1.0`). Using the latest tagged release is recommended.
+
 Install the package directly from GitHub:
 
 ```bash
-npm install github:VIEWVIEWVIEW/handelsrepublik
+npm install github:VIEWVIEWVIEW/handelsrepublik#v0.1.0
+
 ```
 
 The package is ESM-only and includes its compiled `dist` output. Consumers do
 not need to build TypeScript during installation.
 
-Trade Republic may require an AWS WAF browser challenge before login. The SDK
-can collect the matching WAF token, XSRF token, cookies, and browser headers from
-Playwright, which is an optional consumer dependency:
+⚠️ Trade Republic requires passing an AWS WAF browser challenge before login (`WAF token`). The SDK can collect the matching WAF token, XSRF token, cookies, and browser headers from Playwright, which is an optional consumer dependency:
 
 ```bash
 npm install playwright
 npx playwright install chromium
 ```
 
-You can omit Playwright if your application supplies a valid
-`TradeRepublicWebContext` through another mechanism.
+You can omit Playwright if your application supplies a valid `TradeRepublicWebContext` through another mechanism.
 
 ## Quick Start
 
@@ -121,6 +120,7 @@ try {
     });
 
     console.log(
+      // you probably want to render `challenge.qrCode` using a third party package
       challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
     );
 
