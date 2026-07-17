@@ -125,7 +125,6 @@ const helperSignatures = new Map([
   ['exemptionOrder', 'exemptionOrder()'],
   ['taxResidencies', 'taxResidencies()'],
   ['taxResidencyCountries', 'taxResidencyCountries()'],
-  ['interestDetails', 'interestDetails()'],
   ['etfDetails', 'etfDetails(isin?: string)'],
   ['etfComposition', 'etfComposition(isin?: string, after?: string)'],
   ['fundDetails', 'fundDetails(isin?: string)'],
@@ -1090,7 +1089,7 @@ function apiCatalog() {
     market: ['assets', 'asset', 'venues', 'quoteVenues', 'depthVenues', 'candles', 'downloadCandles', 'quoteSearch', 'quoteWatch', 'priceSearch', 'quotes', 'l2', 'tape', 'tradeHistory'],
     instruments: ['news', 'etfDetails', 'etfComposition', 'fundDetails', 'fundComposition', 'cryptoDetails', 'yieldToMaturity', 'priceForOrder', 'availableSize'],
     discovery: ['exchangeDetails', 'exchangeSchedule', 'instrumentStatus', 'watchlists', 'screeners', 'screenerOptions', 'userPreferences'],
-    documentsTaxPayments: ['documents', 'paymentMethods', 'taxInformation', 'exemptionOrder', 'taxResidencies', 'taxResidencyCountries', 'interestDetails'],
+    documentsTaxPayments: ['documents', 'paymentMethods', 'taxInformation', 'exemptionOrder', 'taxResidencies', 'taxResidencyCountries'],
     timeline: ['timeline', 'timelineActions', 'timelineDetail'],
     priceAlarms: ['priceAlarms', 'priceAlarmNotifications'],
   };
@@ -1245,11 +1244,6 @@ async function taxResidencies() {
 async function taxResidencyCountries() {
   await ensureSession();
   return client.tax.taxResidencyCountries();
-}
-
-async function interestDetails() {
-  await ensureSession();
-  return client.payments.interestDetails();
 }
 
 async function etfDetails(isin = EXAMPLE_ASSET_ID) {
@@ -1703,7 +1697,6 @@ Object.assign(replContext, {
   exemptionOrder,
   taxResidencies,
   taxResidencyCountries,
-  interestDetails,
   etfDetails,
   etfComposition,
   fundDetails,
