@@ -16,6 +16,7 @@
     "README.md"
   ],
   "scripts": {
+    "prepare": "husky",
     "dev": "npm run build && node ./demo/repl.mjs",
     "start": "npm run build && node ./demo/repl.mjs",
     "build": "tsup src/index.ts --format esm --dts --sourcemap",
@@ -64,6 +65,7 @@
     "@types/ws": "^8.5.13",
     "acorn": "^8.17.0",
     "blessed": "^0.1.81",
+    "husky": "^9.1.7",
     "jsqr": "^1.4.0",
     "playwright": "^1.61.1",
     "pngjs": "^7.0.0",
