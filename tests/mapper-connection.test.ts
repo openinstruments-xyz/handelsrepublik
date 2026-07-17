@@ -134,7 +134,7 @@ describe('mapper connection', () => {
     });
     const subscription = client.raw.subscribeResource({ type: 'simpleCreateOrder' });
 
-    await assert.rejects(subscription[Symbol.asyncIterator]().next(), (error: unknown) => {
+    await assert.rejects(withTestTimeout(subscription[Symbol.asyncIterator]().next()), (error: unknown) => {
       assert.ok(error instanceof MapperRequestError);
       assert.equal(error.reason, 'handshakeTimeout');
       assert.equal(error.deliveryState, 'notSent');
@@ -281,6 +281,20 @@ describe('mapper connection', () => {
     subscription.close();
   });
 });
+
+async function withTestTimeout<T>(promise: Promise<T>, timeoutMs = 100): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Test promise did not settle within ${timeoutMs}ms.`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 class ManualSocket extends EventEmitter implements WebSocketLike {
   readonly sent: string[] = [];

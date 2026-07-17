@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { cpus, totalmem } from 'node:os';
+import { cpus, platform, totalmem } from 'node:os';
 import { describe, expect, it } from './test-compat.js';
 import { MapperRequestError, TradeRepublicClient } from '../src/index.js';
 import { FakeSocket } from './fake-socket.js';
@@ -47,7 +47,7 @@ describe('TradeRepublicClient', () => {
     const deviceInfo = JSON.parse(Buffer.from(headers['x-tr-device-info']!, 'base64').toString('utf8')) as Record<string, unknown>;
     expect(deviceInfo).toMatchObject({
       browser: 'Firefox',
-      os: 'Windows',
+      os: expectedOperatingSystem(),
     });
     assert.match(String(deviceInfo.stableDeviceId), /^[0-9a-f]{128}$/);
     assert.equal(deviceInfo.numberOfCores, cpus().length);
@@ -1532,6 +1532,14 @@ describe('TradeRepublicClient', () => {
     expect(sockets[0]?.sent[0]).toMatch(/^connect 34 /);
   });
 });
+
+function expectedOperatingSystem(): string {
+  const nodePlatform = platform();
+  if (nodePlatform === 'win32') return 'Windows';
+  if (nodePlatform === 'darwin') return 'Mac OS';
+  if (nodePlatform === 'linux') return 'Linux';
+  return nodePlatform;
+}
 
 function mockFetch(calls: Array<{ url: string; init: RequestInit }>, responseBody: unknown): typeof fetch {
   return (async (url: URL | RequestInfo, init?: RequestInit) => {
