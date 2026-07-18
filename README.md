@@ -347,7 +347,8 @@ const wafContext = await collectTradeRepublicWafContext(browser);
 ```
 
 Like the class method's caller-owned-browser form, it closes the temporary
-browser context but not `browser`.
+browser context but not `browser`. Pass collection options as the second
+argument when using this lower-level function.
 
 ### Collection options
 
@@ -404,6 +405,49 @@ use, but it captures a broader browser context that can contain account cookies
 and headers. Do not share its result between accounts. Prefer the narrow
 `collectWafContext()` or `collectTradeRepublicWafContext()` interfaces.
 
+## Authentication workflows
+
+Instant login creates a challenge that the user approves in the Trade Republic
+app. The challenge exposes a QR data URL, deep link, or raw QR value, depending
+on the current broker response:
+
+```ts
+const challenge = await tr.auth.createInstantLogin({
+  deviceName: 'local sdk',
+});
+
+console.log(
+  challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
+);
+
+const session = await tr.auth.pollInstantLogin(challenge, {
+  intervalMs: 1_500,
+  timeoutMs: 120_000,
+});
+```
+
+PIN login is also available. It starts the broker login process and polls until
+the session is ready:
+
+```ts
+const pin = process.env.TR_PIN;
+if (!pin) throw new Error('TR_PIN is not set.');
+
+const session = await tr.auth.loginWithPin({
+  phoneNumber: '+491234567890',
+  pin,
+  timeoutMs: 120_000,
+});
+```
+
+Keep the PIN out of source control and logs. For applications that need to
+separate the start and poll steps, use `auth.startLoginWithPin()` followed by
+`auth.pollLoginProcess()`. Both login workflows, as well as
+`auth.refreshSession()`, save a finalized session automatically when a
+`SessionStore` is configured.
+
+## Response schema validation
+
 Choose `rawSchemaValidation` deliberately:
 
 | Value | Behavior |
@@ -422,7 +466,8 @@ normalization can still fail if the payload changes substantially.
 material and the structured Trade Republic device profile, including the
 `stableDeviceId`, languages, processor count, and device memory. The client
 derives `x-tr-device-info` from `session.deviceInfo`. The file is not encrypted.
-Do not commit or share it.
+Do not commit or share it. `MemorySessionStore` is available for tests and
+short-lived processes, but it does not survive a restart.
 
 For a server or multi-user application, implement `SessionStore` using the
 application's existing persistence layer. One stored JSON value per user is
@@ -433,6 +478,7 @@ import {
   TradeRepublicClient,
   type Session,
   type SessionStore,
+  type TradeRepublicWafContext,
 } from 'handelsrepublik';
 
 type RedisLike = {
@@ -442,6 +488,7 @@ type RedisLike = {
 };
 
 declare const redis: RedisLike;
+declare const wafContext: TradeRepublicWafContext;
 
 class RedisSessionStore implements SessionStore {
   constructor(
@@ -464,6 +511,7 @@ class RedisSessionStore implements SessionStore {
 }
 
 const tr = TradeRepublicClient.create({
+  wafContext,
   sessionStore: new RedisSessionStore(
     redis,
     'handelsrepublik:sessions:alice',
@@ -479,6 +527,14 @@ safe reuse, and renewal are described in
 finalized account sessions automatically;
 `auth.saveSession()` is available when the application explicitly needs to
 persist the client's current session.
+
+Sessions restored from a store must contain `deviceInfo`. The client rejects a
+directly supplied `session` without that profile, and `auth.restoreSession()`
+ignores stored values that do not contain it. This prevents a restored account
+session from silently switching device identity. `redactSession()` creates a
+log-safe shallow view of the standard token, cookie, and web-context fields;
+application-specific secrets nested in `metadata` still require application
+redaction.
 
 Cookie expiry does not necessarily mean the complete account session expired.
 For example, `tr_claims` can expire while `tr_session` remains usable. Restore
@@ -522,6 +578,10 @@ Initial connection failures and stalled handshakes reject pending requests.
 
 Reconnecting the transport does not reconcile or replay a mutation that may
 already have reached the broker.
+
+Set `websocketMode: 'isolated'` only when each subscription needs a separate
+mapper connection. The default `shared` mode reduces connection count and still
+multiplexes independent subscriptions.
 
 ## Trading safely
 
@@ -968,19 +1028,19 @@ does not yet have a first-class SDK method.
 
 | Namespace | Representative operations |
 | --- | --- |
-| `tr.auth` | Create and poll login challenges; restore, refresh, save, and clear sessions. |
+| `tr.auth` | QR/instant and PIN login; poll login processes; restore, refresh, save, and clear sessions. |
 | `tr.account` | Current account, web session, settings, personal details, relationships, and cards. |
 | `tr.boards` | List and load trading boards. |
 | `tr.assets` | Search, list, and load stocks, ETFs, funds, crypto, bonds, and other instruments. |
 | `tr.derivatives` | Search derivatives, list knockout, warrant, and factor products for an underlying, and load details. |
 | `tr.portfolio` | Portfolio, cash, mark-to-market value, savings plans, private-market positions, and chart data. |
-| `tr.orders` | List, filter, preview, prepare, submit, cancel, replace, and stream order updates. |
-| `tr.trading` | Order prices, available size, destinations, trades, and daily PnL. |
-| `tr.market` | Quotes, candles, live feeds, subscriptions, and L2 order books. |
+| `tr.orders` | List and filter regular, executed, mutual-fund, and private-market orders; preview, prepare, submit, cancel, replace, and stream updates. |
+| `tr.trading` | Order prices, available size, destinations and home venues, trades, and daily PnL. |
+| `tr.market` | Quotes, candles and paged downloads, live feeds, market-data plans and entitlements, L2 venue discovery, and L2 order books. |
 | `tr.timeline` | Timeline entries, actions, and details. |
 | `tr.priceAlarms` | List, create, cancel, and read protobuf price-alarm notifications. |
 | `tr.instruments` | News and ETF, fund, crypto, composition, and yield details. |
-| `tr.discovery` | Exchanges, schedules, instrument status, watchlists, screeners, and preferences. |
+| `tr.discovery` | Exchanges, schedules, instrument status, watchlists and watchlist mutations, screeners, and preferences. |
 | `tr.documents` | Account documents. |
 | `tr.tax` | Tax information, exemption orders, and tax residencies. |
 | `tr.payments` | Payment methods and typed IBAN information from the account relationship. |
@@ -997,8 +1057,9 @@ const position = (await tr.portfolio.current()).positions[0];
 console.log(position?.id, position?.value, position?.raw);
 ```
 
-Some account-specific or unstable methods intentionally return `unknown`. Use
-the corresponding `rawX` method when you need the untouched response.
+Some account-specific or unstable methods intentionally return `unknown`; those
+values already are the untouched broker response. Where a normalized method has
+a corresponding `rawX` method, use `rawX` to bypass normalization explicitly.
 
 ## Market data and streams
 
@@ -1079,7 +1140,28 @@ try {
 `orders.orderUpdates()` and `priceAlarms.notifications()` use the current binary
 protobuf mapper protocol. The SDK performs request framing, response-envelope
 decoding, and normalization internally; callers receive ordinary SDK values and
-do not need protobuf-generated classes.
+do not need protobuf-generated classes. `orderUpdates()` is a long-lived stream;
+`priceAlarms.notifications()` reads one decoded response and returns a promise.
+
+For bounded historical downloads, provide both `from` and `to`. The helper
+splits the range into requests, de-duplicates candles by timestamp, and sorts the
+combined result:
+
+```ts
+const history = await tr.market.downloadCandles(
+  {
+    assetId: 'US0378331005',
+    exchangeId: 'LSX',
+    timeframe: '10m',
+    from: '2026-01-01T00:00:00Z',
+    to: '2026-02-01T00:00:00Z',
+  },
+  { maxCandlesPerRequest: 500 },
+);
+```
+
+Use `tr.market.candleQuery(options).pages()` instead when each page should be
+processed incrementally rather than accumulated in memory.
 
 ## Raw APIs and schema drift
 
@@ -1145,8 +1227,8 @@ Private payloads can still contain undocumented fields or change without notice.
 
 The client generates one device profile per new client and persists it with the
 session. The fingerprint is random, while CPU count, memory, operating system,
-OS release, and timezone come from the Node runtime. Browser defaults use the
-current Firefox profile. Override any device value directly when needed:
+OS release, and timezone come from the Node runtime. Browser defaults use a
+Firefox-shaped profile. Override any device value directly when needed:
 
 ```js
 import { TradeRepublicClient } from 'handelsrepublik';
@@ -1163,6 +1245,51 @@ const tr = TradeRepublicClient.create({
 });
 ```
 
+A directly supplied `session` must include the original `deviceInfo`; use
+`deviceInfo` only to customize a new client profile. The remaining client
+options fall into these groups:
+
+| Concern | Options |
+| --- | --- |
+| API routing | `apiBaseUrl`, `websocketUrl`, `endpoints` |
+| HTTP identity | `locale`, `userAgent`, `defaultHeaders` |
+| Browser proof and authentication | `wafContext`, advanced `webContext`, `session`, `sessionStore` |
+| Transport injection | `fetch`, `websocketFactory` |
+| Mapper lifecycle | `websocketMode`, `websocketReconnectDelayMs`, `websocketHandshakeTimeoutMs`, disconnect/reconnect callbacks |
+| Response validation | `rawSchemaValidation`, `onRawSchemaValidationFailure` |
+
+Endpoint, header, and transport overrides are escape hatches for tests or
+observed private-API changes. They can bypass SDK assumptions; keep them scoped
+and covered by application tests.
+
+## Errors and top-level utilities
+
+The exported error hierarchy lets applications distinguish failure classes:
+
+| Error | Meaning |
+| --- | --- |
+| `TradeRepublicHttpError` | A REST request failed; includes `status` and `responseBody`. |
+| `TradeRepublicProtocolError` | A mapper or private-API payload violated an expected protocol contract. |
+| `TradeRepublicSchemaError` | Covered raw-response validation failed; includes the schema name and a raw-value summary. |
+| `MapperRequestError` | A mapper request failed; includes `reason`, `deliveryState`, and possible connection-loss context. |
+
+All Trade Republic-specific errors extend `TradeRepublicError`. A
+`MapperRequestError` is especially important for mutations: only
+`deliveryState: 'notSent'` proves that the mapper did not accept the request
+bytes.
+
+The package also exports focused lower-level helpers:
+
+- WAF/browser collection: `collectTradeRepublicWafContext()` and the broader
+  `collectTradeRepublicWebContext()`.
+- Session handling: `FileSessionStore`, `MemorySessionStore`, and
+  `redactSession()`.
+- Candles: `CandleQuery`, resolution constants, `candleResolutionMs()`, and
+  `candleResolutionsForInstrumentType()`.
+- Schema tooling: `schemaRegistry`, `validateRawResponse()`, and
+  `schemaCatalogMarkdown()`.
+- Raw mapper safety: `classifyMapperOperation()`.
+
 ## Demo applications
 
 The repository includes an interactive Node REPL and a terminal UI:
@@ -1174,7 +1301,9 @@ npm run demo:tui
 ```
 
 The demos store local authentication state under `demo/`. Do not commit the
-session or configuration files they create.
+session or configuration files they create. The separate `demo:scratchpad`
+script is maintainer-specific and currently submits a real order; do not run it
+as a general SDK demo.
 
 ## Security and privacy
 
@@ -1226,7 +1355,7 @@ local-only. Savings-plan, money-movement, document-acceptance, and
 account-security mutations are never exercised.
 
 GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on every
-push and when the workflows are started manually. A separate account integration
+push, pull request, and manual quality/unit run. A separate account integration
 workflow has no push or pull-request trigger. It runs `npm run test:integration`
 only on `main`, only for the repository owner, and only after its unit-test gate
 passes. It runs at 10:15 and 16:15 Europe/Berlin on weekdays to refresh the
