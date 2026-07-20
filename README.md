@@ -150,7 +150,6 @@ for one share. Pass `true` only after separately confirming the displayed order
 preview; doing so submits a real order.
 
 ```ts
-async function buyOneAppleShare(confirmLiveOrder = false) {
 const APPLE_ISIN = 'US0378331005';
 const searchResults = await tr.assets.search('AAPL', {
   type: 'stock',
@@ -238,14 +237,8 @@ if (result.status === 'outcomeUnknown') {
   console.log('Order result:', result);
 }
 
-  return { info, preview, result };
-}
+console.log({ info, preview, result })
 
-// Preview only:
-await buyOneAppleShare();
-
-// After separately confirming the preview, submit the real order:
-// await buyOneAppleShare(true);
 ```
 
 ## WAF context collection
