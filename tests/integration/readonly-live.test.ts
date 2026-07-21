@@ -1,11 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   FileSessionStore,
-  schemaRegistry,
   TradeRepublicClient,
   validateRawResponse,
 } from '../../src/index.js';
@@ -25,14 +23,7 @@ const bitcoinExchangeId = 'BHS';
 const appleAssetId = 'US0378331005';
 const appleL2ExchangeId = 'XETR';
 const runXetraMarketHoursTests = isXetraMarketHours();
-const runningOnGitHubActions = process.env.GITHUB_ACTIONS === 'true';
-const runClosedExchangeOrderTests = !runningOnGitHubActions
-  && process.env.TR_INTEGRATION_CLOSED_ORDER_REJECTIONS === '1';
 const runLowRiskMutationTests = process.env.TR_INTEGRATION_LOW_RISK_MUTATIONS === '1';
-const classicOrderTestInstruments = [
-  { name: 'SAP stock', instrumentId: 'DE0007164600', exchangeId: 'LSX' },
-  { name: 'iShares Core MSCI World ETF', instrumentId: 'IE00B4L5Y983', exchangeId: 'LSX' },
-] as const;
 
 describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set TR_INTEGRATION=1 to run live Trade Republic integration tests' }, () => {
   liveIt('restores and refreshes an existing real web session', { timeout: 30_000 }, async () => {
@@ -226,75 +217,6 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     } finally {
       subscription.close();
     }
-  });
-
-  liveIt('classifies high-risk mutations', () => {
-    const highRisk = schemaRegistry.filter((entry) => entry.risk === 'highRiskMutation').map((entry) => entry.name);
-    assert.deepEqual(highRisk.sort(), ['orders.cancel', 'orders.replace', 'orders.submit']);
-  });
-
-  liveIt('captures closed-exchange order rejections for a stock and ETF', {
-    timeout: 120_000,
-    skip: runClosedExchangeOrderTests
-      ? false
-      : runningOnGitHubActions
-        ? 'order submission tests are unconditionally disabled on GitHub Actions'
-        : 'set TR_INTEGRATION_CLOSED_ORDER_REJECTIONS=1 to submit classic orders only while LSX reports closed',
-  }, async (t) => {
-    const { client } = await createLiveClient();
-    await client.auth.refreshSession();
-
-    for (const instrument of classicOrderTestInstruments) {
-      await t.test(instrument.name, async (instrumentTest) => {
-        const destinations = await client.trading.orderDestinations(instrument.instrumentId);
-        const destination = destinations.find((item) => item.id === instrument.exchangeId);
-        assert.ok(destination, `expected ${instrument.exchangeId} destination for ${instrument.name}`);
-        if (destination.open !== false) {
-          instrumentTest.skip(`${instrument.exchangeId} is not explicitly closed; refusing to submit ${instrument.name} order`);
-          return;
-        }
-
-        const before = await client.orders.open({ instrumentId: instrument.instrumentId });
-        const beforeIds = new Set(before.map((order) => order.id).filter((id): id is string => Boolean(id)));
-        let submittedOrderId: string | undefined;
-
-        try {
-          const submission = await client.orders.submit({
-            instrumentId: instrument.instrumentId,
-            exchangeId: instrument.exchangeId,
-            side: 'buy',
-            mode: 'market',
-            size: 1,
-            validity: 'day',
-            timeoutMs: 30_000,
-          });
-          submittedOrderId = submission.status === 'succeeded' ? submission.orderId : undefined;
-          if (submission.raw !== undefined) validateRawResponse('orders.submit', submission.raw);
-
-          assert.equal(submission.status, 'failed', `expected closed ${instrument.exchangeId} to reject ${instrument.name}`);
-          assert.equal(firstStringByKey(submission.error, 'code'), 'exchangeClosed');
-          assert.equal(firstStringByKey(submission.error, 'exchangeId'), instrument.exchangeId);
-          assert.equal(firstStringByKey(submission.error, 'isin'), instrument.instrumentId);
-        } finally {
-          const cancelled = new Set<string>();
-          if (submittedOrderId) {
-            await client.orders.cancel(submittedOrderId, { timeoutMs: 15_000 });
-            cancelled.add(submittedOrderId);
-          }
-          const after = await client.orders.open({ instrumentId: instrument.instrumentId });
-          for (const order of after) {
-            if (order.id && !beforeIds.has(order.id) && !cancelled.has(order.id)) {
-              await client.orders.cancel(order.id, { timeoutMs: 15_000 });
-            }
-          }
-        }
-      });
-    }
-
-    const cancellation = await client.orders.cancel(randomUUID(), { timeoutMs: 15_000 });
-    if (cancellation.raw !== undefined) validateRawResponse('orders.cancel', cancellation.raw);
-    assert.equal(cancellation.status, 'failed', 'expected cancellation of a nonexistent order to fail');
-    assert.equal(firstStringByKey(cancellation.error, 'code'), 'orderNotFound');
   });
 
   liveIt('validates disposable low-risk price alarm mutations with cleanup', {

@@ -1,49 +1,52 @@
-name: live-integration
+name: live order integration
 
 on:
-  schedule:
-    # Both weekday runs stay inside the 09:00-17:30 Xetra L2 test window even when GitHub
-    # starts a scheduled workflow up to an hour late.
-    - cron: "15 10,16 * * 1-5"
-      timezone: Europe/Berlin
   workflow_dispatch:
+    inputs:
+      instrument_id:
+        description: 'ISIN to buy and sell.'
+        required: true
+        type: string
+      exchange_id:
+        description: 'Exchange that must explicitly report open (for example LSX).'
+        required: true
+        type: string
+        default: 'LSX'
+      buy_amount_eur:
+        description: 'EUR amount to buy before selling the executed quantity (maximum 0.50, plus the 1 EUR fee).'
+        required: true
+        type: string
+        default: '0.5'
+      confirm_live_execution:
+        description: 'I understand this executes a real market buy and sell.'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: live-integration-main
+  group: live-order-integration-main
   cancel-in-progress: false
 
 jobs:
-  unit-gate:
-    name: owner gate and unit tests
+  orders:
+    name: execute live buy and sell
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'VIEWVIEWVIEW'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-
-  live:
-    name: live integration (no orders)
-    needs: unit-gate
+      github.actor == 'VIEWVIEWVIEW' &&
+      inputs.confirm_live_execution
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: live-order-tests
     env:
       TR_INTEGRATION: "1"
-      # Keep every scheduled account integration run read-only.
-      TR_INTEGRATION_LOW_RISK_MUTATIONS: "0"
+      TR_INTEGRATION_EXECUTE_ORDERS: "EXECUTE_LIVE_BUY_AND_SELL"
+      TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id }}
+      TR_INTEGRATION_ORDER_EXCHANGE: ${{ inputs.exchange_id }}
+      TR_INTEGRATION_ORDER_AMOUNT_EUR: ${{ inputs.buy_amount_eur }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -74,8 +77,8 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Run strict non-order live integration tests
-        run: npm run test:integration
+      - name: Execute and verify live buy and sell
+        run: npm run test:integration:orders
       - name: Remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"

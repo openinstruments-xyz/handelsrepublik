@@ -35,6 +35,41 @@ describe('captured brokerage contracts', () => {
     );
   });
 
+  it('normalizes custom expiry dates and timestamps to broker gtd dates', async () => {
+    const client = TradeRepublicClient.create();
+    const base = {
+      instrumentId: 'DE0007164600',
+      exchangeId: 'LSX',
+      side: 'buy' as const,
+      mode: 'limit' as const,
+      size: 1,
+      limit: 100,
+      secAccNo: '0000000000',
+    };
+
+    const date = await client.orders.prepare({ ...base, expiry: { type: 'gtd', value: '2026-10-20' } });
+    const isoTimestamp = await client.orders.prepare({
+      ...base,
+      expiry: { type: 'gtd', value: '2026-10-20T21:59:59.000Z' },
+    });
+    const dateObject = await client.orders.prepare({
+      ...base,
+      expiry: { type: 'gtd', value: new Date('2026-10-20T21:59:59.000Z') },
+    });
+    const unixMilliseconds = await client.orders.prepare({
+      ...base,
+      expiry: { type: 'gtd', value: Date.parse('2026-10-20T21:59:59.000Z') },
+    });
+
+    for (const order of [date, isoTimestamp, dateObject, unixMilliseconds]) {
+      expect(order.parameters.expiry).toEqual({ type: 'gtd', value: '2026-10-20' });
+    }
+    await assert.rejects(
+      client.orders.prepare({ ...base, expiry: { type: 'gtd', value: '2026-02-30' } }),
+      /gtd expiry requires/i,
+    );
+  });
+
   it('uses numeric candle resolutions and normalizes aggregateHistoryLightV2 responses', async () => {
     const payloads: Array<Record<string, unknown>> = [];
     const sockets: FakeSocket[] = [];

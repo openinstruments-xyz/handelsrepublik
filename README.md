@@ -834,12 +834,25 @@ const untilCancelled = await tr.orders.prepare({
   ...stopOrder,
   validity: 'goodTillCancelled',
 }); // expiry: { type: 'gtc' }; use only when the venue advertises gtc
+
+const customDate = await tr.orders.prepare({
+  ...stopOrder,
+  expiry: { type: 'gtd', value: '2026-10-20' },
+});
+
+const customTimestamp = await tr.orders.prepare({
+  ...stopOrder,
+  expiry: { type: 'gtd', value: new Date('2026-10-20T21:59:59Z') },
+}); // Date, ISO timestamp, or Unix milliseconds; normalized to 2026-10-20
 ```
 
 `day` maps to `gfd`, `month` and `year` map to dated `gtd` expiries 30
 and 365 days from the reference date, and `goodTillCancelled` maps to `gtc`.
-Protocol-shaped `expiry` remains available when the exact broker expiry is
-already known. Do not provide both fields.
+`expiry` remains available when the exact broker expiry is already known. A
+`gtd` value accepts `YYYY-MM-DD`, an ISO timestamp, a JavaScript `Date`, or a
+Unix timestamp in milliseconds. Timestamps are converted to their UTC calendar
+date because the broker payload carries a date rather than a time of day. Do
+not provide both `validity` and `expiry`.
 
 `orderModes` and `orderExpiries` describe what one specific destination says it
 supports; they are not global capabilities. For example, a captured Lang &
@@ -1101,6 +1114,20 @@ const l2Entitlements = await tr.market.entitlements('L2', {
 console.log(subscriptions.map(({ plan }) => plan.product));
 console.log(l2Entitlements.entitlements);
 
+// Static presentation metadata is one-way: exchange ID to display name.
+// Active L2 access remains account- and venue-specific and is reported by
+// subscriptions() and entitlements(). L2 is the order-book stream; tickerV3
+// carries bid/ask updates.
+import {
+  MARKET_DATA_STREAM_TOPICS,
+  VENUE_DISPLAY_NAMES,
+  venueDisplayName,
+} from 'handelsrepublik';
+
+console.log(VENUE_DISPLAY_NAMES.TIB); // Best Price
+console.log(venueDisplayName('XETR')); // Xetra
+console.log(MARKET_DATA_STREAM_TOPICS); // { bidAsk: 'tickerV3', orderBook: 'L2' }
+
 // L2 uses the mapper's protobuf order-book stream. Xetra's exchange ID is
 // XETR. Venues such as LSX that do not publish L2 may return a protocol error
 // through the async iterator; close every stream in a finally block.
@@ -1339,13 +1366,32 @@ npm run test:integration
 ```
 
 Disposable price-alarm and watchlist mutations require the separate
-`TR_INTEGRATION_LOW_RISK_MUTATIONS=1` opt-in and always include cleanup. Closed
-exchange rejection contracts for classic stock and ETF orders require
-`TR_INTEGRATION_CLOSED_ORDER_REJECTIONS=1`; the test refuses to submit unless
-LSX explicitly reports `open: false`, and it cancels any unexpectedly created
-order. This opt-in is ignored whenever `GITHUB_ACTIONS=true`, making order tests
-local-only. Savings-plan, money-movement, document-acceptance, and
-account-security mutations are never exercised.
+`TR_INTEGRATION_LOW_RISK_MUTATIONS=1` opt-in and always include cleanup.
+
+Closed-exchange order rejection integration is a separate opt-in suite:
+
+```powershell
+$env:TR_INTEGRATION = '1'
+$env:TR_INTEGRATION_CLOSED_ORDER_REJECTIONS = '1'
+$env:TR_SESSION_FILE = './demo/.demo-session.json'
+npm run test:integration:order-rejections
+```
+
+It submits both buy and sell requests only when LSX explicitly reports as
+closed, then asserts the `exchangeClosed` outcome and verifies the nonexistent
+order cancellation result. The **live closed-exchange order rejections** GitHub
+workflow runs this suite every day at 01:00 Europe/Berlin.
+
+Successful live order execution uses a different suite and workflow. The
+**live order integration** workflow has only a `workflow_dispatch` trigger. It
+requires an ISIN, exchange, EUR amount, and explicit confirmation that a real
+market buy and sell will execute. The test refuses to run unless the selected
+exchange explicitly reports `open: true`, caps the buy at EUR 0.50 (plus the
+expected EUR 1 fee), waits for the buy to execute, and sells the reported
+executed quantity. Configure required
+reviewers on the `live-order-tests` GitHub environment before using it.
+Savings-plan, money-movement, document-acceptance, and account-security
+mutations are never exercised.
 
 GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on every
 push, pull request, and manual quality/unit run. A separate account integration
@@ -1356,9 +1402,10 @@ account session, and the repository owner can also start it manually. Those
 times keep the scheduled AAPL/XETR L2 test inside Xetra's 09:00-17:30 German
 market hours even when GitHub starts the workflow up to an hour late.
 
-The GitHub workflow explicitly sets both mutation opt-ins to `0`, and the suite
-independently blocks order tests on GitHub Actions. Scheduled and manual GitHub
-runs therefore remain read-only. The live suite fails on all endpoint errors;
+The read-only GitHub workflow explicitly sets the low-risk mutation opt-in to
+`0`. Order rejections and successful order execution run in the two dedicated
+workflows described above.
+The live suite fails on all endpoint errors;
 optional local mutation probes skip unsupported rename and clone operations for
 Trade Republic's built-in default watchlist.
 

@@ -4158,10 +4158,21 @@ function normalizeOrderExpiry(expiry) {
     throw new TypeError('expiry.type must be "gfd", "gtc", "eom", or "gtd".');
   }
   if (expiry.type !== "gtd") return { type: expiry.type };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry.value) || Number.isNaN(Date.parse(`${expiry.value}T00:00:00Z`))) {
-    throw new TypeError("A gtd expiry requires value in YYYY-MM-DD format.");
+  return { type: expiry.type, value: normalizeOrderExpiryDate(expiry.value) };
+}
+function normalizeOrderExpiryDate(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date2 = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+    if (!Number.isNaN(date2.getTime()) && date2.toISOString().slice(0, 10) === value) return value;
   }
-  return { type: expiry.type, value: expiry.value };
+  if (typeof value === "string" && !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    throw new TypeError("A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
+  }
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError("A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
+  }
+  return date.toISOString().slice(0, 10);
 }
 function normalizeOrderValidity(validity, expiry) {
   if (validity !== void 0 && expiry !== void 0) {
@@ -4912,12 +4923,57 @@ var FileSessionStore = class {
     await rm(this.filePath, { force: true });
   }
 };
+
+// src/venues.ts
+var VENUE_DISPLAY_NAMES = {
+  TIB: "Best Price",
+  LUS: "Lang & Schwarz",
+  LSX: "Lang & Schwarz Exchange",
+  LSXCS: "Lang & Schwarz Exchange",
+  TDG: "Tradegate Exchange",
+  XFRA: "Borse Frankfurt",
+  XSWX: "SIX Swiss Exchange",
+  SLT: "Soci\xE9t\xE9 G\xE9n\xE9rale",
+  XETR: "Xetra",
+  XPAR: "Euronext Paris",
+  XBRU: "Euronext Brussels",
+  XAMS: "Euronext Amsterdam",
+  XLIS: "Euronext Lisbon",
+  XOSL: "Euronext Oslo B\xF8rs",
+  XNYS: "New York Stock Exchange",
+  XNAS: "Nasdaq",
+  XCSE: "Nasdaq Copenhagen",
+  XHEL: "Nasdaq Helsinki",
+  XSTO: "Nasdaq Stockholm",
+  XMIL: "Borsa Italiana",
+  XMAD: "Bolsa de Madrid",
+  XWAR: "Warsaw Stock Exchange",
+  XLON: "London Stock Exchange",
+  XWBO: "Wiener B\xF6rse",
+  XTSE: "Toronto Stock Exchange",
+  XTSX: "TSX Venture Exchange",
+  XSES: "Singapore (SGX)",
+  XJPX: "Tokyo Stock Exchange",
+  XASX: "Australian Securities Exchange",
+  TUB: "HSBC Trinkaus & Burkhardt",
+  BHS: "Tradias",
+  B2C: "B2C2"
+};
+var MARKET_DATA_STREAM_TOPICS = {
+  bidAsk: "tickerV3",
+  orderBook: "L2"
+};
+function venueDisplayName(exchangeId) {
+  const normalized = exchangeId.trim().toUpperCase();
+  return VENUE_DISPLAY_NAMES[normalized] ?? exchangeId;
+}
 export {
   BOND_CANDLE_RESOLUTIONS,
   CANDLE_TIMEFRAME_MS,
   CandleQuery,
   DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS,
   FileSessionStore,
+  MARKET_DATA_STREAM_TOPICS,
   MapperRequestError,
   MemorySessionStore,
   STANDARD_CANDLE_RESOLUTIONS,
@@ -4926,6 +4982,7 @@ export {
   TradeRepublicHttpError,
   TradeRepublicProtocolError,
   TradeRepublicSchemaError,
+  VENUE_DISPLAY_NAMES,
   candleResolutionMs,
   candleResolutionsForInstrumentType,
   classifyMapperOperation,
@@ -4934,6 +4991,7 @@ export {
   redactSession,
   schemaCatalogMarkdown,
   schemaRegistry,
-  validateRawResponse
+  validateRawResponse,
+  venueDisplayName
 };
 //# sourceMappingURL=index.js.map

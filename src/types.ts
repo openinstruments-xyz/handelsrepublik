@@ -275,7 +275,7 @@ export type OrderExpiry =
   | { type: 'gfd'; value?: never }
   | { type: 'gtc'; value?: never }
   | { type: 'eom'; value?: never }
-  | { type: 'gtd'; value: string };
+  | { type: 'gtd'; value: string | Date | number };
 
 export type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
 

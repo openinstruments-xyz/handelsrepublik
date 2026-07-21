@@ -1,49 +1,28 @@
-name: live-integration
+name: live closed-exchange order rejections
 
 on:
   schedule:
-    # Both weekday runs stay inside the 09:00-17:30 Xetra L2 test window even when GitHub
-    # starts a scheduled workflow up to an hour late.
-    - cron: "15 10,16 * * 1-5"
+    - cron: "0 1 * * *"
       timezone: Europe/Berlin
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: live-integration-main
+  group: live-order-rejections-main
   cancel-in-progress: false
 
 jobs:
-  unit-gate:
-    name: owner gate and unit tests
+  rejections:
+    name: closed-exchange buy and sell rejections
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
-      github.ref == 'refs/heads/main' &&
-      github.actor == 'VIEWVIEWVIEW'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-
-  live:
-    name: live integration (no orders)
-    needs: unit-gate
+      github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       TR_INTEGRATION: "1"
-      # Keep every scheduled account integration run read-only.
-      TR_INTEGRATION_LOW_RISK_MUTATIONS: "0"
+      TR_INTEGRATION_CLOSED_ORDER_REJECTIONS: "1"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -74,8 +53,8 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Run strict non-order live integration tests
-        run: npm run test:integration
+      - name: Run closed-exchange rejection checks
+        run: npm run test:integration:order-rejections
       - name: Remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"
