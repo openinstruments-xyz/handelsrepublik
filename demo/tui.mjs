@@ -16,9 +16,6 @@ const loginPhoneNumber = cleanString(process.env.TR_PHONE_NUMBER);
 const loginPin = cleanString(process.env.TR_PIN);
 const demoClientOptions = readDemoClientOptions();
 const wafLoadingFrames = ['Collecting WAF.', 'Collecting WAF..', 'Collecting WAF...'];
-const qrRefreshSkewMs = 8_000;
-const minQrDisplayMs = 8_000;
-const nearExpiredQrRetryMs = 500;
 const l2ProbeTimeoutMs = 5_000;
 const searchDebounceMs = 300;
 const searchAssetClasses = [
@@ -54,6 +51,7 @@ const state = {
   sessionRecoveryInFlight: false,
   login: {
     challenge: undefined,
+    qrPayload: '',
     qrText: '',
     expiresAt: undefined,
     refreshAt: undefined,
@@ -891,6 +889,7 @@ async function loginWithPin(reason) {
   state.login.pollAbort = undefined;
   state.login.active = false;
   state.login.error = '';
+  state.login.qrPayload = '';
   state.login.qrText = '';
   state.login.expiresAt = undefined;
   state.login.refreshAt = undefined;
@@ -921,89 +920,54 @@ async function loginWithPin(reason) {
 
 async function requestFreshQr(reason) {
   if (!state.client) return;
-  if (state.login.requestInFlight) return;
+  state.login.pollAbort?.abort();
+  state.login.serial += 1;
+  const serial = state.login.serial;
+  const abortController = new AbortController();
+  state.login.pollAbort = abortController;
   state.login.requestInFlight = true;
   clearTimeout(state.login.retryTimer);
   state.login.retryTimer = undefined;
+  clearTimeout(state.login.expiryTimer);
+  state.login.expiryTimer = undefined;
   state.login.error = '';
 
   try {
     state.status = reason === 'manual'
-      ? 'Fresh QR requested.'
-      : reason === 'refresh'
-        ? 'Refreshing QR.'
-        : 'Requesting a QR login challenge.';
+      ? 'Restarting QR login.'
+      : 'Starting QR login.';
     render();
 
-    const challenge = await state.client.auth.createInstantLogin({
+    const session = await state.client.auth.loginWithQr({
       ...(loginPhoneNumber ? { phoneNumber: loginPhoneNumber } : {}),
       deviceName,
-    });
-    state.status = 'QR challenge created. Resolving the QR payload.';
-    render();
-    const details = await resolveQrChallengeDetails(state.client, challenge);
-    const payload = details.payload || challenge.qrCode || challenge.deepLink;
-    if (!payload) {
-      const challengeSummary = summarizeQrPayloadState(challenge);
-      const detailSummary = summarizeQrPayloadState(details.rawDetail);
-      throw new Error(`Trade Republic did not return a QR payload, deep link, or decodable QR image. Challenge: ${challengeSummary}. Detail: ${detailSummary}.`);
-    }
-
-    const nextExpiresAt = details.expiresAt || challenge.expiresAt;
-    const serverTime = details.serverTime ?? challenge.serverTime;
-    const expiresAtMs = calibratedExpiryMs(nextExpiresAt, serverTime);
-    if (expiresAtMs && expiresAtMs - Date.now() <= minQrDisplayMs) {
-      state.status = 'QR payload was already near expiry. Requesting a fresh QR.';
-      render();
-      scheduleQrRetry('retry', nearExpiredQrRetryMs, state.login.serial);
-      return;
-    }
-
-    const previousAbort = state.login.pollAbort;
-    previousAbort?.abort();
-    clearTimeout(state.login.expiryTimer);
-    state.login.expiryTimer = undefined;
-    state.login.pollAbort = undefined;
-    state.login.serial += 1;
-    const serial = state.login.serial;
-    state.login.challenge = challenge;
-    state.login.expiresAt = nextExpiresAt;
-    state.status = 'Rendering QR code.';
-    render();
-    state.login.qrText = renderTerminalQr(payload);
-    state.login.active = true;
-    state.login.error = '';
-    if (expiresAtMs) {
-      scheduleQrExpiry(expiresAtMs, serial);
-    } else {
-      state.login.refreshAt = undefined;
-      state.login.countdown = '';
-    }
-    state.status = 'Scan the QR code in the Trade Republic app.';
-    showLogin();
-    render();
-
-    const pollAbort = new AbortController();
-    state.login.pollAbort = pollAbort;
-    void pollForLogin(challenge, pollAbort, serial);
-  } catch (error) {
-    state.login.error = formatError(error);
-    state.status = 'Failed to create a QR challenge.';
-    render();
-    if (state.phase === 'login') {
-      scheduleQrRetry('retry', 2000);
-    }
-  } finally {
-    state.login.requestInFlight = false;
-  }
-}
-
-async function pollForLogin(challenge, abortController, serial) {
-  try {
-    const session = await state.client.auth.pollInstantLogin(challenge, {
       intervalMs: 1500,
       timeoutMs: 20 * 60_000,
       signal: abortController.signal,
+      async onChallengeUpdate(update) {
+        if (serial !== state.login.serial || state.phase !== 'login' || !state.client) return;
+        const details = await resolveQrChallengeDetails(state.client, update);
+        const payload = details.payload || update.qrCode || update.deepLink;
+        if (!payload) throw new Error(`Trade Republic did not return a displayable QR payload for challenge ${update.id}.`);
+        const previousPayload = state.login.qrPayload;
+        const challengeChanged = Boolean(state.login.challenge?.id && state.login.challenge.id !== update.id);
+        state.login.challenge = update;
+        state.login.qrPayload = payload;
+        state.login.qrText = renderTerminalQr(payload);
+        state.login.expiresAt = update.challengeExpiresAt ?? details.expiresAt ?? update.expiresAt;
+        state.login.refreshAt = update.qrCodeTokenExpiresAt;
+        const countdownTargetMs = parseDateMs(state.login.refreshAt) || parseDateMs(state.login.expiresAt);
+        state.login.countdown = countdownTargetMs ? formatCountdown(countdownTargetMs) : '';
+        state.login.active = true;
+        state.login.error = '';
+        state.status = challengeChanged
+          ? 'QR challenge replaced. Scan the newest QR code.'
+          : previousPayload
+            ? 'QR token rotated. Scan the newest QR code.'
+            : 'Scan the QR code in the Trade Republic app.';
+        showLogin();
+        render();
+      },
     });
     if (serial !== state.login.serial || state.phase !== 'login') return;
     state.session = session;
@@ -1014,9 +978,11 @@ async function pollForLogin(challenge, abortController, serial) {
   } catch (error) {
     if (abortController.signal.aborted || serial !== state.login.serial || state.phase !== 'login') return;
     state.login.error = formatError(error);
-    state.status = 'QR polling failed. Requesting a new challenge.';
+    state.status = 'QR login failed. Retrying.';
     render();
     scheduleQrRetry('retry', 2000, serial);
+  } finally {
+    if (serial === state.login.serial) state.login.requestInFlight = false;
   }
 }
 
@@ -1031,26 +997,6 @@ function scheduleQrRetry(reason, delayMs, serial) {
   state.login.retryTimer.unref?.();
 }
 
-function scheduleQrExpiry(expiresAtMs, serial) {
-  const refreshAtMs = qrRefreshAtMs(expiresAtMs);
-  const delay = Math.max(0, refreshAtMs - Date.now());
-  state.login.refreshAt = new Date(refreshAtMs).toISOString();
-  state.login.countdown = formatCountdown(refreshAtMs);
-  render();
-  state.login.expiryTimer = setTimeout(() => {
-    if (state.phase !== 'login' || serial !== state.login.serial) return;
-    void requestFreshQr('refresh');
-  }, delay);
-  state.login.expiryTimer.unref?.();
-}
-
-function qrRefreshAtMs(expiresAtMs) {
-  const now = Date.now();
-  const lifetimeMs = Math.max(0, expiresAtMs - now);
-  const skewMs = Math.min(qrRefreshSkewMs, Math.floor(lifetimeMs * 0.2));
-  return Math.max(now + 1000, expiresAtMs - skewMs);
-}
-
 async function enterDashboard() {
   if (!state.client) return;
   state.phase = 'dashboard';
@@ -1062,6 +1008,7 @@ async function enterDashboard() {
   state.login.requestInFlight = false;
   state.login.active = false;
   state.login.countdown = '';
+  state.login.qrPayload = '';
   state.login.qrText = '';
   state.login.expiresAt = undefined;
   state.login.refreshAt = undefined;
@@ -1463,6 +1410,7 @@ async function relogin() {
   state.login.requestInFlight = false;
   state.login.active = false;
   state.login.countdown = '';
+  state.login.qrPayload = '';
   state.login.qrText = '';
   state.login.expiresAt = undefined;
   state.login.refreshAt = undefined;

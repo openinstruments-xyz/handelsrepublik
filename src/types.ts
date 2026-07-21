@@ -193,6 +193,9 @@ export interface InstantLoginChallenge {
   qrCode?: string | undefined;
   qrCodeDataUrl?: string | undefined;
   deepLink?: string | undefined;
+  challengeExpiresAt?: string | undefined;
+  qrCodeTokenExpiresAt?: string | undefined;
+  /** @deprecated Prefer challengeExpiresAt or qrCodeTokenExpiresAt. */
   expiresAt?: string | undefined;
   serverTime?: string | undefined;
   raw: unknown;

@@ -1,5 +1,12 @@
 export { TradeRepublicClient } from './traderepublic-client.js';
 export type {
+  InstantLoginChallengeHandler,
+  LoginWithQrOptions,
+  LoginWithPinOptions,
+  PollLoginOptions,
+  StartLoginWithPinOptions,
+} from './auth.js';
+export type {
   TradeRepublicBrowserLaunchOptions,
   TradeRepublicCollectWafContextOptions,
 } from './traderepublic-client.js';

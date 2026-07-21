@@ -19,7 +19,7 @@ Read subscriptions can reconnect automatically. Order submissions and other high
 
 The package provides:
 
-- login based on the web based QR code method, session persistence, and refresh helpers.
+- Login -- based on the web based "instant login" by scanning a QR code with your phone method. Also does session persistence, and provides session refresh helpers.
 - Typed domain namespaces for account, portfolio, orders, trading, market data,
   timeline, instruments, discovery, documents, tax, and payments.
 - Shared mapper-websocket subscriptions with observable disconnect and reconnect
@@ -122,18 +122,15 @@ try {
     // Refreshes the web session and saves the updated session automatically.
     await tr.auth.refreshSession();
   } else {
-    const challenge = await tr.auth.createInstantLogin({
+    await tr.auth.loginWithQr({
       deviceName: 'local sdk',
+      onChallengeUpdate(challenge) {
+        console.log(
+          // Replace the QR or link in your UI every time this callback runs.
+          challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
+        );
+      },
     });
-
-    console.log(
-      // Show the qr code to your user, or make them open the link with the TR app
-      challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
-    );
-
-    // Approve the challenge in the Trade Republic app. Successful login is
-    // persisted automatically through the configured SessionStore.
-    await tr.auth.pollInstantLogin(challenge);
   }
 
   console.log(await tr.portfolio.cash());
@@ -401,23 +398,48 @@ and headers. Do not share its result between accounts. Prefer the narrow
 ## Authentication workflows
 
 Instant login creates a challenge that the user approves in the Trade Republic
-app. The challenge exposes a QR data URL, deep link, or raw QR value, depending
-on the current broker response:
+app. Trade Republic rotates the signed QR token roughly every ten seconds while
+keeping the same challenge ID. Use the high-level login interface to receive
+the initial QR data URL, deep link, or raw QR value and every replacement:
 
 ```ts
-const challenge = await tr.auth.createInstantLogin({
+const session = await tr.auth.loginWithQr({
   deviceName: 'local sdk',
-});
-
-console.log(
-  challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
-);
-
-const session = await tr.auth.pollInstantLogin(challenge, {
   intervalMs: 1_500,
   timeoutMs: 120_000,
+  async onChallengeUpdate(challenge) {
+    const displayValue = challenge.qrCodeDataUrl
+      ?? challenge.deepLink
+      ?? challenge.qrCode;
+    await renderLatestLoginCode(displayValue);
+
+    console.log({
+      challengeExpiresAt: challenge.challengeExpiresAt,
+      qrCodeTokenExpiresAt: challenge.qrCodeTokenExpiresAt,
+    });
+  },
+}).catch((error) => {
+  console.error(error);
+  return null;
 });
+
+if (!session) {
+  // Show an error or retry action and stop the authenticated flow here.
+  return;
+}
 ```
+
+`onChallengeUpdate` is called for the initial displayable challenge and then
+once for each distinct QR or login-link update; unchanged 1.5-second poll
+responses are deduplicated. Callback calls are awaited and a callback error
+aborts login. When the complete challenge expires, `loginWithQr()`
+creates a replacement challenge and sends it through the same callback.
+
+`challengeExpiresAt` is the lifetime of the complete challenge, while
+`qrCodeTokenExpiresAt` is the shorter lifetime of the currently displayed QR
+token. The server performs the rotation: polling the challenge status returns
+the same challenge ID with a newly signed QR payload. The client does not
+generate or modify tokens locally.
 
 PIN login is also available. It starts the broker login process and polls until
 the session is ready:

@@ -9,7 +9,7 @@ import {
   encodeMapperProtobufTopicPayload,
 } from '../src/mapper-protobuf.js';
 import { FakeSocket } from './fake-socket.js';
-import type { TradeRepublicDeviceInfo, WebSocketLike } from '../src/types.js';
+import type { InstantLoginChallenge, TradeRepublicDeviceInfo, WebSocketLike } from '../src/types.js';
 
 const TEST_DEVICE_INFO: TradeRepublicDeviceInfo = {
   stableDeviceId: 'test-fingerprint',
@@ -36,12 +36,21 @@ describe('TradeRepublicClient', () => {
       }),
     });
 
-    const challenge = await client.auth.createInstantLogin({ deviceName: 'sdk-test' });
+    let challenge: InstantLoginChallenge | undefined;
+    await assert.rejects(client.auth.loginWithQr({
+      deviceName: 'sdk-test',
+      onChallengeUpdate(update) {
+        challenge = update;
+        throw new Error('challenge observed');
+      },
+    }), /challenge observed/);
 
     expect(challenge).toMatchObject({
       id: 'challenge-1',
       qrCodeDataUrl: 'data:image/png;base64,abc',
     });
+    expect('createInstantLogin' in client.auth).toBe(false);
+    expect('pollInstantLogin' in client.auth).toBe(false);
     expect(calls[0]?.url).toBe('https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges');
     expect(calls[0]?.init.method).toBe('POST');
     expect(calls[0]?.init.body).toBe(JSON.stringify({ deviceName: 'sdk-test' }));
@@ -70,14 +79,14 @@ describe('TradeRepublicClient', () => {
         numberOfCores: 24,
         deviceMemory: 64,
       },
-      fetch: mockFetch(firstCalls, { id: 'first' }),
+      fetch: mockFetch(firstCalls, { id: 'first', qrCodePayload: 'first-qr' }),
     });
     const second = TradeRepublicClient.create({
-      fetch: mockFetch(secondCalls, { id: 'second' }),
+      fetch: mockFetch(secondCalls, { id: 'second', qrCodePayload: 'second-qr' }),
     });
 
-    await first.auth.createInstantLogin();
-    await second.auth.createInstantLogin();
+    await assert.rejects(first.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
+    await assert.rejects(second.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
 
     const firstHeaders = firstCalls[0]?.init.headers as Record<string, string>;
     const secondHeaders = secondCalls[0]?.init.headers as Record<string, string>;
@@ -112,15 +121,109 @@ describe('TradeRepublicClient', () => {
           })).toString('base64'),
         },
       },
-      fetch: mockFetch(calls, { id: 'challenge-1' }),
+      fetch: mockFetch(calls, { id: 'challenge-1', qrCodePayload: 'qr' }),
     });
 
-    await client.auth.createInstantLogin();
+    await assert.rejects(client.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
 
     const headers = calls[0]?.init.headers as Record<string, string>;
     expect(headers['x-tr-app-version']).toBe('custom-version');
     expect(headers['x-tr-platform']).toBe('custom-platform');
     expect(headers['x-tr-device-info']).toBe('custom-device');
+  });
+
+  it('delivers the initial and rotated QR payloads through one challenge callback', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetchSequence(calls, [
+        jsonResponse({
+          id: 'challenge-1',
+          qrCodePayload: 'https://example.test/login?token=initial',
+          challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+          qrCodeTokenExpiresAt: '2099-07-21T14:00:00.000Z',
+        }),
+        jsonResponse({
+          status: 'PENDING',
+          qrCodePayload: 'https://example.test/login?token=one',
+          challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+          qrCodeTokenExpiresAt: '2099-07-21T14:00:10.000Z',
+        }),
+        jsonResponse({
+          status: 'PENDING',
+          qrCodePayload: 'https://example.test/login?token=one',
+          challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+          qrCodeTokenExpiresAt: '2099-07-21T14:00:10.000Z',
+        }),
+        jsonResponse({
+          status: 'PENDING',
+          qrCodePayload: 'https://example.test/login?token=two',
+          challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+          qrCodeTokenExpiresAt: '2099-07-21T14:00:20.000Z',
+        }),
+      ]),
+    });
+    const updates: InstantLoginChallenge[] = [];
+
+    await assert.rejects(
+      client.auth.loginWithQr({
+        intervalMs: 0,
+        onChallengeUpdate(update) {
+          updates.push(update);
+          if (update.qrCode?.endsWith('token=two')) throw new Error('stop after rotated token');
+        },
+      }),
+      /stop after rotated token/,
+    );
+
+    expect(updates).toEqual([
+      expect.objectContaining({
+        qrCode: 'https://example.test/login?token=initial',
+        challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+        qrCodeTokenExpiresAt: '2099-07-21T14:00:00.000Z',
+      }),
+      expect.objectContaining({
+        qrCode: 'https://example.test/login?token=one',
+        challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+        qrCodeTokenExpiresAt: '2099-07-21T14:00:10.000Z',
+      }),
+      expect.objectContaining({
+        qrCode: 'https://example.test/login?token=two',
+        challengeExpiresAt: '2099-07-21T14:01:00.000Z',
+        qrCodeTokenExpiresAt: '2099-07-21T14:00:20.000Z',
+      }),
+    ]);
+    expect(calls).toHaveLength(4);
+  });
+
+  it('replaces an expired instant-login challenge behind the callback', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetchSequence(calls, [
+        jsonResponse({ id: 'challenge-1', qrCodePayload: 'https://example.test/login?token=one' }),
+        jsonResponse({ status: 'EXPIRED' }),
+        jsonResponse({ id: 'challenge-2', qrCodePayload: 'https://example.test/login?token=two' }),
+      ]),
+    });
+    const challengeIds: string[] = [];
+
+    await assert.rejects(
+      client.auth.loginWithQr({
+        deviceName: 'callback-test',
+        intervalMs: 0,
+        onChallengeUpdate(update) {
+          challengeIds.push(update.id);
+          if (update.id === 'challenge-2') throw new Error('observed replacement challenge');
+        },
+      }),
+      /observed replacement challenge/,
+    );
+
+    expect(challengeIds).toEqual(['challenge-1', 'challenge-2']);
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['POST', 'https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges'],
+      ['GET', 'https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges/challenge-1'],
+      ['POST', 'https://api.traderepublic.com/api/v2/auth/web/login/qr-challenges'],
+    ]);
   });
 
   it('reuses WAF context across account clients without persisting it in either session', async () => {
@@ -139,7 +242,7 @@ describe('TradeRepublicClient', () => {
         cookies: { tr_session: 'alice-session' },
       },
       sessionStore: memorySessionStore(savedAliceSessions),
-      fetch: mockFetch(aliceCalls, { id: 'alice-challenge' }),
+      fetch: mockFetch(aliceCalls, { id: 'alice-challenge', qrCodePayload: 'alice-qr' }),
     });
     const bob = TradeRepublicClient.create({
       wafContext,
@@ -148,11 +251,11 @@ describe('TradeRepublicClient', () => {
         cookies: { tr_session: 'bob-session' },
       },
       sessionStore: memorySessionStore(savedBobSessions),
-      fetch: mockFetch(bobCalls, { id: 'bob-challenge' }),
+      fetch: mockFetch(bobCalls, { id: 'bob-challenge', qrCodePayload: 'bob-qr' }),
     });
 
-    await alice.auth.createInstantLogin();
-    await bob.auth.createInstantLogin();
+    await assert.rejects(alice.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
+    await assert.rejects(bob.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
     await alice.auth.saveSession();
     await bob.auth.saveSession();
 
@@ -170,7 +273,7 @@ describe('TradeRepublicClient', () => {
     assert.equal(JSON.stringify(savedBobSessions).includes('shared-waf-token'), false);
 
     alice.useWafContext({ awsWafToken: 'renewed-waf-token' });
-    await alice.auth.createInstantLogin();
+    await assert.rejects(alice.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
     const renewedHeaders = aliceCalls[1]?.init.headers as Record<string, string>;
     expect(renewedHeaders['x-aws-waf-token']).toBe('renewed-waf-token');
   });
@@ -253,6 +356,7 @@ describe('TradeRepublicClient', () => {
         async clear() {},
       },
       fetch: mockFetchSequence(calls, [
+        jsonResponse({ id: 'challenge-1' }),
         jsonResponse({
           status: 'CLAIMED',
           processId: 'process-1',
@@ -286,7 +390,10 @@ describe('TradeRepublicClient', () => {
       },
     });
 
-    await expect(client.auth.pollInstantLogin({ id: 'challenge-1' }, { intervalMs: 0 })).resolves.toMatchObject({
+    await expect(client.auth.loginWithQr({
+      intervalMs: 0,
+      onChallengeUpdate() {},
+    })).resolves.toMatchObject({
       sessionToken: 'session-token',
       securitiesAccountNumber: '0000000001',
       cookies: {
@@ -295,7 +402,7 @@ describe('TradeRepublicClient', () => {
       },
     });
 
-    const sessionCall = calls[3];
+    const sessionCall = calls[4];
     expect(sessionCall?.url).toBe('https://api.traderepublic.com/api/v1/auth/web/session');
     const sessionHeaders = sessionCall?.init.headers as Record<string, string>;
     expect(sessionHeaders.cookie).toContain('JSESSIONID=complete-session');
@@ -311,6 +418,7 @@ describe('TradeRepublicClient', () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
       fetch: mockFetchSequence(calls, [
+        jsonResponse({ id: 'challenge-1' }),
         jsonResponse({ status: 'CLAIMED', processId: 'process-1' }, 200, {
           'set-cookie': 'JSESSIONID=claim-session; Path=/; Secure; HttpOnly',
         }),
@@ -333,14 +441,17 @@ describe('TradeRepublicClient', () => {
       },
     });
 
-    await expect(client.auth.pollInstantLogin({ id: 'challenge-1' }, { intervalMs: 0 })).resolves.toMatchObject({
+    await expect(client.auth.loginWithQr({
+      intervalMs: 0,
+      onChallengeUpdate() {},
+    })).resolves.toMatchObject({
       sessionToken: 'session-token',
       cookies: {
         JSESSIONID: 'confirmed-session',
         tr_external_id: 'external-1',
       },
     });
-    expect(calls[3]?.url).toBe('https://api.traderepublic.com/api/v1/auth/web/session');
+    expect(calls[4]?.url).toBe('https://api.traderepublic.com/api/v1/auth/web/session');
   });
 
   it('refreshes the saved web session cookies', async () => {
