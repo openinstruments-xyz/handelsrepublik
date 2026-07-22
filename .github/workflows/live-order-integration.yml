@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       buy_amount_eur:
-        description: 'EUR amount to buy (maximum 5.00, plus the 1 EUR fee).'
+        description: 'Market-buy amount in EUR (maximum 5.00, plus the 1 EUR fee).'
         required: true
         type: string
         default: '0.5'

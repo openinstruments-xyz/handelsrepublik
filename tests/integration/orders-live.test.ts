@@ -8,6 +8,7 @@ import {
 } from '../../src/index.js';
 import type { Order } from '../../src/index.js';
 import { withLiveDiagnostics } from '../live-diagnostics.js';
+import { submitLiveMarketBuy } from './live-buy.js';
 
 const enabled = process.env.TR_INTEGRATION_EXECUTE_ORDERS === 'EXECUTE_LIVE_BUY';
 const sessionPath = process.env.TR_SESSION_FILE ?? 'demo/.demo-session.json';
@@ -23,26 +24,13 @@ describe('TradeRepublicClient live buy integration', {
     assert.ok(buyAmount <= maximumBuyAmount, `live order tests are capped at ${maximumBuyAmount} EUR`);
     const client = await createLiveClient();
     try {
-      const destinations = await client.trading.orderDestinations(instrumentId);
-      const destination = destinations.find(
-        ({ open, orderModes }) => open === true
-          && orderModes?.some((mode) => mode.toLowerCase() === 'market'),
-      );
-      if (!destination) {
-        t.skip(`no explicitly open market-order venue is available for ${instrumentId}; refusing to execute orders`);
+      const attempt = await submitLiveMarketBuy(client, instrumentId, buyAmount);
+      if (attempt.status === 'skipped') {
+        t.skip(attempt.reason);
         return;
       }
-      t.diagnostic(`selected ${destination.name ?? destination.id} (${destination.id})`);
-
-      const buy = await client.orders.submit({
-        instrumentId,
-        exchangeId: destination.id,
-        side: 'buy',
-        mode: 'market',
-        amount: buyAmount,
-        validity: 'day',
-        timeoutMs: 60_000,
-      });
+      t.diagnostic(`selected ${attempt.destination.name ?? attempt.destination.id} (${attempt.destination.id})`);
+      const buy = attempt.submission;
       if (buy.raw !== undefined) validateRawResponse('orders.submit', buy.raw);
       assert.equal(buy.status, 'succeeded', `buy submission did not succeed: ${JSON.stringify(buy)}`);
       assert.ok(buy.orderId, 'buy submission must return an order id');
