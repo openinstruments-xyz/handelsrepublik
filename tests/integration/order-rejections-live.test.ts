@@ -10,9 +10,15 @@ const instrumentId = requiredEnvironment('TR_INTEGRATION_ORDER_ISIN');
 const exchangeId = requiredEnvironment('TR_INTEGRATION_ORDER_EXCHANGE');
 const openBuyLimit = Number(process.env.TR_INTEGRATION_OPEN_BUY_LIMIT_EUR ?? '');
 const runClosedMarketOrderTest = isBeforeBerlinTime(5, 0);
+const selectedProbe = process.env.TR_INTEGRATION_VENUE_STATE_PROBE?.trim();
+
+if (selectedProbe && !['closed-limit', 'closed-market', 'open-limit'].includes(selectedProbe)) {
+  throw new Error(`Unknown TR_INTEGRATION_VENUE_STATE_PROBE: ${selectedProbe}`);
+}
 
 describe('TradeRepublicClient venue-state order integration', () => {
   it('rejects a EUR 1 limit buy while the selected exchange is closed', { timeout: 180_000 }, async (t) => withLiveDiagnostics('closed-exchange limit buy rejection', async () => {
+    if (skipUnlessSelected(t, 'closed-limit')) return;
     assertRequiredInstrument();
     const client = await createLiveClient();
     try {
@@ -39,6 +45,7 @@ describe('TradeRepublicClient venue-state order integration', () => {
   }));
 
   it('rejects a EUR 1 market buy while the selected exchange is closed', { timeout: 90_000 }, async (t) => withLiveDiagnostics('closed-exchange EUR 1 market rejection', async () => {
+    if (skipUnlessSelected(t, 'closed-market')) return;
     if (!runClosedMarketOrderTest) {
       t.skip('market-order rejection probe runs only before 05:00 Europe/Berlin');
       return;
@@ -72,6 +79,7 @@ describe('TradeRepublicClient venue-state order integration', () => {
   }));
 
   it('accepts and cancels a deeply non-marketable one-share limit buy while the selected exchange is open', { timeout: 120_000 }, async (t) => withLiveDiagnostics('open-exchange limit buy and cancel', async () => {
+    if (skipUnlessSelected(t, 'open-limit')) return;
     assertRequiredInstrument();
     assert.ok(Number.isFinite(openBuyLimit) && openBuyLimit > 0, 'TR_INTEGRATION_OPEN_BUY_LIMIT_EUR must be positive');
     const client = await createLiveClient();
@@ -184,6 +192,15 @@ function requiredEnvironment(name: string): string {
 function assertRequiredInstrument(): void {
   assert.ok(instrumentId, 'TR_INTEGRATION_ORDER_ISIN is required');
   assert.ok(exchangeId, 'TR_INTEGRATION_ORDER_EXCHANGE is required');
+}
+
+function skipUnlessSelected(
+  t: { skip(message?: string): void },
+  probe: 'closed-limit' | 'closed-market' | 'open-limit',
+): boolean {
+  if (!selectedProbe || selectedProbe === probe) return false;
+  t.skip(`workflow selected the ${selectedProbe} venue-state probe`);
+  return true;
 }
 
 function isBeforeBerlinTime(hour: number, minute: number): boolean {

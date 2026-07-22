@@ -2,7 +2,11 @@
 
 [![quality](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml)
 [![unit tests](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml)
-[![live-integration](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
+[![live non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
+[![live closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
+[![live closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
+[![live open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
+[![manual live buy](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml)
 
 ## Overview
 
@@ -1480,12 +1484,15 @@ The market-order probe has an additional clock guard: at or after 05:00
 Europe/Berlin it always skips before authentication or submission, even if the
 venue API unexpectedly reports closed.
 
-The **live venue-state order integration** GitHub workflow runs at 00:30 and
-10:15 Europe/Berlin on weekdays so it normally exercises one closed and one open
-venue state. Scheduled runs default to Apple (`US0378331005`), LSX, a EUR 1
-closed-venue amount-based limit buy, and a EUR 1 open-venue buy limit. Manual
-runs require the ISIN, exchange, open-venue limit, and explicit
-confirmation that real order requests will be sent.
+Three dedicated **live venue-state order integration** workflows run on
+weekdays so every time-dependent probe has its own workflow history and status
+badge. The closed-limit probe runs at 00:30, the closed-market probe at 01:00,
+and the open-limit cancellation probe at 10:45 Europe/Berlin. Scheduled runs
+default to Apple (`US0378331005`), LSX, a EUR 1 closed-venue amount-based limit
+buy, and a EUR 1 open-venue buy limit. Manual runs require the relevant inputs
+and explicit confirmation that real order requests will be sent. The
+closed-market test still skips before authentication or submission if a delayed
+run reaches 05:00 Europe/Berlin.
 
 Successful live buying uses a different suite and workflow. The
 **live buy integration** workflow has only a `workflow_dispatch` trigger. It
@@ -1509,8 +1516,8 @@ test inside Xetra's 09:00-17:30 German market hours even when GitHub starts the
 workflow up to an hour late.
 
 The no-order GitHub workflow includes cleanup-backed price-alarm and watchlist
-mutations. Order rejections and successful order execution run in the two
-dedicated workflows described above.
+mutations. The three venue-state probes and successful order execution run in
+the dedicated workflows described above.
 The live suite fails on all endpoint errors;
 optional local mutation probes skip unsupported rename and clone operations for
 Trade Republic's built-in default watchlist.

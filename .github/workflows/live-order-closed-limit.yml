@@ -1,12 +1,26 @@
-name: live integration (non-order)
+name: live venue closed limit
 
 on:
   schedule:
-    # Both weekday runs stay inside the 09:00-17:30 Xetra L2 test window even when GitHub
-    # starts a scheduled workflow up to an hour late.
-    - cron: "15 10,16 * * 1-5"
+    - cron: "30 0 * * 1-5"
       timezone: Europe/Berlin
   workflow_dispatch:
+    inputs:
+      instrument_id:
+        description: 'ISIN for the closed-venue limit rejection check.'
+        required: true
+        type: string
+        default: 'US0378331005'
+      exchange_id:
+        description: 'Exchange that must explicitly report closed (for example LSX).'
+        required: true
+        type: string
+        default: 'LSX'
+      confirm_order_request:
+        description: 'I understand this sends a real EUR 1 limit order that must be rejected.'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,30 +30,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  unit-gate:
-    name: owner gate and unit tests
+  closed-limit:
+    name: reject EUR 1 limit buy while closed
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'VIEWVIEWVIEW'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-
-  live:
-    name: live integration (no orders)
-    needs: unit-gate
+      (github.event_name == 'schedule' ||
+        (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_request))
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TR_INTEGRATION_VENUE_STATE_PROBE: closed-limit
+      TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id || 'US0378331005' }}
+      TR_INTEGRATION_ORDER_EXCHANGE: ${{ inputs.exchange_id || 'LSX' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -70,8 +73,8 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Run non-order live integration tests
-        run: npm run test:integration:non-order
+      - name: Run closed-venue limit rejection probe
+        run: npm run test:integration:order-rejections
       - name: Remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"

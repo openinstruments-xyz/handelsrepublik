@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-order-integration-main
+  group: live-tr-session-main
   cancel-in-progress: false
 
 jobs:
