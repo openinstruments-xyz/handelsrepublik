@@ -1,18 +1,18 @@
 # handelsrepublik
 
-### Package checks
+**Package checks**
 
 [![quality](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml)
 [![unit tests](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml)
 
-### Scheduled live tests
+**Scheduled live tests**
 
 [![scheduled non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
 [![scheduled closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
 [![scheduled closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
 [![scheduled open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
 
-### Manually triggered live tests
+**Manually triggered live tests**
 
 [![manual non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
 [![manual closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
@@ -20,7 +20,7 @@
 [![manual open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
 [![manual live buy](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml)
 
-### Latest result per live workflow
+**Latest result per live workflow**
 
 [![latest non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
 [![latest closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
