@@ -10,14 +10,12 @@ import {
 } from '../src/index.js';
 import {
   accountOperations,
-  boardOperations,
   customerOperations,
   discoveryOperations,
 } from '../src/operation-specs.js';
 
 const operationCatalog = [
   ...Object.values(accountOperations),
-  ...Object.values(boardOperations),
   ...Object.values(discoveryOperations),
   ...Object.values(customerOperations),
 ] as const;
@@ -54,7 +52,6 @@ describe('schema registry', () => {
     };
 
     assert.deepEqual(validateRawResponse('orders.mutualFunds', response), response);
-    assert.deepEqual(validateRawResponse('boards.list', response), response);
     assert.throws(
       () => validateRawResponse('orders.mutualFunds', { ...response, unknown: true }),
       TradeRepublicSchemaError,
@@ -120,6 +117,43 @@ describe('schema registry', () => {
     );
     assert.throws(
       () => validateRawResponse('orders.submit', { status: 'failed', unknown: true }),
+      TradeRepublicSchemaError,
+    );
+    assert.throws(
+      () => validateRawResponse('orders.submit', {
+        status: 'failed',
+        message: 'Exchange is closed',
+        error: {
+          code: 'exchangeClosed',
+          message: 'Exchange is closed',
+          details: {
+            exchangeId: 'LSX',
+            isin: 'US0378331005',
+            isNostro: false,
+            clientProcessId: 'process-1',
+            unknown: true,
+          },
+        },
+      }),
+      TradeRepublicSchemaError,
+    );
+    assert.throws(
+      () => validateRawResponse('orders.submit', {
+        status: 'failed',
+        message: 'Exchange is closed',
+        error: {
+          code: 'exchangeClosed',
+          message: 'Exchange is closed',
+          details: { exchangeId: 'LSX', isin: 'US0378331005', isNostro: false },
+        },
+      }),
+      TradeRepublicSchemaError,
+    );
+    assert.throws(
+      () => validateRawResponse('orders.submit', {
+        status: 'failed',
+        error: { code: 'newBrokerError' },
+      }),
       TradeRepublicSchemaError,
     );
   });

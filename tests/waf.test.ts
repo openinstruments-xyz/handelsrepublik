@@ -65,7 +65,7 @@ describe('collectTradeRepublicWebContext', () => {
   it('accepts a caller-owned browser without closing it', async () => {
     const browser = new FakeBrowser();
 
-    const context = await TradeRepublicClient.collectWafContext({
+    const context = await TradeRepublicClient.collectWafToken({
       browser,
       timeoutMs: 1_000,
       settleMs: 0,
@@ -80,7 +80,7 @@ describe('collectTradeRepublicWebContext', () => {
     const browser = new FakeBrowser();
 
     await assert.rejects(
-      () => TradeRepublicClient.collectWafContext({
+      () => TradeRepublicClient.collectWafToken({
         browser,
         browserLaunchOptions: { headless: true },
       } as never),

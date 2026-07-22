@@ -1,45 +1,55 @@
-name: live integration (non-order)
+name: live venue-state order integration
 
 on:
   schedule:
-    # Both weekday runs stay inside the 09:00-17:30 Xetra L2 test window even when GitHub
-    # starts a scheduled workflow up to an hour late.
-    - cron: "15 10,16 * * 1-5"
+    - cron: "30 0 * * 1-5"
+      timezone: Europe/Berlin
+    - cron: "15 10 * * 1-5"
       timezone: Europe/Berlin
   workflow_dispatch:
+    inputs:
+      instrument_id:
+        description: 'ISIN for venue-state order checks.'
+        required: true
+        type: string
+        default: 'US0378331005'
+      exchange_id:
+        description: 'Exchange that must explicitly report closed (for example LSX).'
+        required: true
+        type: string
+        default: 'LSX'
+      open_buy_limit_eur:
+        description: 'Deeply non-marketable buy limit used while the exchange is open.'
+        required: true
+        type: string
+        default: '1'
+      confirm_order_requests:
+        description: 'I understand this sends real orders and cancels any accepted open-venue probe.'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: live-integration-main
+  group: live-order-rejections-main
   cancel-in-progress: false
 
 jobs:
-  unit-gate:
-    name: owner gate and unit tests
+  rejections:
+    name: venue-state EUR 1 buy checks
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'VIEWVIEWVIEW'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-
-  live:
-    name: live integration (no orders)
-    needs: unit-gate
+      (github.event_name == 'schedule' ||
+        (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_requests))
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id || 'US0378331005' }}
+      TR_INTEGRATION_ORDER_EXCHANGE: ${{ inputs.exchange_id || 'LSX' }}
+      TR_INTEGRATION_OPEN_BUY_LIMIT_EUR: ${{ inputs.open_buy_limit_eur || '1' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -70,8 +80,8 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Run non-order live integration tests
-        run: npm run test:integration:non-order
+      - name: Run venue-state order checks
+        run: npm run test:integration:order-rejections
       - name: Remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"

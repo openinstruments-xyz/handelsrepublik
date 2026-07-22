@@ -7,8 +7,6 @@ export type EndpointKey =
   | 'auth.loginProcess'
   | 'auth.account'
   | 'auth.session'
-  | 'boards.list'
-  | 'boards.detail'
   | 'assets.search'
   | 'assets.detail'
   | 'assets.all'
@@ -100,20 +98,6 @@ export interface IbanInfo {
   raw: unknown;
 }
 
-export interface Board {
-  id: string;
-  name?: string | undefined;
-  widgets: BoardWidget[];
-  raw: unknown;
-}
-
-export interface BoardWidget {
-  id: string;
-  type: string;
-  settings?: Record<string, unknown> | undefined;
-  raw: unknown;
-}
-
 export interface RequestOptions {
   headers?: Record<string, string> | undefined;
   signal?: AbortSignal | undefined;
@@ -193,6 +177,9 @@ export interface InstantLoginChallenge {
   qrCode?: string | undefined;
   qrCodeDataUrl?: string | undefined;
   deepLink?: string | undefined;
+  challengeExpiresAt?: string | undefined;
+  qrCodeTokenExpiresAt?: string | undefined;
+  /** @deprecated Prefer challengeExpiresAt or qrCodeTokenExpiresAt. */
   expiresAt?: string | undefined;
   serverTime?: string | undefined;
   raw: unknown;
@@ -275,7 +262,7 @@ export type OrderExpiry =
   | { type: 'gfd'; value?: never }
   | { type: 'gtc'; value?: never }
   | { type: 'eom'; value?: never }
-  | { type: 'gtd'; value: string };
+  | { type: 'gtd'; value: string | Date | number };
 
 export type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
 

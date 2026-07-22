@@ -268,24 +268,6 @@ function sumExecutionSize(value) {
   }
   return sawSize ? total : void 0;
 }
-function normalizeBoard(value) {
-  const record2 = asRecord(value);
-  return {
-    id: stringValue(record2.id, record2.boardId),
-    name: optionalString(record2.name, record2.title),
-    widgets: arrayPayload(record2.widgets).map(normalizeBoardWidget),
-    raw: value
-  };
-}
-function normalizeBoardWidget(value) {
-  const record2 = asRecord(value);
-  return {
-    id: stringValue(record2.id, record2.widgetId),
-    type: stringValue(record2.type, record2.widgetType),
-    settings: objectPayload(record2.settings),
-    raw: value
-  };
-}
 function normalizePortfolio(value) {
   const record2 = asRecord(value);
   const source = Array.isArray(record2.categories) ? record2.categories : arrayPayload(value);
@@ -767,9 +749,6 @@ function normalizeTimestamp(value) {
   if (/^\d+$/.test(value)) return normalizeTimestamp(Number(value));
   return value;
 }
-function objectPayload(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
-}
 function moneyAmount(value) {
   const record2 = asRecord(value);
   return optionalNumber(record2.amount, record2.value, record2.float, record2.decimal);
@@ -1085,7 +1064,7 @@ var AuthApi = class {
   setSession;
   sessionStore;
   onSessionReady;
-  async createInstantLogin(options = {}) {
+  async createQrChallenge(options = {}) {
     const basePayload = stripUndefined({
       phoneNumber: options.phoneNumber,
       deviceName: options.deviceName
@@ -1114,6 +1093,38 @@ var AuthApi = class {
       return normalizeChallenge(response.body, response.headers.get("date"));
     }
   }
+  async loginWithQr(options) {
+    const timeoutMs = options.timeoutMs ?? 12e4;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      let challengeCallbackFailed = false;
+      const challenge = await this.createQrChallenge({
+        ...options.phoneNumber !== void 0 ? { phoneNumber: options.phoneNumber } : {},
+        ...options.deviceName !== void 0 ? { deviceName: options.deviceName } : {},
+        ...options.signal !== void 0 ? { signal: options.signal } : {}
+      });
+      try {
+        return await this.pollQrChallenge(challenge, {
+          timeoutMs: Math.max(1, deadline - Date.now()),
+          async onChallengeUpdate(update) {
+            try {
+              await options.onChallengeUpdate(update);
+            } catch (error) {
+              challengeCallbackFailed = true;
+              throw error;
+            }
+          },
+          ...options.intervalMs !== void 0 ? { intervalMs: options.intervalMs } : {},
+          ...options.signal !== void 0 ? { signal: options.signal } : {},
+          ...options.debug !== void 0 ? { debug: options.debug } : {}
+        });
+      } catch (error) {
+        if (challengeCallbackFailed || Date.now() >= deadline || !isRetryableInstantLoginExpiry(error)) throw error;
+        debugLog(options.debug, "challenge:renew", { challengeId: challenge.id });
+      }
+    }
+    throw new Error("Timed out while waiting for Trade Republic instant login approval.");
+  }
   async startLoginWithPin(options) {
     const raw = await this.http.request(
       "POST",
@@ -1134,13 +1145,26 @@ var AuthApi = class {
     const progress = await this.startLoginWithPin(options);
     return this.pollLoginProgress(progress, options);
   }
-  async pollInstantLogin(challenge, options = {}) {
+  async pollQrChallenge(challenge, options = {}) {
     const intervalMs = options.intervalMs ?? 1500;
     const timeoutMs = options.timeoutMs ?? 12e4;
     const startedAt = Date.now();
     let processId;
     let confirmedPolls = 0;
     let accumulatedSession = this.getSession();
+    let latestChallenge = initialChallenge(challenge);
+    let deliveredChallengeKey;
+    const deliverChallenge = async (next) => {
+      latestChallenge = mergeChallenges(latestChallenge, next);
+      const key = challengePresentationKey(latestChallenge);
+      if (!options.onChallengeUpdate || key === void 0 || key === deliveredChallengeKey) return;
+      deliveredChallengeKey = key;
+      await options.onChallengeUpdate(latestChallenge);
+    };
+    await deliverChallenge(latestChallenge);
+    if (isInstantLoginChallengeExpired(latestChallenge)) {
+      throw new Error("Trade Republic instant login challenge expired.");
+    }
     debugLog(options.debug, "poll:start", { challengeId: challenge.id, intervalMs, timeoutMs });
     while (Date.now() - startedAt <= timeoutMs) {
       if (options.signal?.aborted) throw options.signal.reason;
@@ -1186,6 +1210,10 @@ var AuthApi = class {
           { signal: options.signal }
         );
         const raw = response.body;
+        await deliverChallenge(normalizeChallenge({ ...asRecord(raw), id: challenge.id }, response.headers.get("date")));
+        if (isInstantLoginChallengeExpired(latestChallenge)) {
+          throw new Error("Trade Republic instant login challenge expired.");
+        }
         const challengeState = extractLoginProgressState(raw);
         const challengeStatus = normalizeStatus(challengeState.status);
         const cookieSession = extractCookieSession(response.headers);
@@ -1335,15 +1363,66 @@ var AuthApi = class {
 function normalizeChallenge(raw, serverTime) {
   const record2 = asRecord(raw);
   const id = stringValue2(record2.id, record2.challengeId, record2.processId);
+  const challengeExpiresAt = optionalString2(record2.challengeExpiresAt);
+  const qrCodeTokenExpiresAt = optionalString2(record2.qrCodeTokenExpiresAt);
   return {
     id,
     qrCode: optionalString2(record2.qrCode, record2.qrCodePayload, record2.qr, record2.code),
     qrCodeDataUrl: optionalString2(record2.qrCodeDataUrl, record2.qrDataUrl),
     deepLink: optionalString2(record2.deepLink, record2.loginUrl, record2.url),
-    expiresAt: optionalString2(record2.expiresAt, record2.challengeExpiresAt, record2.qrCodeTokenExpiresAt, record2.expiration),
+    challengeExpiresAt,
+    qrCodeTokenExpiresAt,
+    expiresAt: optionalString2(record2.expiresAt, challengeExpiresAt, qrCodeTokenExpiresAt, record2.expiration),
     serverTime: serverTime ?? void 0,
     raw
   };
+}
+function initialChallenge(challenge) {
+  return {
+    id: challenge.id,
+    qrCode: challenge.qrCode,
+    qrCodeDataUrl: challenge.qrCodeDataUrl,
+    deepLink: challenge.deepLink,
+    challengeExpiresAt: challenge.challengeExpiresAt,
+    qrCodeTokenExpiresAt: challenge.qrCodeTokenExpiresAt,
+    expiresAt: challenge.expiresAt,
+    serverTime: challenge.serverTime,
+    raw: challenge.raw ?? challenge
+  };
+}
+function mergeChallenges(previous, next) {
+  const hasFreshPresentation = Boolean(next.qrCode || next.qrCodeDataUrl || next.deepLink);
+  return {
+    ...previous,
+    ...next,
+    qrCode: hasFreshPresentation ? next.qrCode : previous.qrCode,
+    qrCodeDataUrl: hasFreshPresentation ? next.qrCodeDataUrl : previous.qrCodeDataUrl,
+    deepLink: hasFreshPresentation ? next.deepLink : previous.deepLink,
+    challengeExpiresAt: next.challengeExpiresAt ?? previous.challengeExpiresAt,
+    qrCodeTokenExpiresAt: next.qrCodeTokenExpiresAt ?? previous.qrCodeTokenExpiresAt,
+    expiresAt: next.expiresAt ?? previous.expiresAt,
+    serverTime: next.serverTime ?? previous.serverTime
+  };
+}
+function challengePresentationKey(challenge) {
+  if (!challenge.qrCode && !challenge.qrCodeDataUrl && !challenge.deepLink) return void 0;
+  return JSON.stringify([
+    challenge.id,
+    challenge.qrCode,
+    challenge.qrCodeDataUrl,
+    challenge.deepLink,
+    challenge.challengeExpiresAt,
+    challenge.qrCodeTokenExpiresAt
+  ]);
+}
+function isRetryableInstantLoginExpiry(error) {
+  return error instanceof Error && /expired|timed out while waiting for trade republic instant login approval/i.test(error.message);
+}
+function isInstantLoginChallengeExpired(challenge) {
+  if (!challenge.challengeExpiresAt) return false;
+  const expiresAt = Date.parse(challenge.challengeExpiresAt);
+  const observedAt = challenge.serverTime ? Date.parse(challenge.serverTime) : Date.now();
+  return Number.isFinite(expiresAt) && Number.isFinite(observedAt) && observedAt >= expiresAt;
 }
 function extractSession(raw) {
   const record2 = asRecord(raw);
@@ -1877,18 +1956,89 @@ var orderMutationStatusSchema = z.enum([
   "succeeded",
   "failed"
 ]);
-var orderMutationErrorSchema = z.object({
-  code: z.string().optional(),
+var otherOrderMutationErrorCodeSchema = z.enum([
+  "cashMissing",
+  "currentQuoteMissing",
+  "instrumentSuspended",
+  "internalError",
+  "invalidSecurityDerivative",
+  "invalidSecurityNonDerivative",
+  "limitDenied",
+  "maxQuantityExceeded",
+  "noRefPriceAvailable",
+  "noRouteToMarket",
+  "orderAlreadyDeleted",
+  "orderAlreadyExists",
+  "orderRejectedAtExchange",
+  "portfolioInactive",
+  "quoteMissing",
+  "savingsplanSharesMissingToday",
+  "sharesMissing",
+  "shortPositionNotAllowed",
+  "timeoutError",
+  "unknownInstrument"
+]);
+var otherOrderMutationErrorDetailsSchema = z.strictObject({
+  exchangeId: z.string().optional(),
+  isin: z.string().optional(),
+  orderId: z.string().optional(),
+  userId: z.string().optional(),
+  clientProcessId: z.string().optional(),
+  isNostro: z.boolean().optional()
+});
+var otherOrderMutationErrorSchema = z.strictObject({
+  code: otherOrderMutationErrorCodeSchema,
   message: z.string().optional(),
-  details: jsonRecord.optional()
-}).passthrough();
-var orderMutationResponseSchema = z.object({
+  details: otherOrderMutationErrorDetailsSchema.optional()
+});
+var exchangeClosedErrorSchema = z.strictObject({
+  code: z.literal("exchangeClosed"),
+  message: z.string(),
+  details: z.strictObject({
+    exchangeId: z.string(),
+    isin: z.string(),
+    isNostro: z.boolean(),
+    clientProcessId: z.string()
+  })
+});
+var orderNotFoundErrorSchema = z.strictObject({
+  code: z.literal("orderNotFound"),
+  message: z.string(),
+  details: z.strictObject({
+    orderId: z.string(),
+    userId: z.string()
+  })
+});
+var exchangeClosedResponseSchema = z.strictObject({
+  status: z.literal("failed"),
+  message: z.string(),
+  error: exchangeClosedErrorSchema
+});
+var orderNotFoundResponseSchema = z.strictObject({
+  status: z.literal("failed"),
+  orderId: z.string(),
+  message: z.string(),
+  error: orderNotFoundErrorSchema
+});
+var otherOrderMutationErrorValueSchema = z.union([
+  z.string(),
+  otherOrderMutationErrorSchema
+]);
+var otherOrderMutationResponseSchema = z.strictObject({
   status: orderMutationStatusSchema,
   orderId: z.string().optional(),
   id: z.string().optional(),
   message: z.string().optional(),
-  error: z.union([z.string(), orderMutationErrorSchema, z.array(jsonValue)]).optional()
-}).strict();
+  error: z.union([
+    otherOrderMutationErrorValueSchema,
+    z.array(otherOrderMutationErrorValueSchema)
+  ]).optional()
+});
+var orderMutationResponseSchema = z.union([
+  exchangeClosedResponseSchema,
+  orderNotFoundResponseSchema,
+  otherOrderMutationResponseSchema
+]);
 var orderMutationVariants = [
   "received",
   "waiting",
@@ -1931,8 +2081,6 @@ var schemaRegistry = [
   entry("account.personalDetails", "Personal details", "rest", "read", "GET /api/v1/customer/personal-details", jsonRecord),
   entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", accountRelationshipsSchema),
   entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord),
-  entry("boards.list", "Boards list", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards", normalizedArrayWrappers),
-  entry("boards.detail", "Board detail", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards/{boardId}", jsonRecord),
   entry("assets.search", "Asset search", "websocket", "read", "neonSearch", normalizedArrayWrappers, { variants: ["stock", "crypto", "etf -> fund", "mutualFund", "privateFund", "bond", "synthetic"] }),
   entry("assets.get", "Instrument detail", "websocket", "read", "instrument", jsonRecord),
   entry("derivatives.search", "Derivative search", "websocket", "read", "neonSearch type=derivative", normalizedArrayWrappers),
@@ -2178,8 +2326,6 @@ var DEFAULT_ENDPOINTS = {
   "auth.loginProcess": "/api/v2/auth/web/login/processes/{processId}",
   "auth.account": "/api/v2/auth/account",
   "auth.session": "/api/v1/auth/web/session",
-  "boards.list": "/api-gateway/pro-trading/api/v2/boards",
-  "boards.detail": "/api-gateway/pro-trading/api/v2/boards/{boardId}",
   "assets.search": "/api/v2/search/instruments",
   "assets.detail": "/api/v2/instruments/{assetId}",
   "assets.all": "/api/v2/instruments",
@@ -2224,20 +2370,6 @@ var accountOperations = {
     normalize: (raw) => normalizeAccountRelationships(raw)
   },
   cardsHome: rest("account.cardsHome", "/api/v1/card/cards/home")
-};
-var boardOperations = {
-  list: {
-    ...endpoint("boards.list", "boards.list"),
-    normalize: (raw) => arrayPayload(raw).map(normalizeBoard)
-  },
-  detail: {
-    transport: "rest",
-    name: "boards.detail",
-    schemaName: "boards.detail",
-    endpoint: "boards.detail",
-    pathParams: ({ boardId }) => ({ boardId }),
-    normalize: (raw) => normalizeBoard(raw)
-  }
 };
 var discoveryOperations = {
   exchangeDetails: {
@@ -2339,18 +2471,6 @@ var AccountApi = class {
   }
   cardsHome() {
     return this.operations.executeRaw(accountOperations.cardsHome, {});
-  }
-};
-var BoardsApi = class {
-  constructor(operations) {
-    this.operations = operations;
-  }
-  operations;
-  list() {
-    return this.operations.execute(boardOperations.list, {});
-  }
-  get(boardId) {
-    return this.operations.execute(boardOperations.detail, { boardId });
   }
 };
 
@@ -3511,7 +3631,6 @@ var TradeRepublicClient = class _TradeRepublicClient {
   auth;
   raw;
   account;
-  boards;
   assets;
   derivatives;
   orders;
@@ -3578,7 +3697,6 @@ var TradeRepublicClient = class _TradeRepublicClient {
     });
     this.operations = this.runtime.operations;
     this.account = new AccountApi(this.operations);
-    this.boards = new BoardsApi(this.operations);
     this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
@@ -3598,7 +3716,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   static create(options = {}) {
     return new _TradeRepublicClient(options);
   }
-  static async collectWafContext(options = {}) {
+  static async collectWafToken(options = {}) {
     const { browser, browserLaunchOptions, ...collectionOptions } = options;
     if (browser) {
       if (browserLaunchOptions) {
@@ -4158,10 +4276,21 @@ function normalizeOrderExpiry(expiry) {
     throw new TypeError('expiry.type must be "gfd", "gtc", "eom", or "gtd".');
   }
   if (expiry.type !== "gtd") return { type: expiry.type };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry.value) || Number.isNaN(Date.parse(`${expiry.value}T00:00:00Z`))) {
-    throw new TypeError("A gtd expiry requires value in YYYY-MM-DD format.");
+  return { type: expiry.type, value: normalizeOrderExpiryDate(expiry.value) };
+}
+function normalizeOrderExpiryDate(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date2 = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+    if (!Number.isNaN(date2.getTime()) && date2.toISOString().slice(0, 10) === value) return value;
   }
-  return { type: expiry.type, value: expiry.value };
+  if (typeof value === "string" && !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    throw new TypeError("A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
+  }
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError("A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
+  }
+  return date.toISOString().slice(0, 10);
 }
 function normalizeOrderValidity(validity, expiry) {
   if (validity !== void 0 && expiry !== void 0) {
@@ -4912,12 +5041,57 @@ var FileSessionStore = class {
     await rm(this.filePath, { force: true });
   }
 };
+
+// src/venues.ts
+var VENUE_DISPLAY_NAMES = {
+  TIB: "Best Price",
+  LUS: "Lang & Schwarz",
+  LSX: "Lang & Schwarz Exchange",
+  LSXCS: "Lang & Schwarz Exchange",
+  TDG: "Tradegate Exchange",
+  XFRA: "Borse Frankfurt",
+  XSWX: "SIX Swiss Exchange",
+  SLT: "Soci\xE9t\xE9 G\xE9n\xE9rale",
+  XETR: "Xetra",
+  XPAR: "Euronext Paris",
+  XBRU: "Euronext Brussels",
+  XAMS: "Euronext Amsterdam",
+  XLIS: "Euronext Lisbon",
+  XOSL: "Euronext Oslo B\xF8rs",
+  XNYS: "New York Stock Exchange",
+  XNAS: "Nasdaq",
+  XCSE: "Nasdaq Copenhagen",
+  XHEL: "Nasdaq Helsinki",
+  XSTO: "Nasdaq Stockholm",
+  XMIL: "Borsa Italiana",
+  XMAD: "Bolsa de Madrid",
+  XWAR: "Warsaw Stock Exchange",
+  XLON: "London Stock Exchange",
+  XWBO: "Wiener B\xF6rse",
+  XTSE: "Toronto Stock Exchange",
+  XTSX: "TSX Venture Exchange",
+  XSES: "Singapore (SGX)",
+  XJPX: "Tokyo Stock Exchange",
+  XASX: "Australian Securities Exchange",
+  TUB: "HSBC Trinkaus & Burkhardt",
+  BHS: "Tradias",
+  B2C: "B2C2"
+};
+var MARKET_DATA_STREAM_TOPICS = {
+  bidAsk: "tickerV3",
+  orderBook: "L2"
+};
+function venueDisplayName(exchangeId) {
+  const normalized = exchangeId.trim().toUpperCase();
+  return VENUE_DISPLAY_NAMES[normalized] ?? exchangeId;
+}
 export {
   BOND_CANDLE_RESOLUTIONS,
   CANDLE_TIMEFRAME_MS,
   CandleQuery,
   DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS,
   FileSessionStore,
+  MARKET_DATA_STREAM_TOPICS,
   MapperRequestError,
   MemorySessionStore,
   STANDARD_CANDLE_RESOLUTIONS,
@@ -4926,6 +5100,7 @@ export {
   TradeRepublicHttpError,
   TradeRepublicProtocolError,
   TradeRepublicSchemaError,
+  VENUE_DISPLAY_NAMES,
   candleResolutionMs,
   candleResolutionsForInstrumentType,
   classifyMapperOperation,
@@ -4934,6 +5109,7 @@ export {
   redactSession,
   schemaCatalogMarkdown,
   schemaRegistry,
-  validateRawResponse
+  validateRawResponse,
+  venueDisplayName
 };
 //# sourceMappingURL=index.js.map

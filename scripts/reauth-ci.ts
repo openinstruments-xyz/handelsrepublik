@@ -7,7 +7,6 @@ import {
   TradeRepublicClient,
 } from '../src/index.js';
 import type {
-  InstantLoginChallenge,
   Session,
   TradeRepublicBrowserLike,
 } from '../src/index.js';
@@ -102,41 +101,33 @@ async function run(): Promise<void> {
 }
 
 async function loginWithRotatingQr(client: TradeRepublicClient): Promise<Session> {
-  const deadline = Date.now() + options.timeoutMs;
   let attempt = 0;
-
-  while (Date.now() < deadline) {
-    attempt += 1;
-    const challenge = await client.auth.createInstantLogin({
-      deviceName: options.deviceName,
-    });
-    const details = await resolveQrDetails(client, challenge);
-    assert.ok(details.payload, 'Trade Republic did not return a usable QR payload.');
-
-    console.log(`\nScan QR code ${attempt} with the Trade Republic app and approve the login:\n`);
-    console.log(renderQr(details.payload));
-    console.log('Waiting for approval. A fresh QR will appear automatically if this one expires...');
-
-    const remainingOverallMs = deadline - Date.now();
-    const expiryMs = calibratedExpiryMs(details.expiresAt, details.serverTime);
-    const remainingChallengeMs = expiryMs === undefined
-      ? remainingOverallMs
-      : Math.max(1_000, expiryMs - Date.now() - 1_500);
-    const attemptTimeoutMs = Math.min(remainingOverallMs, remainingChallengeMs);
-
-    try {
-      return await client.auth.pollInstantLogin(challenge, {
-        intervalMs: 1_500,
-        timeoutMs: attemptTimeoutMs,
-        debug: options.debug,
-      });
-    } catch (error) {
-      if (Date.now() >= deadline || !isRetryableQrExpiry(error)) throw error;
-      console.log('QR challenge expired. Requesting a fresh one...');
-    }
-  }
-
-  throw new Error('Timed out while waiting for Trade Republic QR login approval.');
+  let challengeId: string | undefined;
+  let displayedPayload: string | undefined;
+  return client.auth.loginWithQr({
+    deviceName: options.deviceName,
+    intervalMs: 1_500,
+    timeoutMs: options.timeoutMs,
+    debug: options.debug,
+    onChallengeUpdate(update) {
+      const payload = firstString(update.qrCode, update.deepLink)
+        ?? decodeQrDataUrl(firstString(update.qrCodeDataUrl));
+      assert.ok(payload, 'Trade Republic did not return a usable QR payload.');
+      if (payload === displayedPayload) return;
+      const firstPayload = challengeId === undefined;
+      const replacedChallenge = challengeId !== undefined && challengeId !== update.id;
+      if (challengeId !== update.id) attempt += 1;
+      challengeId = update.id;
+      displayedPayload = payload;
+      console.log(firstPayload
+        ? `\nScan QR code ${attempt} with the Trade Republic app and approve the login:\n`
+        : replacedChallenge
+          ? '\nQR challenge expired. Scan the replacement QR code:\n'
+          : '\nTrade Republic rotated the QR token. Scan the newest QR code:\n');
+      console.log(renderQr(payload));
+      console.log('Waiting for approval. Rotated QR tokens will appear automatically...');
+    },
+  });
 }
 
 async function launchBrowser(): Promise<TradeRepublicBrowserLike & { close(): Promise<void> }> {
@@ -150,70 +141,6 @@ async function launchBrowser(): Promise<TradeRepublicBrowserLike & { close(): Pr
       return await chromium.launch({ headless: true });
     }
   }
-}
-
-async function resolveQrDetails(
-  client: TradeRepublicClient,
-  challenge: InstantLoginChallenge,
-): Promise<{
-  payload: string | undefined;
-  expiresAt: string | undefined;
-  serverTime: string | undefined;
-}> {
-  const inline = firstString(challenge.qrCode, challenge.deepLink);
-  if (inline) {
-    return {
-      payload: inline,
-      expiresAt: challenge.expiresAt,
-      serverTime: challenge.serverTime,
-    };
-  }
-  const inlineDataUrl = firstString(challenge.qrCodeDataUrl);
-  if (inlineDataUrl) {
-    return {
-      payload: decodeQrDataUrl(inlineDataUrl),
-      expiresAt: challenge.expiresAt,
-      serverTime: challenge.serverTime,
-    };
-  }
-  if (!challenge.id) {
-    return {
-      payload: undefined,
-      expiresAt: challenge.expiresAt,
-      serverTime: challenge.serverTime,
-    };
-  }
-
-  const response = await client.web.requestDetailed<Record<string, unknown>>(
-    'GET',
-    `/api/v2/auth/web/login/qr-challenges/${encodeURIComponent(challenge.id)}`,
-  );
-  const detail = response.body;
-  return {
-    payload: firstString(detail.qrCodePayload, detail.qrCode, detail.deepLink, detail.loginUrl, detail.url)
-      ?? decodeQrDataUrl(firstString(detail.qrCodeDataUrl, detail.qrDataUrl)),
-    expiresAt: firstString(
-      detail.challengeExpiresAt,
-      detail.expiresAt,
-      detail.expiration,
-      detail.qrCodeTokenExpiresAt,
-      challenge.expiresAt,
-    ),
-    serverTime: response.headers.get('date') ?? challenge.serverTime,
-  };
-}
-
-function calibratedExpiryMs(expiresAt: string | undefined, serverTime: string | undefined): number | undefined {
-  if (!expiresAt) return undefined;
-  const expiryMs = new Date(expiresAt).getTime();
-  if (!Number.isFinite(expiryMs)) return undefined;
-  const serverMs = serverTime ? new Date(serverTime).getTime() : NaN;
-  return Number.isFinite(serverMs) ? expiryMs - (serverMs - Date.now()) : expiryMs;
-}
-
-function isRetryableQrExpiry(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return /expired|timed out while waiting for trade republic instant login approval/i.test(error.message);
 }
 
 function decodeQrDataUrl(dataUrl: string | undefined): string | undefined {

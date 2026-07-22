@@ -3,14 +3,13 @@ import { identity } from './operations.js';
 import {
   arrayPayload,
   normalizeAccountRelationships,
-  normalizeBoard,
   normalizeExchangeDetails,
   normalizeExchangeSchedule,
   normalizeIbanInfo,
   normalizeInstrumentStatus,
   normalizeWatchlist,
 } from './normalizers.js';
-import type { AccountRelationship, Board, ExchangeDetails, ExchangeSchedule, IbanInfo, InstrumentStatus, Watchlist } from './types.js';
+import type { AccountRelationship, ExchangeDetails, ExchangeSchedule, IbanInfo, InstrumentStatus, Watchlist } from './types.js';
 
 export const accountOperations = {
   current: endpoint('auth.account', 'auth.account'),
@@ -22,21 +21,6 @@ export const accountOperations = {
     normalize: (raw: unknown): AccountRelationship[] => normalizeAccountRelationships(raw),
   } satisfies RestOperation<Record<string, never>, AccountRelationship[]>,
   cardsHome: rest('account.cardsHome', '/api/v1/card/cards/home'),
-} as const;
-
-export const boardOperations = {
-  list: {
-    ...endpoint('boards.list', 'boards.list'),
-    normalize: (raw: unknown): Board[] => arrayPayload(raw).map(normalizeBoard),
-  },
-  detail: {
-    transport: 'rest',
-    name: 'boards.detail',
-    schemaName: 'boards.detail',
-    endpoint: 'boards.detail',
-    pathParams: ({ boardId }: { boardId: string }) => ({ boardId }),
-    normalize: (raw: unknown): Board => normalizeBoard(raw),
-  } satisfies RestOperation<{ boardId: string }, Board>,
 } as const;
 
 export const discoveryOperations = {
@@ -107,7 +91,7 @@ function rest(name: string, path: string): RestOperation<Record<string, never>, 
   return { transport: 'rest', name, schemaName: name, path, normalize: identity<unknown> };
 }
 
-function endpoint(name: string, endpointKey: 'auth.account' | 'auth.session' | 'boards.list'): RestOperation<Record<string, never>, unknown> {
+function endpoint(name: string, endpointKey: 'auth.account' | 'auth.session'): RestOperation<Record<string, never>, unknown> {
   return { transport: 'rest', name, schemaName: name, endpoint: endpointKey, normalize: identity<unknown> };
 }
 

@@ -71,8 +71,6 @@ const helperSignatures = new Map([
   ['derivatives', 'derivatives(query?: string, options?: { underlyingId?: string; direction?: "long" | "short"; limit?: number })'],
   ['derivativesFor', 'derivativesFor(underlyingId?: string, options?: { direction?: "long" | "short"; productType?: string; limit?: number })'],
   ['derivative', 'derivative(derivativeId: string)'],
-  ['boards', 'boards()'],
-  ['board', 'board(boardId: string)'],
   ['candles', 'candles(assetId?: string, exchangeId?: string, timeframe?: string, options?: { from?: string | Date; to?: string | Date; limit?: number })'],
   ['downloadCandles', 'downloadCandles(assetId?: string, exchangeId?: string, timeframe?: string, options?: { from?: string | Date; to?: string | Date; maxCandlesPerRequest?: number })'],
   ['marketSubscriptions', 'marketSubscriptions(options?: { assetId?: string; exchangeId?: string; type?: string })'],
@@ -159,37 +157,44 @@ function createSessionStore() {
 
 async function loginQr(options = {}) {
   await ensureLoginContext(options);
-
-  const challenge = await client.auth.createInstantLogin({
-    deviceName: options.deviceName ?? 'handelsrepublik demo repl',
-  });
-
-  const qrDetails = await resolveQrChallengeDetails(challenge);
-  const displayedChallenge = {
-    ...challenge,
-    deepLink: challenge.deepLink ?? qrDetails.deepLink,
-    expiresAt: qrDetails.expiresAt ?? challenge.expiresAt,
-  };
-
-  if (qrDetails.payload) {
-    await writeConsoleLine(renderTerminalQr(qrDetails.payload));
-  } else {
-    throw new Error(`Trade Republic did not return a QR payload for challenge ${challenge.id}.`);
-  }
-  if (options.debug) {
-    console.log({
-      challengeId: challenge.id,
-      expiresAt: displayedChallenge.expiresAt ?? null,
-      deepLink: displayedChallenge.deepLink ?? null,
-    });
-  }
-
-  const stopCountdown = startQrCountdown(displayedChallenge.expiresAt, qrDetails.serverTime ?? challenge.serverTime);
+  let displayedQrPayload;
+  let displayedChallengeId;
+  let displayedChallengeExpiry;
+  let stopCountdown = () => {};
   try {
-    const session = await client.auth.pollInstantLogin(challenge, {
+    const session = await client.auth.loginWithQr({
+      deviceName: options.deviceName ?? 'handelsrepublik demo repl',
       intervalMs: options.intervalMs ?? 1500,
       timeoutMs: options.timeoutMs ?? 10 * 60_000,
       debug: options.debug ?? false,
+      async onChallengeUpdate(update) {
+        const details = await resolveQrChallengeDetails(update);
+        const payload = details.payload;
+        if (!payload || payload === displayedQrPayload) return;
+        const challengeChanged = displayedChallengeId !== undefined && displayedChallengeId !== update.id;
+        displayedChallengeId = update.id;
+        displayedQrPayload = payload;
+        await writeConsoleLine(challengeChanged
+          ? '\nQR challenge replaced; use the newest code:'
+          : displayedChallengeExpiry === undefined
+            ? '\nScan this QR code with the Trade Republic app:'
+            : '\nQR token rotated; use the newest code:');
+        await writeConsoleLine(renderTerminalQr(payload));
+        const challengeExpiry = update.challengeExpiresAt ?? details.expiresAt ?? update.expiresAt;
+        if (challengeExpiry && challengeExpiry !== displayedChallengeExpiry) {
+          displayedChallengeExpiry = challengeExpiry;
+          stopCountdown();
+          stopCountdown = startQrCountdown(challengeExpiry, details.serverTime ?? update.serverTime);
+        }
+        if (options.debug) {
+          console.log({
+            challengeId: update.id,
+            challengeExpiresAt: update.challengeExpiresAt ?? null,
+            qrCodeTokenExpiresAt: update.qrCodeTokenExpiresAt ?? null,
+            deepLink: update.deepLink ?? null,
+          });
+        }
+      },
     });
     const profile = await loginProfile();
     scheduleSessionRefresh(session, {
@@ -256,7 +261,7 @@ async function loginProfile() {
 
 async function resolveQrChallengeDetails(challenge) {
   const inlinePayload = challenge.qrCode ?? challenge.deepLink;
-  const inlineExpiresAt = firstString(challenge.expiresAt);
+  const inlineExpiresAt = firstString(challenge.challengeExpiresAt, challenge.expiresAt, challenge.qrCodeTokenExpiresAt);
   if (inlinePayload) {
     return {
       payload: inlinePayload,
@@ -612,20 +617,6 @@ async function derivative(derivativeId) {
   derivativeId ??= EXAMPLE_ASSET_ID;
   await ensureSession();
   return client.derivatives.get(derivativeId);
-}
-
-async function boards() {
-  await ensureSession();
-  return client.boards.list();
-}
-
-async function board(boardId) {
-  if (!boardId) {
-    const items = await boards();
-    return items[0] ?? null;
-  }
-  await ensureSession();
-  return client.boards.get(boardId);
 }
 
 async function candles(assetId, exchangeId, timeframe = '1h', options = {}) {
@@ -1633,8 +1624,6 @@ Object.assign(replContext, {
   derivatives,
   derivativesFor,
   derivative,
-  boards,
-  board,
   candles,
   downloadCandles,
   marketSubscriptions,

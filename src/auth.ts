@@ -5,7 +5,7 @@ import { asRecord } from './normalizers.js';
 import type { InstantLoginChallenge, Session, SessionStore } from './types.js';
 import { mergeTradeRepublicWebContexts } from './waf.js';
 
-export interface CreateInstantLoginOptions {
+interface CreateQrChallengeOptions {
   phoneNumber?: string;
   deviceName?: string;
   signal?: AbortSignal;
@@ -18,14 +18,26 @@ export interface StartLoginWithPinOptions {
   signal?: AbortSignal;
 }
 
-export interface LoginWithPinOptions extends StartLoginWithPinOptions, PollInstantLoginOptions {}
+export interface LoginWithPinOptions extends StartLoginWithPinOptions, PollLoginOptions {}
 
-export interface PollInstantLoginOptions {
+export interface PollLoginOptions {
   intervalMs?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
   debug?: boolean;
 }
+
+interface PollQrChallengeOptions extends PollLoginOptions {
+  onChallengeUpdate?: InstantLoginChallengeHandler;
+}
+
+export interface LoginWithQrOptions extends CreateQrChallengeOptions, PollLoginOptions {
+  onChallengeUpdate: InstantLoginChallengeHandler;
+}
+
+export type InstantLoginChallengeHandler = (
+  challenge: InstantLoginChallenge,
+) => void | Promise<void>;
 
 export interface LoginProgressState {
   status: string | undefined;
@@ -45,7 +57,7 @@ export class AuthApi {
     private readonly onSessionReady?: SessionReadyHandler,
   ) {}
 
-  async createInstantLogin(options: CreateInstantLoginOptions = {}): Promise<InstantLoginChallenge> {
+  private async createQrChallenge(options: CreateQrChallengeOptions = {}): Promise<InstantLoginChallenge> {
     const basePayload = stripUndefined({
       phoneNumber: options.phoneNumber,
       deviceName: options.deviceName,
@@ -75,6 +87,39 @@ export class AuthApi {
     }
   }
 
+  async loginWithQr(options: LoginWithQrOptions): Promise<Session> {
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      let challengeCallbackFailed = false;
+      const challenge = await this.createQrChallenge({
+        ...(options.phoneNumber !== undefined ? { phoneNumber: options.phoneNumber } : {}),
+        ...(options.deviceName !== undefined ? { deviceName: options.deviceName } : {}),
+        ...(options.signal !== undefined ? { signal: options.signal } : {}),
+      });
+      try {
+        return await this.pollQrChallenge(challenge, {
+          timeoutMs: Math.max(1, deadline - Date.now()),
+          async onChallengeUpdate(update) {
+            try {
+              await options.onChallengeUpdate(update);
+            } catch (error) {
+              challengeCallbackFailed = true;
+              throw error;
+            }
+          },
+          ...(options.intervalMs !== undefined ? { intervalMs: options.intervalMs } : {}),
+          ...(options.signal !== undefined ? { signal: options.signal } : {}),
+          ...(options.debug !== undefined ? { debug: options.debug } : {}),
+        });
+      } catch (error) {
+        if (challengeCallbackFailed || Date.now() >= deadline || !isRetryableInstantLoginExpiry(error)) throw error;
+        debugLog(options.debug, 'challenge:renew', { challengeId: challenge.id });
+      }
+    }
+    throw new Error('Timed out while waiting for Trade Republic instant login approval.');
+  }
+
   async startLoginWithPin(options: StartLoginWithPinOptions): Promise<LoginProgressState> {
     const raw = await this.http.request<unknown>(
       'POST',
@@ -97,13 +142,29 @@ export class AuthApi {
     return this.pollLoginProgress(progress, options);
   }
 
-  async pollInstantLogin(challenge: Pick<InstantLoginChallenge, 'id'>, options: PollInstantLoginOptions = {}): Promise<Session> {
+  private async pollQrChallenge(
+    challenge: Pick<InstantLoginChallenge, 'id'> & Partial<InstantLoginChallenge>,
+    options: PollQrChallengeOptions = {},
+  ): Promise<Session> {
     const intervalMs = options.intervalMs ?? 1500;
     const timeoutMs = options.timeoutMs ?? 120_000;
     const startedAt = Date.now();
     let processId: string | undefined;
     let confirmedPolls = 0;
     let accumulatedSession: Session | undefined = this.getSession();
+    let latestChallenge = initialChallenge(challenge);
+    let deliveredChallengeKey: string | undefined;
+    const deliverChallenge = async (next: InstantLoginChallenge): Promise<void> => {
+      latestChallenge = mergeChallenges(latestChallenge, next);
+      const key = challengePresentationKey(latestChallenge);
+      if (!options.onChallengeUpdate || key === undefined || key === deliveredChallengeKey) return;
+      deliveredChallengeKey = key;
+      await options.onChallengeUpdate(latestChallenge);
+    };
+    await deliverChallenge(latestChallenge);
+    if (isInstantLoginChallengeExpired(latestChallenge)) {
+      throw new Error('Trade Republic instant login challenge expired.');
+    }
     debugLog(options.debug, 'poll:start', { challengeId: challenge.id, intervalMs, timeoutMs });
     while (Date.now() - startedAt <= timeoutMs) {
       if (options.signal?.aborted) throw options.signal.reason;
@@ -150,6 +211,10 @@ export class AuthApi {
           { signal: options.signal },
         );
         const raw = response.body;
+        await deliverChallenge(normalizeChallenge({ ...asRecord(raw), id: challenge.id }, response.headers.get('date')));
+        if (isInstantLoginChallengeExpired(latestChallenge)) {
+          throw new Error('Trade Republic instant login challenge expired.');
+        }
         const challengeState = extractLoginProgressState(raw);
         const challengeStatus = normalizeStatus(challengeState.status);
         const cookieSession = extractCookieSession(response.headers);
@@ -180,7 +245,7 @@ export class AuthApi {
     throw new Error('Timed out while waiting for Trade Republic instant login approval.');
   }
 
-  async pollLoginProcess(processId: string, options: PollInstantLoginOptions = {}): Promise<Session> {
+  async pollLoginProcess(processId: string, options: PollLoginOptions = {}): Promise<Session> {
     return this.pollLoginProgress({ status: undefined, processId, session: undefined }, options);
   }
 
@@ -212,7 +277,7 @@ export class AuthApi {
     await this.sessionStore?.clear();
   }
 
-  private async completeWebSession(session: Session, options: PollInstantLoginOptions): Promise<Session> {
+  private async completeWebSession(session: Session, options: PollLoginOptions): Promise<Session> {
     this.setSession(session);
     const response = await this.http.requestDetailed<unknown>(
       'GET',
@@ -248,7 +313,7 @@ export class AuthApi {
     return finalizedSession;
   }
 
-  private async pollLoginProgress(progress: LoginProgressState, options: PollInstantLoginOptions): Promise<Session> {
+  private async pollLoginProgress(progress: LoginProgressState, options: PollLoginOptions): Promise<Session> {
     const intervalMs = options.intervalMs ?? 1500;
     const timeoutMs = options.timeoutMs ?? 120_000;
     const startedAt = Date.now();
@@ -309,15 +374,77 @@ export class AuthApi {
 function normalizeChallenge(raw: unknown, serverTime?: string | null): InstantLoginChallenge {
   const record = asRecord(raw);
   const id = stringValue(record.id, record.challengeId, record.processId);
+  const challengeExpiresAt = optionalString(record.challengeExpiresAt);
+  const qrCodeTokenExpiresAt = optionalString(record.qrCodeTokenExpiresAt);
   return {
     id,
     qrCode: optionalString(record.qrCode, record.qrCodePayload, record.qr, record.code),
     qrCodeDataUrl: optionalString(record.qrCodeDataUrl, record.qrDataUrl),
     deepLink: optionalString(record.deepLink, record.loginUrl, record.url),
-    expiresAt: optionalString(record.expiresAt, record.challengeExpiresAt, record.qrCodeTokenExpiresAt, record.expiration),
+    challengeExpiresAt,
+    qrCodeTokenExpiresAt,
+    expiresAt: optionalString(record.expiresAt, challengeExpiresAt, qrCodeTokenExpiresAt, record.expiration),
     serverTime: serverTime ?? undefined,
     raw,
   };
+}
+
+function initialChallenge(
+  challenge: Pick<InstantLoginChallenge, 'id'> & Partial<InstantLoginChallenge>,
+): InstantLoginChallenge {
+  return {
+    id: challenge.id,
+    qrCode: challenge.qrCode,
+    qrCodeDataUrl: challenge.qrCodeDataUrl,
+    deepLink: challenge.deepLink,
+    challengeExpiresAt: challenge.challengeExpiresAt,
+    qrCodeTokenExpiresAt: challenge.qrCodeTokenExpiresAt,
+    expiresAt: challenge.expiresAt,
+    serverTime: challenge.serverTime,
+    raw: challenge.raw ?? challenge,
+  };
+}
+
+function mergeChallenges(
+  previous: InstantLoginChallenge,
+  next: InstantLoginChallenge,
+): InstantLoginChallenge {
+  const hasFreshPresentation = Boolean(next.qrCode || next.qrCodeDataUrl || next.deepLink);
+  return {
+    ...previous,
+    ...next,
+    qrCode: hasFreshPresentation ? next.qrCode : previous.qrCode,
+    qrCodeDataUrl: hasFreshPresentation ? next.qrCodeDataUrl : previous.qrCodeDataUrl,
+    deepLink: hasFreshPresentation ? next.deepLink : previous.deepLink,
+    challengeExpiresAt: next.challengeExpiresAt ?? previous.challengeExpiresAt,
+    qrCodeTokenExpiresAt: next.qrCodeTokenExpiresAt ?? previous.qrCodeTokenExpiresAt,
+    expiresAt: next.expiresAt ?? previous.expiresAt,
+    serverTime: next.serverTime ?? previous.serverTime,
+  };
+}
+
+function challengePresentationKey(challenge: InstantLoginChallenge): string | undefined {
+  if (!challenge.qrCode && !challenge.qrCodeDataUrl && !challenge.deepLink) return undefined;
+  return JSON.stringify([
+    challenge.id,
+    challenge.qrCode,
+    challenge.qrCodeDataUrl,
+    challenge.deepLink,
+    challenge.challengeExpiresAt,
+    challenge.qrCodeTokenExpiresAt,
+  ]);
+}
+
+function isRetryableInstantLoginExpiry(error: unknown): boolean {
+  return error instanceof Error
+    && /expired|timed out while waiting for trade republic instant login approval/i.test(error.message);
+}
+
+function isInstantLoginChallengeExpired(challenge: InstantLoginChallenge): boolean {
+  if (!challenge.challengeExpiresAt) return false;
+  const expiresAt = Date.parse(challenge.challengeExpiresAt);
+  const observedAt = challenge.serverTime ? Date.parse(challenge.serverTime) : Date.now();
+  return Number.isFinite(expiresAt) && Number.isFinite(observedAt) && observedAt >= expiresAt;
 }
 
 function extractSession(raw: unknown): Session | undefined {

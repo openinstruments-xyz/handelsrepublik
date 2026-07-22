@@ -19,7 +19,7 @@ Read subscriptions can reconnect automatically. Order submissions and other high
 
 The package provides:
 
-- login based on the web based QR code method, session persistence, and refresh helpers.
+- Login -- based on the web based "instant login" by scanning a QR code with your phone method. Also does session persistence, and provides session refresh helpers.
 - Typed domain namespaces for account, portfolio, orders, trading, market data,
   timeline, instruments, discovery, documents, tax, and payments.
 - Shared mapper-websocket subscriptions with observable disconnect and reconnect
@@ -75,7 +75,46 @@ You can omit Playwright if your application supplies a valid
 
 ## Quick Start
 
-This example lets the SDK launch a temporary Chromium browser and collect a
+```ts
+import {
+  FileSessionStore,
+  TradeRepublicClient,
+} from 'handelsrepublik';
+
+const wafContext = await TradeRepublicClient.collectWafToken();
+
+const tr = TradeRepublicClient.create({
+  wafContext,
+  sessionStore: new FileSessionStore('.tr-session.json'),
+  rawSchemaValidation: 'throw',
+});
+
+let session = await tr.auth.restoreSession();
+
+// Check if we can refresh the existing session
+if (session) {
+  session = await tr.auth.refreshSession().catch(async (error) => {
+    console.warn('Saved session could not be refreshed; starting QR login.', error);
+    return undefined;
+  });
+}
+
+// We couldn't restore session in the step above.
+if (!session) {
+  session = await tr.auth.loginWithQr({
+    onChallengeUpdate(challenge) {
+      // Open this URL on your phone. It rotates automatically while login is pending.
+      console.log(challenge.qrCode);
+    },
+  });
+}
+
+tr.close();
+```
+
+## Extended Start
+
+This example lets the SDK launch a temporary, visible Chromium browser and collect a
 shareable WAF context. It then restores and refreshes an existing account
 session when available, otherwise performs QR login, and finally makes a
 read-only request. The SDK closes Chromium immediately after collecting the WAF
@@ -88,12 +127,12 @@ import {
 } from 'handelsrepublik';
 
 // First, we need to get a token for passing the AWS WAF challenge
-// This will launch a browser in the background, visits the TradeRepublic site, collect the WAF token, and then close again.
+// This launches a visible browser, visits the Trade Republic site, collects the WAF token, and then closes it again.
 // This process might take a while.
-const wafContext = await TradeRepublicClient.collectWafContext({
+const wafContext = await TradeRepublicClient.collectWafToken({
   // browserLaunchOptions: {
   //  channel: 'chrome',
-  //  headless: true, // setting headless 'true' is useful for debugging if the browser doesn't pass AWS WAF
+  //  headless: false, // Set to true to hide the browser in production; visible mode is easier to debug if the WAF challenge fails.
   // },
 });
 
@@ -116,24 +155,29 @@ const tr = TradeRepublicClient.create({
 // Restore old, saved sessions like this
 try {
   //
-  const restored = await tr.auth.restoreSession();
+  let session = await tr.auth.restoreSession();
 
-  if (restored) {
+  if (session) {
     // Refreshes the web session and saves the updated session automatically.
-    await tr.auth.refreshSession();
-  } else {
-    const challenge = await tr.auth.createInstantLogin({
-      deviceName: 'local sdk',
+    session = await tr.auth.refreshSession().catch(async (error) => {
+      console.warn('Saved session could not be refreshed; starting QR login.', error);
+      await tr.auth.clearSession();
+      return undefined;
     });
+  }
 
-    console.log(
-      // Show the qr code to your user, or make them open the link with the TR app
-      challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
-    );
-
-    // Approve the challenge in the Trade Republic app. Successful login is
-    // persisted automatically through the configured SessionStore.
-    await tr.auth.pollInstantLogin(challenge);
+  if (!session) {
+    session = await tr.auth.loginWithQr({
+      deviceName: 'local sdk',
+      onChallengeUpdate(challenge) {
+        console.log(
+          // Show one of these to your user.
+          challenge.qrCodeDataUrl // "data:image/png;base64,xxx...", which you could use like <img src="data:image/png;base64,..." />
+            ?? challenge.deepLink // e.g. "traderepublic://login/..."
+            ?? challenge.qrCode, // "https://app.traderepublic.com/login?...token=...", you want to throw this string into your QR Code generator
+        );
+      },
+    });
   }
 
   console.log(await tr.portfolio.cash());
@@ -243,7 +287,7 @@ console.log({ info, preview, result })
 
 ## WAF context collection
 
-`TradeRepublicClient.collectWafContext()` obtains the browser proof required by
+`TradeRepublicClient.collectWafToken()` obtains the browser proof required by
 AWS WAF before Trade Republic login. It is asynchronous because collection can
 launch a browser, navigate to Trade Republic, and wait for the browser challenge
 to complete. `TradeRepublicClient.create()` remains synchronous and accepts the
@@ -272,7 +316,7 @@ collects the WAF context, and closes both the temporary context and browser on
 success or failure:
 
 ```ts
-const wafContext = await TradeRepublicClient.collectWafContext();
+const wafContext = await TradeRepublicClient.collectWafToken();
 const tr = TradeRepublicClient.create({ wafContext });
 ```
 
@@ -280,7 +324,7 @@ To use an installed Chrome or another Playwright-supported Chromium channel,
 provide launch options. The SDK still owns and closes the launched browser:
 
 ```ts
-const wafContext = await TradeRepublicClient.collectWafContext({
+const wafContext = await TradeRepublicClient.collectWafToken({
   browserLaunchOptions: {
     channel: 'chrome',
     headless: false,
@@ -316,7 +360,7 @@ import { TradeRepublicClient } from 'handelsrepublik';
 const browser = await firefox.launch({ headless: false });
 
 try {
-  const wafContext = await TradeRepublicClient.collectWafContext({ browser });
+  const wafContext = await TradeRepublicClient.collectWafToken({ browser });
   const tr = TradeRepublicClient.create({ wafContext });
 
   // Use tr here. tr.close() does not close browser.
@@ -368,7 +412,7 @@ reuse the WAF context when those clients represent the same logical browser
 environment:
 
 ```ts
-const wafContext = await TradeRepublicClient.collectWafContext();
+const wafContext = await TradeRepublicClient.collectWafToken();
 
 const alice = TradeRepublicClient.create({
   wafContext,
@@ -387,7 +431,7 @@ AWS WAF rejects or expires it, collect a replacement and apply it to every
 active client that should continue sharing the browser proof:
 
 ```ts
-const nextWafContext = await TradeRepublicClient.collectWafContext();
+const nextWafContext = await TradeRepublicClient.collectWafToken();
 
 alice.useWafContext(nextWafContext);
 bob.useWafContext(nextWafContext);
@@ -396,28 +440,53 @@ bob.useWafContext(nextWafContext);
 `collectTradeRepublicWebContext()` remains available for advanced compatibility
 use, but it captures a broader browser context that can contain account cookies
 and headers. Do not share its result between accounts. Prefer the narrow
-`collectWafContext()` or `collectTradeRepublicWafContext()` interfaces.
+`collectWafToken()` or `collectTradeRepublicWafContext()` interfaces.
 
 ## Authentication workflows
 
 Instant login creates a challenge that the user approves in the Trade Republic
-app. The challenge exposes a QR data URL, deep link, or raw QR value, depending
-on the current broker response:
+app. Trade Republic rotates the signed QR token roughly every ten seconds while
+keeping the same challenge ID. Use the high-level login interface to receive
+the initial QR data URL, deep link, or raw QR value and every replacement:
 
 ```ts
-const challenge = await tr.auth.createInstantLogin({
+const session = await tr.auth.loginWithQr({
   deviceName: 'local sdk',
-});
-
-console.log(
-  challenge.qrCodeDataUrl ?? challenge.deepLink ?? challenge.qrCode,
-);
-
-const session = await tr.auth.pollInstantLogin(challenge, {
   intervalMs: 1_500,
   timeoutMs: 120_000,
+  async onChallengeUpdate(challenge) {
+    const displayValue = challenge.qrCodeDataUrl
+      ?? challenge.deepLink
+      ?? challenge.qrCode;
+    await renderLatestLoginCode(displayValue);
+
+    console.log({
+      challengeExpiresAt: challenge.challengeExpiresAt,
+      qrCodeTokenExpiresAt: challenge.qrCodeTokenExpiresAt,
+    });
+  },
+}).catch((error) => {
+  console.error(error);
+  return null;
 });
+
+if (!session) {
+  // Show an error or retry action and stop the authenticated flow here.
+  return;
+}
 ```
+
+`onChallengeUpdate` is called for the initial displayable challenge and then
+once for each distinct QR or login-link update; unchanged 1.5-second poll
+responses are deduplicated. Callback calls are awaited and a callback error
+aborts login. When the complete challenge expires, `loginWithQr()`
+creates a replacement challenge and sends it through the same callback.
+
+`challengeExpiresAt` is the lifetime of the complete challenge, while
+`qrCodeTokenExpiresAt` is the shorter lifetime of the currently displayed QR
+token. The server performs the rotation: polling the challenge status returns
+the same challenge ID with a newly signed QR payload. The client does not
+generate or modify tokens locally.
 
 PIN login is also available. It starts the broker login process and polls until
 the session is ready:
@@ -520,6 +589,23 @@ safe reuse, and renewal are described in
 finalized account sessions automatically;
 `auth.saveSession()` is available when the application explicitly needs to
 persist the client's current session.
+
+A complete runnable example with one client and encrypted Redis key per account
+is available in [`demo/redis-multi-account.mjs`](demo/redis-multi-account.mjs).
+It uses `ioredis` as a demo/CI-only development dependency; the SDK does not
+install a Redis client for consumers. At the top of the demo, configure the
+`ACCOUNT_IDS`, `REDIS_URL`, and `SESSION_ENCRYPTION_KEY_BASE64`
+constants. Generate the encryption-key value once with:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+npm run demo:redis
+```
+
+Keep the encryption key stable across restarts. Changing it makes previously
+stored sessions unreadable. The demo prints short-lived QR login secrets to the
+terminal for illustration; a real backend should deliver each update only to
+the corresponding authenticated user over SSE or WebSocket.
 
 Sessions restored from a store must contain `deviceInfo`. The client rejects a
 directly supplied `session` without that profile, and `auth.restoreSession()`
@@ -834,12 +920,25 @@ const untilCancelled = await tr.orders.prepare({
   ...stopOrder,
   validity: 'goodTillCancelled',
 }); // expiry: { type: 'gtc' }; use only when the venue advertises gtc
+
+const customDate = await tr.orders.prepare({
+  ...stopOrder,
+  expiry: { type: 'gtd', value: '2026-10-20' },
+});
+
+const customTimestamp = await tr.orders.prepare({
+  ...stopOrder,
+  expiry: { type: 'gtd', value: new Date('2026-10-20T21:59:59Z') },
+}); // Date, ISO timestamp, or Unix milliseconds; normalized to 2026-10-20
 ```
 
 `day` maps to `gfd`, `month` and `year` map to dated `gtd` expiries 30
 and 365 days from the reference date, and `goodTillCancelled` maps to `gtc`.
-Protocol-shaped `expiry` remains available when the exact broker expiry is
-already known. Do not provide both fields.
+`expiry` remains available when the exact broker expiry is already known. A
+`gtd` value accepts `YYYY-MM-DD`, an ISO timestamp, a JavaScript `Date`, or a
+Unix timestamp in milliseconds. Timestamps are converted to their UTC calendar
+date because the broker payload carries a date rather than a time of day. Do
+not provide both `validity` and `expiry`.
 
 `orderModes` and `orderExpiries` describe what one specific destination says it
 supports; they are not global capabilities. For example, a captured Lang &
@@ -1023,7 +1122,6 @@ does not yet have a first-class SDK method.
 | --- | --- |
 | `tr.auth` | QR/instant and PIN login; poll login processes; restore, refresh, save, and clear sessions. |
 | `tr.account` | Current account, web session, settings, personal details, relationships, and cards. |
-| `tr.boards` | List and load trading boards. |
 | `tr.assets` | Search, list, and load stocks, ETFs, funds, crypto, bonds, and other instruments. |
 | `tr.derivatives` | Search derivatives, list knockout, warrant, and factor products for an underlying, and load details. |
 | `tr.portfolio` | Portfolio, cash, mark-to-market value, savings plans, private-market positions, and chart data. |
@@ -1100,6 +1198,20 @@ const l2Entitlements = await tr.market.entitlements('L2', {
 
 console.log(subscriptions.map(({ plan }) => plan.product));
 console.log(l2Entitlements.entitlements);
+
+// Static presentation metadata is one-way: exchange ID to display name.
+// Active L2 access remains account- and venue-specific and is reported by
+// subscriptions() and entitlements(). L2 is the order-book stream; tickerV3
+// carries bid/ask updates.
+import {
+  MARKET_DATA_STREAM_TOPICS,
+  VENUE_DISPLAY_NAMES,
+  venueDisplayName,
+} from 'handelsrepublik';
+
+console.log(VENUE_DISPLAY_NAMES.TIB); // Best Price
+console.log(venueDisplayName('XETR')); // Xetra
+console.log(MARKET_DATA_STREAM_TOPICS); // { bidAsk: 'tickerV3', orderBook: 'L2' }
 
 // L2 uses the mapper's protobuf order-book stream. Xetra's exchange ID is
 // XETR. Venues such as LSX that do not publish L2 may return a protocol error
@@ -1328,37 +1440,75 @@ REST and mapper calls live in `src/operation-specs.ts` and run through
 order preparation, submission, and cancellation remain explicit workflows.
 `MapperConnection` owns multiplexing and reconnect behavior.
 
-Unit tests use mocked HTTP and websocket transports. Live integration tests are
-opt-in, reuse a saved demo session, and run read-only Trade Republic operations
-by default:
+Unit tests use mocked HTTP and websocket transports. Live integration tests
+reuse a saved demo session and run non-order Trade Republic operations:
 
 ```powershell
-$env:TR_INTEGRATION = '1'
 $env:TR_SESSION_FILE = './demo/.demo-session.json'
-npm run test:integration
+npm run test:integration:non-order
 ```
 
-Disposable price-alarm and watchlist mutations require the separate
-`TR_INTEGRATION_LOW_RISK_MUTATIONS=1` opt-in and always include cleanup. Closed
-exchange rejection contracts for classic stock and ETF orders require
-`TR_INTEGRATION_CLOSED_ORDER_REJECTIONS=1`; the test refuses to submit unless
-LSX explicitly reports `open: false`, and it cancels any unexpectedly created
-order. This opt-in is ignored whenever `GITHUB_ACTIONS=true`, making order tests
-local-only. Savings-plan, money-movement, document-acceptance, and
-account-security mutations are never exercised.
+`npm run test:integration` remains an alias for the non-order suite.
+
+Disposable price-alarm and watchlist mutation checks run by default and always
+include cleanup.
+
+Closed-exchange order rejection integration is a separate suite. It requires an
+explicit instrument and exchange:
+
+```powershell
+$env:TR_SESSION_FILE = './demo/.demo-session.json'
+$env:TR_INTEGRATION_ORDER_ISIN = 'DE0007164600'
+$env:TR_INTEGRATION_ORDER_EXCHANGE = 'LSX'
+$env:TR_INTEGRATION_OPEN_BUY_LIMIT_EUR = '1'
+npm run test:integration:order-rejections
+```
+
+It submits a EUR 1 amount-based limit buy only when the selected exchange
+explicitly reports as closed. The buy limit uses the current bid so the request
+is non-marketable if the venue state changes. The suite then asserts the
+`exchangeClosed` outcome and verifies the nonexistent order cancellation
+result. While the venue is closed,
+it also submits a EUR 1 market buy and requires the same rejection. While the
+venue is open, it instead submits one share at the configured deeply
+non-marketable buy limit, requires that limit to be no more than 10% of the live
+bid, and cancels the accepted order immediately with a `finally` cleanup retry.
+The market-order probe has an additional clock guard: at or after 05:00
+Europe/Berlin it always skips before authentication or submission, even if the
+venue API unexpectedly reports closed.
+
+The **live venue-state order integration** GitHub workflow runs at 00:30 and
+10:15 Europe/Berlin on weekdays so it normally exercises one closed and one open
+venue state. Scheduled runs default to Apple (`US0378331005`), LSX, a EUR 1
+closed-venue amount-based limit buy, and a EUR 1 open-venue buy limit. Manual
+runs require the ISIN, exchange, open-venue limit, and explicit
+confirmation that real order requests will be sent.
+
+Successful live buying uses a different suite and workflow. The
+**live buy integration** workflow has only a `workflow_dispatch` trigger. It
+requires an ISIN, exchange, EUR amount, and explicit confirmation that a real
+market buy will execute. The test refuses to run unless the selected
+exchange explicitly reports `open: true`, caps the buy at EUR 0.50 (plus the
+expected EUR 1 fee), and waits for the buy to execute. It does not automatically
+sell the purchased quantity, which remains in the account. Configure required
+reviewers on the `live-order-tests` GitHub environment before using it.
+Savings-plan, money-movement, document-acceptance, and account-security
+mutations are never exercised.
 
 GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on every
 push, pull request, and manual quality/unit run. A separate account integration
-workflow has no push or pull-request trigger. It runs `npm run test:integration`
-only on `main`, only for the repository owner, and only after its unit-test gate
-passes. It runs at 10:15 and 16:15 Europe/Berlin on weekdays to refresh the
-account session, and the repository owner can also start it manually. Those
-times keep the scheduled AAPL/XETR L2 test inside Xetra's 09:00-17:30 German
-market hours even when GitHub starts the workflow up to an hour late.
+workflow has no push or pull-request trigger. It runs
+`npm run test:integration:non-order` only on `main`, only for the repository
+owner, and only after its unit-test gate passes. It runs at 10:15 and 16:15
+Europe/Berlin on weekdays to refresh the account session, and the repository
+owner can also start it manually. Those times keep the scheduled AAPL/XETR L2
+test inside Xetra's 09:00-17:30 German market hours even when GitHub starts the
+workflow up to an hour late.
 
-The GitHub workflow explicitly sets both mutation opt-ins to `0`, and the suite
-independently blocks order tests on GitHub Actions. Scheduled and manual GitHub
-runs therefore remain read-only. The live suite fails on all endpoint errors;
+The no-order GitHub workflow includes cleanup-backed price-alarm and watchlist
+mutations. Order rejections and successful order execution run in the two
+dedicated workflows described above.
+The live suite fails on all endpoint errors;
 optional local mutation probes skip unsupported rename and clone operations for
 Trade Republic's built-in default watchlist.
 

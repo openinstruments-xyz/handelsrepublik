@@ -1,5 +1,12 @@
 export { TradeRepublicClient } from './traderepublic-client.js';
 export type {
+  InstantLoginChallengeHandler,
+  LoginWithQrOptions,
+  LoginWithPinOptions,
+  PollLoginOptions,
+  StartLoginWithPinOptions,
+} from './auth.js';
+export type {
   TradeRepublicBrowserLaunchOptions,
   TradeRepublicCollectWafContextOptions,
 } from './traderepublic-client.js';
@@ -18,6 +25,12 @@ export { collectTradeRepublicWafContext, collectTradeRepublicWebContext } from '
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
 export { MapperRequestError } from './mapper-connection.js';
 export { classifyMapperOperation } from './raw.js';
+export {
+  MARKET_DATA_STREAM_TOPICS,
+  VENUE_DISPLAY_NAMES,
+  venueDisplayName,
+} from './venues.js';
+export type { KnownVenueId, MarketDataStream } from './venues.js';
 export type { MapperDeliveryState, MapperRequestFailureReason } from './mapper-connection.js';
 export type { RawOperationKind, RawQueryOptions, RawSubscription, RawSubscriptionOptions } from './raw.js';
 export type { SchemaRisk, SchemaTransport, TradeRepublicSchemaEntry } from './schemas/registry.js';

@@ -1,4 +1,4 @@
-// Working example: preview or submit the full gold-short-certificate position
+// Example: preview or submit the full gold-short-certificate position
 // as a EUR 0.90 day-limit sell order through the saved demo session.
 //
 // Validate, preview, and submit:

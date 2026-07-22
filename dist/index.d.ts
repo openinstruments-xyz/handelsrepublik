@@ -1,7 +1,7 @@
 import { ZodType } from 'zod';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'boards.list' | 'boards.detail' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.entitlements' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
+type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.entitlements' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
 type EndpointMap = Partial<Record<EndpointKey, string>>;
 type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
 interface RawSchemaValidationFailure {
@@ -63,18 +63,6 @@ interface IbanInfo {
     accountHolder?: string | undefined;
     customerId?: string | undefined;
     relationshipType?: string | undefined;
-    raw: unknown;
-}
-interface Board {
-    id: string;
-    name?: string | undefined;
-    widgets: BoardWidget[];
-    raw: unknown;
-}
-interface BoardWidget {
-    id: string;
-    type: string;
-    settings?: Record<string, unknown> | undefined;
     raw: unknown;
 }
 interface RequestOptions {
@@ -149,6 +137,9 @@ interface InstantLoginChallenge {
     qrCode?: string | undefined;
     qrCodeDataUrl?: string | undefined;
     deepLink?: string | undefined;
+    challengeExpiresAt?: string | undefined;
+    qrCodeTokenExpiresAt?: string | undefined;
+    /** @deprecated Prefer challengeExpiresAt or qrCodeTokenExpiresAt. */
     expiresAt?: string | undefined;
     serverTime?: string | undefined;
     raw: unknown;
@@ -220,7 +211,7 @@ type OrderExpiry = {
     value?: never;
 } | {
     type: 'gtd';
-    value: string;
+    value: string | Date | number;
 };
 type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
 type OrderValidity = OrderValidityPreset | {
@@ -730,7 +721,7 @@ declare class HttpClient {
     headers(extra?: Record<string, string>, hasJsonBody?: boolean): Record<string, string>;
 }
 
-interface CreateInstantLoginOptions {
+interface CreateQrChallengeOptions {
     phoneNumber?: string;
     deviceName?: string;
     signal?: AbortSignal;
@@ -741,14 +732,18 @@ interface StartLoginWithPinOptions {
     otpLess?: boolean | undefined;
     signal?: AbortSignal;
 }
-interface LoginWithPinOptions extends StartLoginWithPinOptions, PollInstantLoginOptions {
+interface LoginWithPinOptions extends StartLoginWithPinOptions, PollLoginOptions {
 }
-interface PollInstantLoginOptions {
+interface PollLoginOptions {
     intervalMs?: number;
     timeoutMs?: number;
     signal?: AbortSignal;
     debug?: boolean;
 }
+interface LoginWithQrOptions extends CreateQrChallengeOptions, PollLoginOptions {
+    onChallengeUpdate: InstantLoginChallengeHandler;
+}
+type InstantLoginChallengeHandler = (challenge: InstantLoginChallenge) => void | Promise<void>;
 interface LoginProgressState {
     status: string | undefined;
     processId: string | undefined;
@@ -763,11 +758,12 @@ declare class AuthApi {
     private readonly sessionStore?;
     private readonly onSessionReady?;
     constructor(http: HttpClient, endpoints: EndpointResolver, getSession: () => Session | undefined, setSession: (session: Session) => void, sessionStore?: SessionStore | undefined, onSessionReady?: SessionReadyHandler | undefined);
-    createInstantLogin(options?: CreateInstantLoginOptions): Promise<InstantLoginChallenge>;
+    private createQrChallenge;
+    loginWithQr(options: LoginWithQrOptions): Promise<Session>;
     startLoginWithPin(options: StartLoginWithPinOptions): Promise<LoginProgressState>;
     loginWithPin(options: LoginWithPinOptions): Promise<Session>;
-    pollInstantLogin(challenge: Pick<InstantLoginChallenge, 'id'>, options?: PollInstantLoginOptions): Promise<Session>;
-    pollLoginProcess(processId: string, options?: PollInstantLoginOptions): Promise<Session>;
+    private pollQrChallenge;
+    pollLoginProcess(processId: string, options?: PollLoginOptions): Promise<Session>;
     restoreSession(): Promise<Session | undefined>;
     saveSession(session?: Session | undefined): Promise<void>;
     refreshSession(options?: {
@@ -967,12 +963,6 @@ declare class AccountApi {
     rawRelationships(): Promise<unknown>;
     cardsHome(): Promise<unknown>;
 }
-declare class BoardsApi {
-    private readonly operations;
-    constructor(operations: OperationClient);
-    list(): Promise<Board[]>;
-    get(boardId: string): Promise<Board>;
-}
 
 declare class DocumentsApi {
     private readonly operations;
@@ -1098,7 +1088,6 @@ declare class TradeRepublicClient {
     readonly auth: AuthApi;
     readonly raw: RawApi;
     readonly account: AccountApi;
-    readonly boards: BoardsApi;
     readonly assets: AssetsApi;
     readonly derivatives: DerivativesApi;
     readonly orders: OrdersApi;
@@ -1125,7 +1114,7 @@ declare class TradeRepublicClient {
     private readonly validateRaw;
     constructor(options?: TradeRepublicClientOptions);
     static create(options?: TradeRepublicClientOptions): TradeRepublicClient;
-    static collectWafContext(options?: TradeRepublicCollectWafContextOptions): Promise<TradeRepublicWafContext>;
+    static collectWafToken(options?: TradeRepublicCollectWafContextOptions): Promise<TradeRepublicWafContext>;
     getSession(): Session | undefined;
     setSession(session: Session): void;
     useWebContext(webContext: TradeRepublicWebContext): Session;
@@ -1490,8 +1479,50 @@ interface TradeRepublicSchemaEntry {
         sample?: 'once' | 'stream' | 'cleanup' | undefined;
     } | undefined;
 }
-declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
+declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
-export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafContextOptions, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstrumentNewsItem, type InstrumentStatus, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafContextOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafContext, type TradeRepublicWebContext, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafContext, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse };
+declare const VENUE_DISPLAY_NAMES: {
+    readonly TIB: "Best Price";
+    readonly LUS: "Lang & Schwarz";
+    readonly LSX: "Lang & Schwarz Exchange";
+    readonly LSXCS: "Lang & Schwarz Exchange";
+    readonly TDG: "Tradegate Exchange";
+    readonly XFRA: "Borse Frankfurt";
+    readonly XSWX: "SIX Swiss Exchange";
+    readonly SLT: "Société Générale";
+    readonly XETR: "Xetra";
+    readonly XPAR: "Euronext Paris";
+    readonly XBRU: "Euronext Brussels";
+    readonly XAMS: "Euronext Amsterdam";
+    readonly XLIS: "Euronext Lisbon";
+    readonly XOSL: "Euronext Oslo Børs";
+    readonly XNYS: "New York Stock Exchange";
+    readonly XNAS: "Nasdaq";
+    readonly XCSE: "Nasdaq Copenhagen";
+    readonly XHEL: "Nasdaq Helsinki";
+    readonly XSTO: "Nasdaq Stockholm";
+    readonly XMIL: "Borsa Italiana";
+    readonly XMAD: "Bolsa de Madrid";
+    readonly XWAR: "Warsaw Stock Exchange";
+    readonly XLON: "London Stock Exchange";
+    readonly XWBO: "Wiener Börse";
+    readonly XTSE: "Toronto Stock Exchange";
+    readonly XTSX: "TSX Venture Exchange";
+    readonly XSES: "Singapore (SGX)";
+    readonly XJPX: "Tokyo Stock Exchange";
+    readonly XASX: "Australian Securities Exchange";
+    readonly TUB: "HSBC Trinkaus & Burkhardt";
+    readonly BHS: "Tradias";
+    readonly B2C: "B2C2";
+};
+type KnownVenueId = keyof typeof VENUE_DISPLAY_NAMES;
+declare const MARKET_DATA_STREAM_TOPICS: {
+    readonly bidAsk: "tickerV3";
+    readonly orderBook: "L2";
+};
+type MarketDataStream = keyof typeof MARKET_DATA_STREAM_TOPICS;
+declare function venueDisplayName(exchangeId: string): string;
+
+export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafContextOptions, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstantLoginChallengeHandler, type InstrumentNewsItem, type InstrumentStatus, type KnownVenueId, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type LoginWithPinOptions, type LoginWithQrOptions, MARKET_DATA_STREAM_TOPICS, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataStream, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type PollLoginOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StartLoginWithPinOptions, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafContextOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafContext, type TradeRepublicWebContext, VENUE_DISPLAY_NAMES, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafContext, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse, venueDisplayName };

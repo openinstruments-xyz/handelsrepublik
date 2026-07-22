@@ -8,11 +8,11 @@ describe('declarative operations', () => {
       rawSchemaValidation: false,
       endpoints: {
         'auth.account': '/custom/account',
-        'boards.detail': '/custom/boards/{boardId}',
+        'market.entitlements': '/custom/entitlements/{topic}',
       },
       fetch: async (input) => {
         urls.push(String(input));
-        return new Response(JSON.stringify({ id: 'board/1', name: 'Primary' }), {
+        return new Response(JSON.stringify({ payload: 'ok' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
@@ -20,11 +20,11 @@ describe('declarative operations', () => {
     });
 
     await client.account.current();
-    await client.boards.get('board/1');
+    await client.market.entitlements('board/1', { exchangeIds: ['LSX'] });
 
     expect(urls).toEqual([
       'https://api.traderepublic.com/custom/account',
-      'https://api.traderepublic.com/custom/boards/board%2F1',
+      'https://api.traderepublic.com/custom/entitlements/board%2F1?exchangeId=LSX',
     ]);
   });
 });

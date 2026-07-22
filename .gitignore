@@ -40,6 +40,8 @@ trade republic flows
 *.pcapng
 
 # Sensitive session/config material
+.tr-session.json
+.tr-login-qr.png
 *.session.json
 *.session.json.tmp
 *.cookies

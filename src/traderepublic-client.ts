@@ -4,7 +4,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { CandleQuery } from './candles.js';
 import { ClientRuntime, firstStringByKey } from './client-runtime.js';
 import { EndpointResolver } from './endpoints.js';
-import { AccountApi, BoardsApi } from './domains/account.js';
+import { AccountApi } from './domains/account.js';
 import { DocumentsApi, PaymentsApi, TaxApi } from './domains/customer.js';
 import { DiscoveryApi } from './domains/discovery.js';
 import { HttpClient } from './http.js';
@@ -156,7 +156,6 @@ export class TradeRepublicClient {
   readonly auth: AuthApi;
   readonly raw: RawApi;
   readonly account: AccountApi;
-  readonly boards: BoardsApi;
   readonly assets: AssetsApi;
   readonly derivatives: DerivativesApi;
   readonly orders: OrdersApi;
@@ -229,7 +228,6 @@ export class TradeRepublicClient {
     });
     this.operations = this.runtime.operations;
     this.account = new AccountApi(this.operations);
-    this.boards = new BoardsApi(this.operations);
     this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
@@ -251,7 +249,7 @@ export class TradeRepublicClient {
     return new TradeRepublicClient(options);
   }
 
-  static async collectWafContext(
+  static async collectWafToken(
     options: TradeRepublicCollectWafContextOptions = {},
   ): Promise<TradeRepublicWafContext> {
     const { browser, browserLaunchOptions, ...collectionOptions } = options;
@@ -897,10 +895,23 @@ function normalizeOrderExpiry(expiry: CreateOrderOptions['expiry']): Record<stri
     throw new TypeError('expiry.type must be "gfd", "gtc", "eom", or "gtd".');
   }
   if (expiry.type !== 'gtd') return { type: expiry.type };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry.value) || Number.isNaN(Date.parse(`${expiry.value}T00:00:00Z`))) {
-    throw new TypeError('A gtd expiry requires value in YYYY-MM-DD format.');
+  return { type: expiry.type, value: normalizeOrderExpiryDate(expiry.value) };
+}
+
+function normalizeOrderExpiryDate(value: string | Date | number): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(`${value}T00:00:00Z`);
+    if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value) return value;
   }
-  return { type: expiry.type, value: expiry.value };
+
+  if (typeof value === 'string' && !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+    throw new TypeError('A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.');
+  }
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError('A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.');
+  }
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeOrderValidity(
