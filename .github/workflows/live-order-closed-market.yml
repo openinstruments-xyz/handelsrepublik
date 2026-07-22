@@ -30,13 +30,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  closed-market:
-    name: reject EUR 1 market buy while closed
+  time-gate:
+    name: require Berlin time before 05:00
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' ||
         (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_request))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      before_five: ${{ steps.clock.outputs.before_five }}
+    steps:
+      - name: Check Europe/Berlin safety window
+        id: clock
+        env:
+          TZ: Europe/Berlin
+        run: |
+          hour=$(date +%-H)
+          minute=$(date +%-M)
+          current_minutes=$((hour * 60 + minute))
+          if (( current_minutes < 300 )); then
+            echo "before_five=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "before_five=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping the closed-market probe at or after 05:00 Europe/Berlin."
+          fi
+
+  closed-market:
+    name: reject EUR 1 market buy while closed
+    needs: time-gate
+    if: needs.time-gate.outputs.before_five == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:

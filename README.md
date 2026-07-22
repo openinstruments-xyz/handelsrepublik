@@ -1491,8 +1491,10 @@ and the open-limit cancellation probe at 10:45 Europe/Berlin. Scheduled runs
 default to Apple (`US0378331005`), LSX, a EUR 1 closed-venue amount-based limit
 buy, and a EUR 1 open-venue buy limit. Manual runs require the relevant inputs
 and explicit confirmation that real order requests will be sent. The
-closed-market test still skips before authentication or submission if a delayed
-run reaches 05:00 Europe/Berlin.
+closed-market workflow gates the session/authentication job on the current
+Europe/Berlin time, so that job is marked skipped at or after 05:00. The test
+also retains its own clock guard before authentication or submission as a
+second safety layer.
 
 Successful live buying uses a different suite and workflow. The
 **live buy integration** workflow has only a `workflow_dispatch` trigger. It
