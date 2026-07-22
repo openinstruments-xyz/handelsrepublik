@@ -12,29 +12,31 @@ import { withLiveDiagnostics } from '../live-diagnostics.js';
 const enabled = process.env.TR_INTEGRATION_EXECUTE_ORDERS === 'EXECUTE_LIVE_BUY';
 const sessionPath = process.env.TR_SESSION_FILE ?? 'demo/.demo-session.json';
 const instrumentId = requiredEnvironment('TR_INTEGRATION_ORDER_ISIN');
-const exchangeId = requiredEnvironment('TR_INTEGRATION_ORDER_EXCHANGE');
 const buyAmount = Number(process.env.TR_INTEGRATION_ORDER_AMOUNT_EUR ?? '0.5');
-const maximumBuyAmount = 0.5;
+const maximumBuyAmount = 5;
 
 describe('TradeRepublicClient live buy integration', {
   skip: enabled ? false : 'set the live order execution opt-in to run buy integration tests',
 }, () => {
-  it('buys the configured amount while the exchange is open', { timeout: 300_000 }, async (t) => withLiveDiagnostics('live buy', async () => {
+  it('buys the configured amount at an automatically selected open venue', { timeout: 300_000 }, async (t) => withLiveDiagnostics('live buy', async () => {
     assert.ok(Number.isFinite(buyAmount) && buyAmount > 0, 'TR_INTEGRATION_ORDER_AMOUNT_EUR must be positive');
     assert.ok(buyAmount <= maximumBuyAmount, `live order tests are capped at ${maximumBuyAmount} EUR`);
     const client = await createLiveClient();
     try {
       const destinations = await client.trading.orderDestinations(instrumentId);
-      const destination = destinations.find((item) => item.id === exchangeId);
-      assert.ok(destination, `expected ${exchangeId} destination for ${instrumentId}`);
-      if (destination.open !== true) {
-        t.skip(`${exchangeId} is not explicitly open; refusing to execute orders`);
+      const destination = destinations.find(
+        ({ open, orderModes }) => open === true
+          && orderModes?.some((mode) => mode.toLowerCase() === 'market'),
+      );
+      if (!destination) {
+        t.skip(`no explicitly open market-order venue is available for ${instrumentId}; refusing to execute orders`);
         return;
       }
+      t.diagnostic(`selected ${destination.name ?? destination.id} (${destination.id})`);
 
       const buy = await client.orders.submit({
         instrumentId,
-        exchangeId,
+        exchangeId: destination.id,
         side: 'buy',
         mode: 'market',
         amount: buyAmount,

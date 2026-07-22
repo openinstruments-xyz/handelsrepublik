@@ -1518,12 +1518,14 @@ second safety layer.
 
 Successful live buying uses a different suite and workflow. The
 **live buy integration** workflow has only a `workflow_dispatch` trigger. It
-requires an ISIN, exchange, EUR amount, and explicit confirmation that a real
-market buy will execute. The test refuses to run unless the selected
-exchange explicitly reports `open: true`, caps the buy at EUR 0.50 (plus the
-expected EUR 1 fee), and waits for the buy to execute. It does not automatically
-sell the purchased quantity, which remains in the account. Configure required
-reviewers on the `live-order-tests` GitHub environment before using it.
+requires an ISIN, EUR amount, and explicit confirmation that a real market buy
+will execute. The test automatically selects the first broker-provided
+destination that explicitly reports `open: true` and supports market orders; it
+skips without submitting an order if none is available. It caps the buy at EUR 5
+(plus the expected EUR 1 fee) and waits for the buy to execute. It does not
+automatically sell the purchased quantity, which remains in the account.
+Configure required reviewers on the `live-order-tests` GitHub environment before
+using it.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
