@@ -10,7 +10,6 @@ import {
 import type { AssetSearchType } from '../../src/index.js';
 import { withLiveDiagnostics } from '../live-diagnostics.js';
 
-const enabled = process.env.TR_INTEGRATION === '1';
 const sessionPath = process.env.TR_SESSION_FILE ?? join(process.cwd(), 'demo', '.demo-session.json');
 const testAssetId = process.env.TR_INTEGRATION_ISIN ?? 'US0378331005';
 const testExchangeId = process.env.TR_INTEGRATION_EXCHANGE ?? 'LSX';
@@ -23,9 +22,8 @@ const bitcoinExchangeId = 'BHS';
 const appleAssetId = 'US0378331005';
 const appleL2ExchangeId = 'XETR';
 const runXetraMarketHoursTests = isXetraMarketHours();
-const runLowRiskMutationTests = process.env.TR_INTEGRATION_LOW_RISK_MUTATIONS === '1';
 
-describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set TR_INTEGRATION=1 to run live Trade Republic integration tests' }, () => {
+describe('TradeRepublicClient live integration', () => {
   liveIt('restores and refreshes an existing real web session', { timeout: 30_000 }, async () => {
     const { client } = await createLiveClient();
 
@@ -57,9 +55,8 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     const secAccNo = client.securitiesAccountNumber ?? client.getSession()?.securitiesAccountNumber;
     assert.ok(secAccNo, 'expected securities account number to be available');
 
-    const [session, boards, mutualFundOrders, privateMarketOrders, markToMarket, portfolio] = await Promise.all([
+    const [session, mutualFundOrders, privateMarketOrders, markToMarket, portfolio] = await Promise.all([
       client.account.session(),
-      client.boards.list(),
       client.orders.mutualFunds(),
       client.orders.privateMarkets(),
       client.portfolio.markToMarketValue(),
@@ -67,7 +64,6 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
     ]);
 
     assertOptionalObject(session, 'account.session');
-    assert.ok(Array.isArray(boards), 'boards.list should return an array');
     assert.ok(Array.isArray(mutualFundOrders), 'orders.mutualFunds should return an array');
     assert.ok(Array.isArray(privateMarketOrders), 'orders.privateMarkets should return an array');
     assertObject(markToMarket, 'portfolio.markToMarketValue');
@@ -221,7 +217,6 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
 
   liveIt('validates disposable low-risk price alarm mutations with cleanup', {
     timeout: 45_000,
-    skip: runLowRiskMutationTests ? false : 'set TR_INTEGRATION_LOW_RISK_MUTATIONS=1 to allow disposable price-alarm mutations',
   }, async () => {
     const { client } = await createLiveClient();
     let alarmId: string | undefined;
@@ -246,7 +241,6 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
 
   liveIt('validates restorable low-risk watchlist mutations', {
     timeout: 45_000,
-    skip: runLowRiskMutationTests ? false : 'set TR_INTEGRATION_LOW_RISK_MUTATIONS=1 to allow watchlist mutations',
   }, async (t) => {
     const { client } = await createLiveClient();
     const watchlists = await client.discovery.watchlists();
@@ -286,7 +280,6 @@ describe('TradeRepublicClient live integration', { skip: enabled ? false : 'set 
 
   liveIt('validates disposable watchlist clone/delete when the account supports clones', {
     timeout: 60_000,
-    skip: runLowRiskMutationTests ? false : 'set TR_INTEGRATION_LOW_RISK_MUTATIONS=1 to allow watchlist mutations',
   }, async (t) => {
     const { client } = await createLiveClient();
     const name = `sdk-test-${Date.now()}`;

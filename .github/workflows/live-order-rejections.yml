@@ -1,9 +1,33 @@
-name: live closed-exchange order rejections
+name: live venue-state order integration
 
 on:
   schedule:
-    - cron: "0 1 * * *"
+    - cron: "30 0 * * 1-5"
       timezone: Europe/Berlin
+    - cron: "15 10 * * 1-5"
+      timezone: Europe/Berlin
+  workflow_dispatch:
+    inputs:
+      instrument_id:
+        description: 'ISIN for venue-state order checks.'
+        required: true
+        type: string
+        default: 'US0378331005'
+      exchange_id:
+        description: 'Exchange that must explicitly report closed (for example LSX).'
+        required: true
+        type: string
+        default: 'LSX'
+      open_buy_limit_eur:
+        description: 'Deeply non-marketable buy limit used while the exchange is open.'
+        required: true
+        type: string
+        default: '1'
+      confirm_order_requests:
+        description: 'I understand this sends real orders and cancels any accepted open-venue probe.'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,15 +38,18 @@ concurrency:
 
 jobs:
   rejections:
-    name: closed-exchange buy and sell rejections
+    name: venue-state EUR 1 buy checks
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
-      github.ref == 'refs/heads/main'
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' ||
+        (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_requests))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      TR_INTEGRATION: "1"
-      TR_INTEGRATION_CLOSED_ORDER_REJECTIONS: "1"
+      TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id || 'US0378331005' }}
+      TR_INTEGRATION_ORDER_EXCHANGE: ${{ inputs.exchange_id || 'LSX' }}
+      TR_INTEGRATION_OPEN_BUY_LIMIT_EUR: ${{ inputs.open_buy_limit_eur || '1' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -53,7 +80,7 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Run closed-exchange rejection checks
+      - name: Run venue-state order checks
         run: npm run test:integration:order-rejections
       - name: Remove materialized session
         if: always()

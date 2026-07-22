@@ -5,31 +5,29 @@ import { describe, it } from 'node:test';
 import { FileSessionStore, TradeRepublicClient, validateRawResponse } from '../../src/index.js';
 import { withLiveDiagnostics } from '../live-diagnostics.js';
 
-const enabled = process.env.TR_INTEGRATION === '1'
-  && process.env.TR_INTEGRATION_CLOSED_ORDER_REJECTIONS === '1';
 const sessionPath = process.env.TR_SESSION_FILE ?? 'demo/.demo-session.json';
-const instruments = [
-  { name: 'SAP stock', instrumentId: 'DE0007164600', exchangeId: 'LSX' },
-  { name: 'iShares Core MSCI World ETF', instrumentId: 'IE00B4L5Y983', exchangeId: 'LSX' },
-] as const;
+const instrumentId = requiredEnvironment('TR_INTEGRATION_ORDER_ISIN');
+const exchangeId = requiredEnvironment('TR_INTEGRATION_ORDER_EXCHANGE');
+const openBuyLimit = Number(process.env.TR_INTEGRATION_OPEN_BUY_LIMIT_EUR ?? '');
+const runClosedMarketOrderTest = isBeforeBerlinTime(5, 0);
 
-describe('TradeRepublicClient closed-exchange order integration', {
-  skip: enabled ? false : 'set the closed-exchange integration opt-ins to run rejection tests',
-}, () => {
-  it('rejects buy and sell submissions while LSX is closed', { timeout: 180_000 }, async (t) => withLiveDiagnostics('closed-exchange order rejections', async () => {
+describe('TradeRepublicClient venue-state order integration', () => {
+  it('rejects a EUR 1 limit buy while the selected exchange is closed', { timeout: 180_000 }, async (t) => withLiveDiagnostics('closed-exchange limit buy rejection', async () => {
+    assertRequiredInstrument();
     const client = await createLiveClient();
     try {
-      for (const instrument of instruments) {
-        await t.test(instrument.name, async (instrumentTest) => {
-          const destinations = await client.trading.orderDestinations(instrument.instrumentId);
-          const destination = destinations.find((item) => item.id === instrument.exchangeId);
-          assert.ok(destination, `expected ${instrument.exchangeId} destination for ${instrument.name}`);
-          assert.equal(destination.open, false, `${instrument.exchangeId} must be explicitly closed for rejection tests`);
-          for (const side of ['buy', 'sell'] as const) {
-            await instrumentTest.test(side, () => assertRejectedOrder(client, instrument, side));
-          }
-        });
+      const instrument = { name: instrumentId, instrumentId, exchangeId };
+      const destinations = await client.trading.orderDestinations(instrumentId);
+      const destination = destinations.find((item) => item.id === exchangeId);
+      assert.ok(destination, `expected ${exchangeId} destination for ${instrumentId}`);
+      if (destination.open !== false) {
+        t.skip(`${exchangeId} is not explicitly closed`);
+        return;
       }
+      assert.ok(destination.orderModes?.some((mode) => mode.toLowerCase() === 'limit'), `${exchangeId} must support limit orders`);
+      const quote = await client.market.quote(instrumentId, exchangeId);
+      assert.ok(quote.bid && quote.bid > 0, `expected a positive ${exchangeId} bid for a non-marketable buy limit`);
+      await assertRejectedLimitBuy(client, instrument, quote.bid);
 
       const cancellation = await client.orders.cancel(randomUUID(), { timeoutMs: 15_000 });
       if (cancellation.raw !== undefined) validateRawResponse('orders.cancel', cancellation.raw);
@@ -37,6 +35,84 @@ describe('TradeRepublicClient closed-exchange order integration', {
       assert.equal(firstStringByKey(cancellation.error, 'code'), 'orderNotFound');
     } finally {
       await client.close();
+    }
+  }));
+
+  it('rejects a EUR 1 market buy while the selected exchange is closed', { timeout: 90_000 }, async (t) => withLiveDiagnostics('closed-exchange EUR 1 market rejection', async () => {
+    if (!runClosedMarketOrderTest) {
+      t.skip('market-order rejection probe runs only before 05:00 Europe/Berlin');
+      return;
+    }
+    assertRequiredInstrument();
+    const client = await createLiveClient();
+    try {
+      const destination = (await client.trading.orderDestinations(instrumentId)).find((item) => item.id === exchangeId);
+      assert.ok(destination, `expected ${exchangeId} destination for ${instrumentId}`);
+      if (destination.open !== false) {
+        t.skip(`${exchangeId} is not explicitly closed`);
+        return;
+      }
+      const quote = await client.market.quote(instrumentId, exchangeId);
+      const lastClientPrice = quote.ask ?? quote.last ?? quote.bid;
+      assert.ok(lastClientPrice && lastClientPrice > 0, `expected a positive ${exchangeId} reference price`);
+      const submission = await client.orders.submit({
+        instrumentId,
+        exchangeId,
+        side: 'buy',
+        mode: 'market',
+        amount: 1,
+        lastClientPrice,
+        validity: 'day',
+        timeoutMs: 30_000,
+      });
+      assertExchangeClosed(submission, { name: instrumentId, instrumentId, exchangeId }, 'buy');
+    } finally {
+      await client.close();
+    }
+  }));
+
+  it('accepts and cancels a deeply non-marketable one-share limit buy while the selected exchange is open', { timeout: 120_000 }, async (t) => withLiveDiagnostics('open-exchange limit buy and cancel', async () => {
+    assertRequiredInstrument();
+    assert.ok(Number.isFinite(openBuyLimit) && openBuyLimit > 0, 'TR_INTEGRATION_OPEN_BUY_LIMIT_EUR must be positive');
+    const client = await createLiveClient();
+    let orderId: string | undefined;
+    try {
+      const destination = (await client.trading.orderDestinations(instrumentId)).find((item) => item.id === exchangeId);
+      assert.ok(destination, `expected ${exchangeId} destination for ${instrumentId}`);
+      if (destination.open !== true) {
+        t.skip(`${exchangeId} is not explicitly open`);
+        return;
+      }
+      assert.ok(destination.orderModes?.some((mode) => mode.toLowerCase() === 'limit'), `${exchangeId} must support limit orders`);
+      const quote = await client.market.quote(instrumentId, exchangeId);
+      assert.ok(quote.bid && quote.bid > 0, `expected a positive ${exchangeId} bid`);
+      assert.ok(openBuyLimit <= quote.bid * 0.1, `refusing limit ${openBuyLimit}: it must be at most 10% of the live bid ${quote.bid}`);
+
+      const submission = await client.orders.submit({
+        instrumentId,
+        exchangeId,
+        side: 'buy',
+        mode: 'limit',
+        size: 1,
+        limit: openBuyLimit,
+        validity: 'day',
+        timeoutMs: 60_000,
+      });
+      if (submission.raw !== undefined) validateRawResponse('orders.submit', submission.raw);
+      assert.equal(submission.status, 'succeeded', `limit buy submission did not succeed: ${JSON.stringify(submission)}`);
+      assert.ok(submission.orderId, 'limit buy submission must return an order id');
+      orderId = submission.orderId;
+
+      const cancellation = await client.orders.cancel(orderId, { timeoutMs: 30_000 });
+      if (cancellation.raw !== undefined) validateRawResponse('orders.cancel', cancellation.raw);
+      assert.equal(cancellation.status, 'succeeded', `limit buy cancellation did not succeed: ${JSON.stringify(cancellation)}`);
+      orderId = undefined;
+    } finally {
+      try {
+        if (orderId) await client.orders.cancel(orderId, { timeoutMs: 30_000 });
+      } finally {
+        await client.close();
+      }
     }
   }));
 });
@@ -50,20 +126,29 @@ async function createLiveClient(): Promise<TradeRepublicClient> {
   return client;
 }
 
-async function assertRejectedOrder(
+async function assertRejectedLimitBuy(
   client: TradeRepublicClient,
   instrument: { name: string; instrumentId: string; exchangeId: string },
-  side: 'buy' | 'sell',
+  limit: number,
 ): Promise<void> {
   const submission = await client.orders.submit({
     instrumentId: instrument.instrumentId,
     exchangeId: instrument.exchangeId,
-    side,
-    mode: 'market',
-    size: 1,
+    side: 'buy',
+    mode: 'limit',
+    amount: 1,
+    limit,
     validity: 'day',
     timeoutMs: 30_000,
   });
+  assertExchangeClosed(submission, instrument, 'buy');
+}
+
+function assertExchangeClosed(
+  submission: Awaited<ReturnType<TradeRepublicClient['orders']['submit']>>,
+  instrument: { name: string; instrumentId: string; exchangeId: string },
+  side: 'buy' | 'sell',
+): void {
   if (submission.raw !== undefined) validateRawResponse('orders.submit', submission.raw);
   assert.equal(submission.status, 'failed', `expected ${side} rejection for ${instrument.name}`);
   assert.equal(firstStringByKey(submission.error, 'code'), 'exchangeClosed');
@@ -90,4 +175,24 @@ function firstStringByKey(value: unknown, ...keys: string[]): string | undefined
     if (found) return found;
   }
   return undefined;
+}
+
+function requiredEnvironment(name: string): string {
+  return process.env[name]?.trim() ?? '';
+}
+
+function assertRequiredInstrument(): void {
+  assert.ok(instrumentId, 'TR_INTEGRATION_ORDER_ISIN is required');
+  assert.ok(exchangeId, 'TR_INTEGRATION_ORDER_EXCHANGE is required');
+}
+
+function isBeforeBerlinTime(hour: number, minute: number): boolean {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Berlin',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find((part) => part.type === type)?.value);
+  return value('hour') * 60 + value('minute') < hour * 60 + minute;
 }

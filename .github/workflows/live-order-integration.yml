@@ -1,10 +1,10 @@
-name: live order integration
+name: live buy integration
 
 on:
   workflow_dispatch:
     inputs:
       instrument_id:
-        description: 'ISIN to buy and sell.'
+        description: 'ISIN to buy.'
         required: true
         type: string
       exchange_id:
@@ -13,12 +13,12 @@ on:
         type: string
         default: 'LSX'
       buy_amount_eur:
-        description: 'EUR amount to buy before selling the executed quantity (maximum 0.50, plus the 1 EUR fee).'
+        description: 'EUR amount to buy (maximum 0.50, plus the 1 EUR fee).'
         required: true
         type: string
         default: '0.5'
       confirm_live_execution:
-        description: 'I understand this executes a real market buy and sell.'
+        description: 'I understand this executes a real market buy and leaves the purchased position in the account.'
         required: true
         type: boolean
         default: false
@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   orders:
-    name: execute live buy and sell
+    name: execute live buy
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
@@ -42,8 +42,7 @@ jobs:
     timeout-minutes: 20
     environment: live-order-tests
     env:
-      TR_INTEGRATION: "1"
-      TR_INTEGRATION_EXECUTE_ORDERS: "EXECUTE_LIVE_BUY_AND_SELL"
+      TR_INTEGRATION_EXECUTE_ORDERS: "EXECUTE_LIVE_BUY"
       TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id }}
       TR_INTEGRATION_ORDER_EXCHANGE: ${{ inputs.exchange_id }}
       TR_INTEGRATION_ORDER_AMOUNT_EUR: ${{ inputs.buy_amount_eur }}
@@ -77,7 +76,7 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Execute and verify live buy and sell
+      - name: Execute and verify live buy
         run: npm run test:integration:orders
       - name: Remove materialized session
         if: always()
