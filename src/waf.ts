@@ -1,4 +1,4 @@
-import type { TradeRepublicWafContext, TradeRepublicWebContext } from './types.js';
+import type { TradeRepublicWafToken, TradeRepublicWebContext } from './types.js';
 
 export interface TradeRepublicBrowserLike {
   newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
@@ -15,7 +15,7 @@ export interface CollectTradeRepublicWebContextOptions {
   waitUntil?: string | undefined;
 }
 
-export type CollectTradeRepublicWafContextOptions = CollectTradeRepublicWebContextOptions;
+export type CollectTradeRepublicWafTokenOptions = CollectTradeRepublicWebContextOptions;
 
 export interface TradeRepublicBrowserContextLike {
   newPage(): Promise<TradeRepublicPageLike>;
@@ -81,16 +81,16 @@ export async function collectTradeRepublicWebContext(
     page.on?.('request', (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
     await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
     let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
-    if (!hasWafContext(webContext) && settleMs > 0) {
+    if (!hasWafToken(webContext) && settleMs > 0) {
       await wait(page, settleMs);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    while (!hasWafContext(webContext) && Date.now() - startedAt < timeoutMs) {
+    while (!hasWafToken(webContext) && Date.now() - startedAt < timeoutMs) {
       await wait(page, WAF_POLL_INTERVAL_MS);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    if (!hasWafContext(webContext)) {
-      const missing = missingWafContext(webContext);
+    if (!hasWafToken(webContext)) {
+      const missing = missingWafToken(webContext);
       throw new Error(formatLoginContextError(webContext, missing));
     }
     return webContext;
@@ -99,17 +99,17 @@ export async function collectTradeRepublicWebContext(
   }
 }
 
-export async function collectTradeRepublicWafContext(
+export async function collectTradeRepublicWafToken(
   browser: TradeRepublicBrowserLike,
-  options: CollectTradeRepublicWebContextOptions = {},
-): Promise<TradeRepublicWafContext> {
-  return toTradeRepublicWafContext(await collectTradeRepublicWebContext(browser, options));
+  options: CollectTradeRepublicWafTokenOptions = {},
+): Promise<TradeRepublicWafToken> {
+  return toTradeRepublicWafToken(await collectTradeRepublicWebContext(browser, options));
 }
 
-export function toTradeRepublicWafContext(context: TradeRepublicWebContext): TradeRepublicWafContext {
+export function toTradeRepublicWafToken(context: TradeRepublicWebContext): TradeRepublicWafToken {
   const normalized = normalizeTradeRepublicWebContext(context);
   if (!normalized.awsWafToken) {
-    throw new TypeError('Trade Republic WAF context requires an AWS WAF token.');
+    throw new TypeError('Trade Republic WAF token requires an AWS WAF token.');
   }
   return {
     awsWafToken: normalized.awsWafToken,
@@ -118,13 +118,13 @@ export function toTradeRepublicWafContext(context: TradeRepublicWebContext): Tra
   };
 }
 
-export function normalizeTradeRepublicWafContext(context: TradeRepublicWafContext): TradeRepublicWafContext {
-  const awsWafToken = normalizeString(context.awsWafToken);
+export function normalizeTradeRepublicWafToken(token: TradeRepublicWafToken): TradeRepublicWafToken {
+  const awsWafToken = normalizeString(token.awsWafToken);
   if (!awsWafToken) {
-    throw new TypeError('Trade Republic WAF context requires an AWS WAF token.');
+    throw new TypeError('Trade Republic WAF token requires an AWS WAF token.');
   }
-  const xsrfToken = normalizeString(context.xsrfToken);
-  const capturedAt = normalizeString(context.capturedAt);
+  const xsrfToken = normalizeString(token.xsrfToken);
+  const capturedAt = normalizeString(token.capturedAt);
   return {
     awsWafToken,
     ...(xsrfToken ? { xsrfToken } : {}),
@@ -273,11 +273,11 @@ function decodeStorageToken(value: string | undefined): string | undefined {
   return current;
 }
 
-function hasWafContext(context: TradeRepublicWebContext): boolean {
-  return missingWafContext(context).length === 0;
+function hasWafToken(context: TradeRepublicWebContext): boolean {
+  return missingWafToken(context).length === 0;
 }
 
-function missingWafContext(context: TradeRepublicWebContext): string[] {
+function missingWafToken(context: TradeRepublicWebContext): string[] {
   const headers = context.headers ?? {};
   const missing = [];
   if (!(context.awsWafToken || headers['x-aws-waf-token'])) missing.push('x-aws-waf-token');

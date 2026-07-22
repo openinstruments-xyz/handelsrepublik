@@ -48,7 +48,7 @@ try {
   await redis.ping();
 
   // This proof is anonymous and may be shared by account-specific clients.
-  const wafContext = await TradeRepublicClient.collectWafToken({
+  const wafToken = await TradeRepublicClient.collectWafToken({
     browserLaunchOptions: {
       headless: WAF_BROWSER_HEADLESS,
     },
@@ -61,7 +61,7 @@ try {
       encryptionKey,
     );
     const client = TradeRepublicClient.create({
-      wafContext,
+      wafToken,
       sessionStore,
       rawSchemaValidation: 'passthrough',
       onRawSchemaValidationFailure({ schemaName, error }) {

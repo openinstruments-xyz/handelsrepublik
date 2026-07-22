@@ -53,7 +53,7 @@ async function run(): Promise<void> {
   let client: TradeRepublicClient | undefined;
 
   try {
-    console.log('Collecting the Trade Republic browser/WAF context...');
+    console.log('Collecting the Trade Republic browser context and WAF token...');
     const webContext = await collectTradeRepublicWebContext(browser, {
       timeoutMs: 60_000,
       settleMs: 1_000,

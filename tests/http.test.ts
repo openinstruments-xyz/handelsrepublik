@@ -84,7 +84,7 @@ describe('HttpClient headers', () => {
   });
 
   it('shares WAF proof while keeping account cookies isolated', () => {
-    const wafContext = {
+    const wafToken = {
       awsWafToken: 'shared-waf-token',
       xsrfToken: 'anonymous-xsrf%3Dtoken',
     };
@@ -95,7 +95,7 @@ describe('HttpClient headers', () => {
       fetch,
       getSession: () => ({ cookies: { tr_session: 'alice-session' } }),
       getDeviceInfo: () => deviceInfo,
-      getWafContext: () => wafContext,
+      getWafToken: () => wafToken,
     });
     const bob = new HttpClient({
       apiBaseUrl: 'https://api.traderepublic.com',
@@ -104,7 +104,7 @@ describe('HttpClient headers', () => {
       fetch,
       getSession: () => ({ cookies: { tr_session: 'bob-session' } }),
       getDeviceInfo: () => deviceInfo,
-      getWafContext: () => wafContext,
+      getWafToken: () => wafToken,
     });
 
     const aliceHeaders = alice.headers();

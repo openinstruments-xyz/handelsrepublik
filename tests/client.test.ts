@@ -226,8 +226,8 @@ describe('TradeRepublicClient', () => {
     ]);
   });
 
-  it('reuses WAF context across account clients without persisting it in either session', async () => {
-    const wafContext = {
+  it('reuses WAF token across account clients without persisting it in either session', async () => {
+    const wafToken = {
       awsWafToken: 'shared-waf-token',
       xsrfToken: 'shared-xsrf',
     };
@@ -236,7 +236,7 @@ describe('TradeRepublicClient', () => {
     const aliceCalls: Array<{ url: string; init: RequestInit }> = [];
     const bobCalls: Array<{ url: string; init: RequestInit }> = [];
     const alice = TradeRepublicClient.create({
-      wafContext,
+      wafToken,
       session: {
         deviceInfo: TEST_DEVICE_INFO,
         cookies: { tr_session: 'alice-session' },
@@ -245,7 +245,7 @@ describe('TradeRepublicClient', () => {
       fetch: mockFetch(aliceCalls, { id: 'alice-challenge', qrCodePayload: 'alice-qr' }),
     });
     const bob = TradeRepublicClient.create({
-      wafContext,
+      wafToken,
       session: {
         deviceInfo: TEST_DEVICE_INFO,
         cookies: { tr_session: 'bob-session' },
@@ -267,12 +267,12 @@ describe('TradeRepublicClient', () => {
     assert.doesNotMatch(aliceHeaders.cookie ?? '', /bob-session/);
     expect(bobHeaders.cookie).toContain('tr_session=bob-session');
     assert.doesNotMatch(bobHeaders.cookie ?? '', /alice-session/);
-    assert.equal('wafContext' in (alice.getSession() ?? {}), false);
-    assert.equal('wafContext' in (bob.getSession() ?? {}), false);
+    assert.equal('wafToken' in (alice.getSession() ?? {}), false);
+    assert.equal('wafToken' in (bob.getSession() ?? {}), false);
     assert.equal(JSON.stringify(savedAliceSessions).includes('shared-waf-token'), false);
     assert.equal(JSON.stringify(savedBobSessions).includes('shared-waf-token'), false);
 
-    alice.useWafContext({ awsWafToken: 'renewed-waf-token' });
+    alice.useWafToken({ awsWafToken: 'renewed-waf-token' });
     await assert.rejects(alice.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
     const renewedHeaders = aliceCalls[1]?.init.headers as Record<string, string>;
     expect(renewedHeaders['x-aws-waf-token']).toBe('renewed-waf-token');

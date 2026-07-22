@@ -5,7 +5,7 @@ import type {
   Session,
   TradeRepublicDefaultHeaders,
   TradeRepublicDeviceInfo,
-  TradeRepublicWafContext,
+  TradeRepublicWafToken,
 } from './types.js';
 
 export interface HttpClientOptions {
@@ -17,7 +17,7 @@ export interface HttpClientOptions {
   fetch: typeof fetch;
   getSession: () => Session | undefined;
   getDeviceInfo: () => TradeRepublicDeviceInfo;
-  getWafContext?: (() => TradeRepublicWafContext | undefined) | undefined;
+  getWafToken?: (() => TradeRepublicWafToken | undefined) | undefined;
 }
 
 export class HttpClient {
@@ -80,13 +80,13 @@ export class HttpClient {
   headers(extra: Record<string, string> = {}, hasJsonBody = false): Record<string, string> {
     const session = this.options.getSession();
     const webContext = session?.webContext;
-    const wafContext = this.options.getWafContext?.();
+    const wafToken = this.options.getWafToken?.();
     const xsrfToken = session?.cookies?.['XSRF-TOKEN']
-      ?? wafContext?.xsrfToken
+      ?? wafToken?.xsrfToken
       ?? webContext?.cookies?.['XSRF-TOKEN']
       ?? webContext?.xsrfToken;
     const webContextHeaders = normalizeHeaderRecord(webContext?.headers);
-    if (wafContext) {
+    if (wafToken) {
       deleteHeader(webContextHeaders, 'x-aws-waf-token');
       deleteHeader(webContextHeaders, 'x-xsrf-token');
     }
@@ -105,12 +105,12 @@ export class HttpClient {
     if (hasJsonBody && !hasHeader(headers, 'content-type')) headers['content-type'] = 'application/json';
     if (session?.accessToken) headers.authorization = `Bearer ${session.accessToken}`;
     if (session?.sessionToken) headers['x-tr-session'] = session.sessionToken;
-    const awsWafToken = wafContext?.awsWafToken ?? webContext?.awsWafToken;
+    const awsWafToken = wafToken?.awsWafToken ?? webContext?.awsWafToken;
     if (awsWafToken && !hasHeader(headers, 'x-aws-waf-token')) headers['x-aws-waf-token'] = awsWafToken;
     if (xsrfToken && !hasHeader(headers, 'x-xsrf-token')) headers['x-xsrf-token'] = decodeCookieValue(xsrfToken);
     const cookies = { ...(webContext?.cookies ?? {}), ...(session?.cookies ?? {}) };
-    if (wafContext?.awsWafToken) cookies['aws-waf-token'] = wafContext.awsWafToken;
-    if (wafContext?.xsrfToken && !cookies['XSRF-TOKEN']) cookies['XSRF-TOKEN'] = wafContext.xsrfToken;
+    if (wafToken?.awsWafToken) cookies['aws-waf-token'] = wafToken.awsWafToken;
+    if (wafToken?.xsrfToken && !cookies['XSRF-TOKEN']) cookies['XSRF-TOKEN'] = wafToken.xsrfToken;
     const cookieHeader = mergeCookieHeaders(
       [headers.cookie, webContext?.cookieHeader].filter((value): value is string => Boolean(value)).join('; '),
       cookies,

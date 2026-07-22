@@ -8,7 +8,7 @@ export type {
 } from './auth.js';
 export type {
   TradeRepublicBrowserLaunchOptions,
-  TradeRepublicCollectWafContextOptions,
+  TradeRepublicCollectWafTokenOptions,
 } from './traderepublic-client.js';
 export { TradeRepublicError, TradeRepublicHttpError, TradeRepublicProtocolError, TradeRepublicSchemaError } from './errors.js';
 export { MemorySessionStore, FileSessionStore, redactSession } from './session.js';
@@ -21,7 +21,7 @@ export {
   candleResolutionMs,
   candleResolutionsForInstrumentType,
 } from './candle-resolutions.js';
-export { collectTradeRepublicWafContext, collectTradeRepublicWebContext } from './waf.js';
+export { collectTradeRepublicWafToken, collectTradeRepublicWebContext } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
 export { MapperRequestError } from './mapper-connection.js';
 export { classifyMapperOperation } from './raw.js';
@@ -36,7 +36,7 @@ export type { RawOperationKind, RawQueryOptions, RawSubscription, RawSubscriptio
 export type { SchemaRisk, SchemaTransport, TradeRepublicSchemaEntry } from './schemas/registry.js';
 export type {
   CollectTradeRepublicWebContextOptions,
-  CollectTradeRepublicWafContextOptions,
+  CollectTradeRepublicWafTokenOptions,
   TradeRepublicBrowserContextLike,
   TradeRepublicBrowserLike,
   TradeRepublicCookieLike,
@@ -141,7 +141,7 @@ export type {
   TradeRepublicClientOptions,
   TradeRepublicDefaultHeaders,
   TradeRepublicDeviceInfo,
-  TradeRepublicWafContext,
+  TradeRepublicWafToken,
   TradeRepublicWebContext,
   WebSocketDisconnectEvent,
   WebSocketReconnectEvent,

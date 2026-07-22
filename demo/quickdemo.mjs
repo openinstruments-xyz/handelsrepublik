@@ -45,7 +45,7 @@ async function showQrCode(challenge) {
 // First, we need to get a token for passing the AWS WAF challenge
 // This launches a visible browser, visits the Trade Republic site, collects the WAF token, and then closes it again.
 // This process might take a while.
-const wafContext = await TradeRepublicClient.collectWafToken({
+const wafToken = await TradeRepublicClient.collectWafToken({
   // browserLaunchOptions: {
   //  channel: 'chrome',
   //  headless: false, // Set to true to hide the browser in production; visible mode is easier to debug if the WAF challenge fails.
@@ -56,7 +56,7 @@ const wafContext = await TradeRepublicClient.collectWafToken({
 // It takes a session store (you can implement your own, e.g. in Redis. More on that later.).
 // We will use the simple file-based session store. It creates `.tr-session.json` in the current directory.
 const tr = TradeRepublicClient.create({
-  wafContext,
+  wafToken,
   sessionStore: new FileSessionStore('.tr-session.json'),
 
   // We currently validate all answers from TradeRepublic via zod schemas.

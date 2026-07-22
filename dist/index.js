@@ -796,16 +796,16 @@ async function collectTradeRepublicWebContext(browser, options = {}) {
     page.on?.("request", (request) => captureRequest(request, appUrl, apiUrl, capturedHeaders, capturedCookies));
     await page.goto(appUrl, { waitUntil, timeout: timeoutMs });
     let webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
-    if (!hasWafContext(webContext) && settleMs > 0) {
+    if (!hasWafToken(webContext) && settleMs > 0) {
       await wait(page, settleMs);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    while (!hasWafContext(webContext) && Date.now() - startedAt < timeoutMs) {
+    while (!hasWafToken(webContext) && Date.now() - startedAt < timeoutMs) {
       await wait(page, WAF_POLL_INTERVAL_MS);
       webContext = await buildWebContext(context, appUrl, apiUrl, capturedHeaders, capturedCookies, page);
     }
-    if (!hasWafContext(webContext)) {
-      const missing = missingWafContext(webContext);
+    if (!hasWafToken(webContext)) {
+      const missing = missingWafToken(webContext);
       throw new Error(formatLoginContextError(webContext, missing));
     }
     return webContext;
@@ -813,13 +813,13 @@ async function collectTradeRepublicWebContext(browser, options = {}) {
     await context.close();
   }
 }
-async function collectTradeRepublicWafContext(browser, options = {}) {
-  return toTradeRepublicWafContext(await collectTradeRepublicWebContext(browser, options));
+async function collectTradeRepublicWafToken(browser, options = {}) {
+  return toTradeRepublicWafToken(await collectTradeRepublicWebContext(browser, options));
 }
-function toTradeRepublicWafContext(context) {
+function toTradeRepublicWafToken(context) {
   const normalized = normalizeTradeRepublicWebContext(context);
   if (!normalized.awsWafToken) {
-    throw new TypeError("Trade Republic WAF context requires an AWS WAF token.");
+    throw new TypeError("Trade Republic WAF token requires an AWS WAF token.");
   }
   return {
     awsWafToken: normalized.awsWafToken,
@@ -827,13 +827,13 @@ function toTradeRepublicWafContext(context) {
     ...normalized.capturedAt ? { capturedAt: normalized.capturedAt } : {}
   };
 }
-function normalizeTradeRepublicWafContext(context) {
-  const awsWafToken = normalizeString(context.awsWafToken);
+function normalizeTradeRepublicWafToken(token) {
+  const awsWafToken = normalizeString(token.awsWafToken);
   if (!awsWafToken) {
-    throw new TypeError("Trade Republic WAF context requires an AWS WAF token.");
+    throw new TypeError("Trade Republic WAF token requires an AWS WAF token.");
   }
-  const xsrfToken = normalizeString(context.xsrfToken);
-  const capturedAt = normalizeString(context.capturedAt);
+  const xsrfToken = normalizeString(token.xsrfToken);
+  const capturedAt = normalizeString(token.capturedAt);
   return {
     awsWafToken,
     ...xsrfToken ? { xsrfToken } : {},
@@ -958,10 +958,10 @@ function decodeStorageToken(value) {
   }
   return current;
 }
-function hasWafContext(context) {
-  return missingWafContext(context).length === 0;
+function hasWafToken(context) {
+  return missingWafToken(context).length === 0;
 }
-function missingWafContext(context) {
+function missingWafToken(context) {
   const headers = context.headers ?? {};
   const missing = [];
   if (!(context.awsWafToken || headers["x-aws-waf-token"])) missing.push("x-aws-waf-token");
@@ -2676,10 +2676,10 @@ var HttpClient = class {
   headers(extra = {}, hasJsonBody = false) {
     const session = this.options.getSession();
     const webContext = session?.webContext;
-    const wafContext = this.options.getWafContext?.();
-    const xsrfToken = session?.cookies?.["XSRF-TOKEN"] ?? wafContext?.xsrfToken ?? webContext?.cookies?.["XSRF-TOKEN"] ?? webContext?.xsrfToken;
+    const wafToken = this.options.getWafToken?.();
+    const xsrfToken = session?.cookies?.["XSRF-TOKEN"] ?? wafToken?.xsrfToken ?? webContext?.cookies?.["XSRF-TOKEN"] ?? webContext?.xsrfToken;
     const webContextHeaders = normalizeHeaderRecord(webContext?.headers);
-    if (wafContext) {
+    if (wafToken) {
       deleteHeader(webContextHeaders, "x-aws-waf-token");
       deleteHeader(webContextHeaders, "x-xsrf-token");
     }
@@ -2698,12 +2698,12 @@ var HttpClient = class {
     if (hasJsonBody && !hasHeader(headers, "content-type")) headers["content-type"] = "application/json";
     if (session?.accessToken) headers.authorization = `Bearer ${session.accessToken}`;
     if (session?.sessionToken) headers["x-tr-session"] = session.sessionToken;
-    const awsWafToken = wafContext?.awsWafToken ?? webContext?.awsWafToken;
+    const awsWafToken = wafToken?.awsWafToken ?? webContext?.awsWafToken;
     if (awsWafToken && !hasHeader(headers, "x-aws-waf-token")) headers["x-aws-waf-token"] = awsWafToken;
     if (xsrfToken && !hasHeader(headers, "x-xsrf-token")) headers["x-xsrf-token"] = decodeCookieValue(xsrfToken);
     const cookies = { ...webContext?.cookies ?? {}, ...session?.cookies ?? {} };
-    if (wafContext?.awsWafToken) cookies["aws-waf-token"] = wafContext.awsWafToken;
-    if (wafContext?.xsrfToken && !cookies["XSRF-TOKEN"]) cookies["XSRF-TOKEN"] = wafContext.xsrfToken;
+    if (wafToken?.awsWafToken) cookies["aws-waf-token"] = wafToken.awsWafToken;
+    if (wafToken?.xsrfToken && !cookies["XSRF-TOKEN"]) cookies["XSRF-TOKEN"] = wafToken.xsrfToken;
     const cookieHeader = mergeCookieHeaders(
       [headers.cookie, webContext?.cookieHeader].filter((value) => Boolean(value)).join("; "),
       cookies
@@ -3647,7 +3647,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   web;
   securitiesAccountNumber;
   session;
-  wafContext;
+  wafToken;
   deviceInfo;
   http;
   endpoints;
@@ -3660,7 +3660,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
       throw new TypeError("Trade Republic sessions must contain deviceInfo.");
     }
     this.deviceInfo = createDeviceInfo(options.session?.deviceInfo ?? options.deviceInfo);
-    this.wafContext = options.wafContext ? normalizeTradeRepublicWafContext(options.wafContext) : void 0;
+    this.wafToken = options.wafToken ? normalizeTradeRepublicWafToken(options.wafToken) : void 0;
     this.session = withClientContext(options.session, options.webContext, this.deviceInfo);
     this.securitiesAccountNumber = options.session?.securitiesAccountNumber;
     this.validateRaw = createRawSchemaValidator(options.rawSchemaValidation, options.onRawSchemaValidationFailure);
@@ -3674,7 +3674,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
       fetch: options.fetch ?? fetch,
       getSession: () => this.session,
       getDeviceInfo: () => this.deviceInfo,
-      getWafContext: () => this.wafContext
+      getWafToken: () => this.wafToken
     });
     this.auth = new AuthApi(this.http, this.endpoints, () => this.session, (session) => {
       this.setSession(session);
@@ -3722,20 +3722,20 @@ var TradeRepublicClient = class _TradeRepublicClient {
       if (browserLaunchOptions) {
         throw new TypeError("browserLaunchOptions cannot be used with a caller-owned browser.");
       }
-      return collectTradeRepublicWafContext(browser, collectionOptions);
+      return collectTradeRepublicWafToken(browser, collectionOptions);
     }
     let chromium;
     try {
       ({ chromium } = await import("playwright"));
     } catch (cause) {
       throw new Error(
-        'Automatic Trade Republic WAF context collection requires the optional playwright package. Install it with "npm install playwright".',
+        'Automatic Trade Republic WAF token collection requires the optional playwright package. Install it with "npm install playwright".',
         { cause }
       );
     }
     const launchedBrowser = await chromium.launch({ headless: false, ...browserLaunchOptions });
     try {
-      return await collectTradeRepublicWafContext(launchedBrowser, collectionOptions);
+      return await collectTradeRepublicWafToken(launchedBrowser, collectionOptions);
     } finally {
       await launchedBrowser.close();
     }
@@ -3766,8 +3766,8 @@ var TradeRepublicClient = class _TradeRepublicClient {
     this.setSession(session);
     return this.getSession() ?? session;
   }
-  useWafContext(wafContext) {
-    this.wafContext = normalizeTradeRepublicWafContext(wafContext);
+  useWafToken(wafToken) {
+    this.wafToken = normalizeTradeRepublicWafToken(wafToken);
   }
   close() {
     this.raw.close();
@@ -5104,7 +5104,7 @@ export {
   candleResolutionMs,
   candleResolutionsForInstrumentType,
   classifyMapperOperation,
-  collectTradeRepublicWafContext,
+  collectTradeRepublicWafToken,
   collectTradeRepublicWebContext,
   redactSession,
   schemaCatalogMarkdown,

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
-import { collectTradeRepublicWafContext, collectTradeRepublicWebContext } from '../src/waf.js';
-import { TradeRepublicClient } from '../src/index.js';
+import {
+  collectTradeRepublicWafToken,
+  collectTradeRepublicWebContext,
+  TradeRepublicClient,
+} from '../src/index.js';
 import type {
   TradeRepublicBrowserContextLike,
   TradeRepublicBrowserLike,
@@ -47,19 +50,19 @@ describe('collectTradeRepublicWebContext', () => {
     expect(context.awsWafToken).toBe('storage-waf-token');
   });
 
-  it('returns a shareable WAF context without account cookies or browser headers', async () => {
-    const context = await collectTradeRepublicWafContext(new FakeBrowser(), {
+  it('returns a shareable WAF token without account cookies or browser headers', async () => {
+    const token = await collectTradeRepublicWafToken(new FakeBrowser(), {
       timeoutMs: 1_000,
       settleMs: 0,
     });
 
-    expect(context).toMatchObject({
+    expect(token).toMatchObject({
       awsWafToken: 'waf-token',
       xsrfToken: 'xsrf-cookie',
     });
-    assert.deepEqual(Object.keys(context).sort(), ['awsWafToken', 'capturedAt', 'xsrfToken']);
-    assert.equal('cookies' in context, false);
-    assert.equal('headers' in context, false);
+    assert.deepEqual(Object.keys(token).sort(), ['awsWafToken', 'capturedAt', 'xsrfToken']);
+    assert.equal('cookies' in token, false);
+    assert.equal('headers' in token, false);
   });
 
   it('accepts a caller-owned browser without closing it', async () => {
