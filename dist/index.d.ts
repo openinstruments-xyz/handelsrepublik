@@ -1118,7 +1118,7 @@ declare class TradeRepublicClient {
     getSession(): Session | undefined;
     setSession(session: Session): void;
     useWebContext(webContext: TradeRepublicWebContext): Session;
-    useWafToken(wafToken: TradeRepublicWafToken): void;
+    setWafToken(wafToken: TradeRepublicWafToken): void;
     close(): void;
     private setSecuritiesAccountNumber;
     private captureSecuritiesAccountNumber;

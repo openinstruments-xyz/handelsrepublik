@@ -436,8 +436,8 @@ active client that should continue sharing the browser proof:
 ```ts
 const nextWafToken = await TradeRepublicClient.collectWafToken();
 
-alice.useWafToken(nextWafToken);
-bob.useWafToken(nextWafToken);
+alice.setWafToken(nextWafToken);
+bob.setWafToken(nextWafToken);
 ```
 
 `collectTradeRepublicWebContext()` remains available for advanced compatibility

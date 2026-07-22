@@ -272,7 +272,7 @@ describe('TradeRepublicClient', () => {
     assert.equal(JSON.stringify(savedAliceSessions).includes('shared-waf-token'), false);
     assert.equal(JSON.stringify(savedBobSessions).includes('shared-waf-token'), false);
 
-    alice.useWafToken({ awsWafToken: 'renewed-waf-token' });
+    alice.setWafToken({ awsWafToken: 'renewed-waf-token' });
     await assert.rejects(alice.auth.loginWithQr({ onChallengeUpdate() { throw new Error('stop'); } }), /stop/);
     const renewedHeaders = aliceCalls[1]?.init.headers as Record<string, string>;
     expect(renewedHeaders['x-aws-waf-token']).toBe('renewed-waf-token');

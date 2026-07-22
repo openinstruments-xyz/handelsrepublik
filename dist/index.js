@@ -3766,7 +3766,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
     this.setSession(session);
     return this.getSession() ?? session;
   }
-  useWafToken(wafToken) {
+  setWafToken(wafToken) {
     this.wafToken = normalizeTradeRepublicWafToken(wafToken);
   }
   close() {

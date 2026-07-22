@@ -309,7 +309,7 @@ export class TradeRepublicClient {
     return this.getSession() ?? session;
   }
 
-  useWafToken(wafToken: TradeRepublicWafToken): void {
+  setWafToken(wafToken: TradeRepublicWafToken): void {
     this.wafToken = normalizeTradeRepublicWafToken(wafToken);
   }
 
