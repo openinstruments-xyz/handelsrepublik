@@ -37,7 +37,6 @@ import type {
   TimelineAction,
   TimelineDetail,
   TimelineItem,
-  Trade,
   Watchlist,
   WatchlistItem,
 } from './types.js';
@@ -474,22 +473,6 @@ export function normalizeOrderPriceQuote(value: unknown, options: OrderPriceOpti
     ask: optionalNumber(record.askPrice, record.ask),
     unit: optionalString(record.unit, record.currency),
     time: normalizeTimestamp(optionalString(record.time, record.timestamp) ?? optionalNumber(record.time, record.timestamp)),
-    raw: value,
-  };
-}
-
-export function normalizeTrade(value: unknown): Trade {
-  const record = asRecord(value);
-  const amount = moneyAmount(record.amount) ?? moneyAmount(record.cashQuantity) ?? optionalNumber(record.amount, asRecord(record.amount).value);
-  const currency = moneyCurrency(record.amount) ?? moneyCurrency(record.cashQuantity) ?? optionalString(record.currency, record.currencyId, asRecord(record.amount).currency);
-  return {
-    id: stringValue(record.id, record.tradeId, record.orderId),
-    isin: optionalString(record.isin, record.instrumentId),
-    side: optionalString(record.side, record.action),
-    quantity: optionalNumber(record.quantity, record.size, record.executionSize),
-    amount,
-    currency,
-    executedAt: optionalString(record.executedAt, record.executionTime, record.createdAt),
     raw: value,
   };
 }

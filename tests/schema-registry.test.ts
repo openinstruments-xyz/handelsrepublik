@@ -27,7 +27,7 @@ describe('schema registry', () => {
       ['auth.account', 'auth.account.json'],
       ['priceAlarms.list', 'priceAlarms.list.json'],
       ['discovery.watchlists', 'discovery.watchlists.json'],
-      ['market.candles', 'market.candles.json'],
+      ['market.candles.light', 'market.candles.json'],
       ['trading.orderDestinations', 'trading.orderDestinations.json'],
       ['orders.submit', 'orders.submit.exchangeClosed.json'],
       ['orders.cancel', 'orders.cancel.orderNotFound.json'],
@@ -43,6 +43,27 @@ describe('schema registry', () => {
       ]),
       TradeRepublicSchemaError,
     );
+  });
+
+  it('keeps standard, light, and bond candle wire formats separate', () => {
+    assert.doesNotThrow(() => validateRawResponse('market.candles.standard', {
+      aggregates: [{ time: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }],
+      resolution: 60_000,
+      sourceCurrency: 'EUR',
+    }));
+    assert.doesNotThrow(() => validateRawResponse('market.candles.bond', {
+      aggregates: [{ time: 1, open: 1, high: 2, low: 0.5, close: 1.5, adjValue: 1.5 }],
+      resolution: 86_400_000,
+      sourceCurrency: null,
+    }));
+    assert.throws(() => validateRawResponse('market.candles.standard', {
+      aggregates: [{ time: 1, open: 1, high: 2, low: 0.5, close: 1.5, adjValue: 1.5 }],
+      resolution: 60_000,
+    }), TradeRepublicSchemaError);
+    assert.throws(() => validateRawResponse('market.candles.bond', {
+      aggregates: [{ time: 1, open: 1, high: 2, low: 0.5, close: 1.5 }],
+      resolution: 86_400_000,
+    }), TradeRepublicSchemaError);
   });
 
   it('accepts paginated item wrappers with a total', () => {
@@ -164,10 +185,7 @@ describe('schema registry', () => {
 
     assert.deepEqual(lowRisk.sort(), [
       'discovery.watchlists.addItem',
-      'discovery.watchlists.clone',
-      'discovery.watchlists.delete',
       'discovery.watchlists.removeItem',
-      'discovery.watchlists.rename',
       'priceAlarms.cancel',
       'priceAlarms.create',
     ].sort());

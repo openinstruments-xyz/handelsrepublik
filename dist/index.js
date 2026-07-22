@@ -432,21 +432,6 @@ function normalizeOrderPriceQuote(value, options, instrumentId) {
     raw: value
   };
 }
-function normalizeTrade(value) {
-  const record2 = asRecord(value);
-  const amount = moneyAmount(record2.amount) ?? moneyAmount(record2.cashQuantity) ?? optionalNumber(record2.amount, asRecord(record2.amount).value);
-  const currency = moneyCurrency(record2.amount) ?? moneyCurrency(record2.cashQuantity) ?? optionalString(record2.currency, record2.currencyId, asRecord(record2.amount).currency);
-  return {
-    id: stringValue(record2.id, record2.tradeId, record2.orderId),
-    isin: optionalString(record2.isin, record2.instrumentId),
-    side: optionalString(record2.side, record2.action),
-    quantity: optionalNumber(record2.quantity, record2.size, record2.executionSize),
-    amount,
-    currency,
-    executedAt: optionalString(record2.executedAt, record2.executionTime, record2.createdAt),
-    raw: value
-  };
-}
 function normalizeExchangeDetails(value) {
   const record2 = asRecord(value);
   return {
@@ -780,7 +765,7 @@ var RELEVANT_HEADER_NAMES = /* @__PURE__ */ new Set([
   "x-tr-device-info",
   "x-tr-platform"
 ]);
-async function collectTradeRepublicWebContext(browser, options = {}) {
+async function collectTradeRepublicBrowserContext(browser, options = {}) {
   const appUrl = options.appUrl ?? DEFAULT_APP_URL;
   const apiUrl = options.apiUrl ?? DEFAULT_API_URL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -814,7 +799,7 @@ async function collectTradeRepublicWebContext(browser, options = {}) {
   }
 }
 async function collectTradeRepublicWafToken(browser, options = {}) {
-  return toTradeRepublicWafToken(await collectTradeRepublicWebContext(browser, options));
+  return toTradeRepublicWafToken(await collectTradeRepublicBrowserContext(browser, options));
 }
 function toTradeRepublicWafToken(context) {
   const normalized = normalizeTradeRepublicWebContext(context);
@@ -1627,87 +1612,16 @@ function candleResolutionMs(resolution) {
   return milliseconds;
 }
 
-// src/market-specs.ts
-var marketSubscriptionsSpec = {
-  endpoint: "market.subscriptions",
-  schemaName: "market.subscriptions",
-  normalize: (raw) => arrayPayload(raw).map(normalizeSubscription)
-};
-var marketEntitlementsSpec = {
-  endpoint: "market.entitlements",
-  schemaName: "market.entitlements",
-  pathParams: ({ topic }) => ({ topic }),
-  query: ({ options }) => ({ exchangeId: options.exchangeIds.join(",") }),
-  normalize: normalizeMarketEntitlementSet
-};
-var candlesSpec = {
-  schemaName: "market.candles",
-  resource: candleResource,
-  normalize: (raw) => arrayPayload(raw).map(normalizeCandle)
-};
-var candleSeriesSpec = {
-  schemaName: "market.candles",
-  resource: candleResource,
-  normalize: normalizeCandleSeries
-};
-var availableCandleResolutionsSpec = {
-  schemaName: "assets.get",
-  resource: (params) => ({ type: "instrument", id: params.assetId }),
-  normalize: (raw) => candleResolutionsForInstrumentType(normalizeAsset(raw).type)
-};
-var availableL2BooksSpec = {
-  schemaName: "market.availableL2Books",
-  resource: (params) => ({ type: "instrument", id: params.assetId }),
-  normalize: (raw) => normalizeL2Venues(raw)
-};
-var quoteSpec = {
-  schemaName: "market.quote",
-  resource: (params) => ({ type: "ticker", id: `${params.assetId}.${params.exchangeId}` }),
-  normalize: (raw, params) => normalizeMarketQuote(raw, params.assetId, params.exchangeId)
-};
-var liveFeedSpec = {
-  schemaName: "market.liveFeed",
-  topic: "tickerV3",
-  payload: (params) => ({
-    isin: params.assetId,
-    exchangeId: params.exchangeId,
-    unit: "EUR",
-    fields: params.fields
-  }),
-  normalize: (raw) => normalizeLiveFeedEvent(raw)
-};
-var l2OrderBookSpec = {
-  schemaName: "market.l2OrderBook",
-  topic: "L2",
-  request: (params) => ({ instrumentId: { isin: params.assetId, exchangeId: params.exchangeId } }),
-  normalize: (raw) => normalizeL2OrderBook(raw)
-};
-function candleResource(params) {
-  return {
-    type: "aggregateHistoryLightV2",
-    isin: params.assetId,
-    exchangeId: params.exchangeId,
-    resolution: candleResolutionMs(params.timeframe),
-    range: params.range,
-    from: params.from ? toIso(params.from) : void 0,
-    until: params.to ? toIso(params.to) : void 0,
-    unit: params.unit?.trim() || "EUR"
-  };
-}
-function toIso(value) {
-  return value instanceof Date ? value.toISOString() : value;
-}
-
 // src/candles.ts
 var CandleQuery = class {
-  constructor(resources, options) {
-    this.resources = resources;
+  constructor(fetchPage, options) {
+    this.fetchPage = fetchPage;
     this.options = options;
   }
-  resources;
+  fetchPage;
   options;
   fetch() {
-    return this.resources.query(candlesSpec, this.options);
+    return this.fetchPage(this.options);
   }
   async *pages(options = {}) {
     const maxCandlesPerRequest = options.maxCandlesPerRequest ?? this.options.limit ?? 500;
@@ -1721,7 +1635,7 @@ var CandleQuery = class {
     let cursor = asDate(this.options.from);
     while (cursor < to) {
       const next = new Date(Math.min(cursor.getTime() + stepMs, to.getTime()));
-      yield await this.resources.query(candlesSpec, {
+      yield await this.fetchPage({
         ...this.options,
         from: cursor,
         to: next,
@@ -1786,6 +1700,132 @@ var jsonRecord = z.record(z.string(), jsonValue);
 var emptyObject = z.strictObject({});
 var optionalNullableString = z.string().nullable().optional();
 var optionalNullableBoolean = z.boolean().nullable().optional();
+var wireNumberSchema = z.union([z.number(), z.string()]);
+var candleTupleSchema = z.union([z.tuple([
+  z.union([z.string(), z.number()]),
+  wireNumberSchema,
+  wireNumberSchema,
+  wireNumberSchema,
+  wireNumberSchema
+]), z.tuple([
+  z.union([z.string(), z.number()]),
+  wireNumberSchema,
+  wireNumberSchema,
+  wireNumberSchema,
+  wireNumberSchema,
+  wireNumberSchema
+])]);
+var candleObjectShape = {
+  time: z.union([z.string(), z.number()]),
+  open: wireNumberSchema,
+  high: wireNumberSchema,
+  low: wireNumberSchema,
+  close: wireNumberSchema,
+  volume: wireNumberSchema.optional()
+};
+var standardCandleSchema = z.strictObject(candleObjectShape);
+var bondCandleSchema = z.strictObject({ ...candleObjectShape, adjValue: wireNumberSchema });
+var aggregateEnvelopeShape = {
+  resolution: z.number(),
+  expectedClosingTime: z.union([z.string(), z.number()]).optional(),
+  lastAggregateEndTime: z.union([z.string(), z.number()]).optional(),
+  unit: z.string().optional(),
+  sourceCurrency: z.string().nullable().optional()
+};
+var standardCandlesResponseSchema = z.strictObject({
+  aggregates: z.array(standardCandleSchema),
+  ...aggregateEnvelopeShape
+});
+var lightCandlesResponseSchema = z.union([
+  z.strictObject({ data: z.array(candleTupleSchema) }),
+  z.strictObject({
+    aggregates: z.array(standardCandleSchema),
+    ...aggregateEnvelopeShape
+  })
+]);
+var bondCandlesResponseSchema = z.strictObject({
+  aggregates: z.array(bondCandleSchema),
+  ...aggregateEnvelopeShape
+});
+var orderTradeSchema = z.strictObject({
+  id: z.string().optional(),
+  secAccNo: z.string().optional(),
+  userId: z.string().optional(),
+  exchangeId: z.string().optional(),
+  instrumentId: z.string().optional(),
+  type: z.string().optional(),
+  side: z.string().optional(),
+  orderUsecase: z.string().optional(),
+  expiry: z.string().optional(),
+  groupId: z.string().optional(),
+  size: z.number().optional(),
+  amount: jsonRecord.optional(),
+  stop: jsonRecord.optional(),
+  limit: jsonRecord.optional(),
+  createdAt: z.number().optional(),
+  updatedAt: z.number().optional(),
+  receivedAt: z.number().optional(),
+  submittedAt: z.number().optional(),
+  openedAt: z.number().optional(),
+  executedAt: z.number().optional(),
+  expiredAt: z.number().optional(),
+  cancelledAt: z.number().optional(),
+  rejectedAt: z.number().optional(),
+  trades: z.array(jsonRecord)
+});
+var l2LevelSchema = z.strictObject({ price: z.number(), size: z.number() });
+var l2OrderBookSchema = z.strictObject({
+  instrumentId: z.string().optional(),
+  currency: z.string().optional(),
+  timestamp: z.number().optional(),
+  bid: z.array(l2LevelSchema),
+  ask: z.array(l2LevelSchema)
+});
+var orderDestinationSchema = z.strictObject({
+  id: z.string().optional(),
+  exchangeId: z.string().optional(),
+  destinationId: z.string().optional(),
+  venue: z.string().optional(),
+  name: z.string().optional(),
+  type: z.string().optional(),
+  orderModes: z.array(z.string()).optional(),
+  orderExpiries: z.array(z.string()).optional(),
+  listingId: z.string().optional(),
+  currencyId: z.string().optional(),
+  open: z.boolean().optional(),
+  openTimeOffsetMillis: z.number().optional(),
+  closeTimeOffsetMillis: z.number().optional(),
+  timeZoneId: z.string().optional(),
+  maintenanceWindow: jsonValue.optional(),
+  ongoingOutage: z.boolean().optional(),
+  priority: z.number().nullable().optional(),
+  tickSizes: z.array(z.array(z.number())).nullable().optional()
+});
+var watchlistItemSchema = z.strictObject({
+  id: z.string().optional(),
+  instrumentId: z.string().optional(),
+  isin: z.string().optional(),
+  name: z.string().optional(),
+  rank: z.number().optional(),
+  itemRank: z.number().optional(),
+  instrument: jsonRecord.optional(),
+  "core.shortName": z.string().optional(),
+  "core.officialName": z.string().optional(),
+  "core.icon": z.string().optional(),
+  "core.tickerSymbol": z.string().optional(),
+  "fundamental.peRatio": z.number().optional(),
+  "fundamental.dividendYield": z.number().optional(),
+  "fundamental.marketCap": z.number().optional(),
+  exchangeIds: z.array(z.string()).optional()
+});
+var watchlistSchema = z.strictObject({
+  id: z.string(),
+  name: z.string().optional(),
+  type: z.string().optional(),
+  created_at: z.number().optional(),
+  updated_at: z.number().optional(),
+  items: z.array(watchlistItemSchema).optional()
+});
 var availableCashItemSchema = z.strictObject({
   accountNumber: z.string(),
   currencyId: z.string(),
@@ -1828,6 +1868,37 @@ var marketEntitlementsSchema = z.strictObject({
     isCanceled: z.boolean()
   }))
 });
+var executionSnapshotLevelSchema = z.strictObject({
+  price: z.number(),
+  qty: z.number()
+});
+var orderBookSnapshotSchema = z.strictObject({
+  priceLevels: z.strictObject({
+    bidLevels: z.array(executionSnapshotLevelSchema),
+    askLevels: z.array(executionSnapshotLevelSchema)
+  })
+});
+var tapeSnapshotSchema = z.strictObject({
+  trades: z.array(z.strictObject({
+    timestamp: z.union([z.string(), z.number()]),
+    price: z.strictObject({
+      value: z.union([z.string(), z.number()]),
+      currency: z.string()
+    }),
+    size: z.number()
+  }))
+});
+var dailyPnlResponseSchema = z.array(z.strictObject({
+  currentQty: z.number(),
+  day: z.string(),
+  instrumentId: z.string(),
+  intradayOpenCost: z.number(),
+  realizedBase: z.number(),
+  secAccNo: z.string(),
+  sodOpenQty: z.number(),
+  sodQty: z.number(),
+  sodSoldQty: z.number()
+}));
 var normalizedArrayWrappers = z.union([
   z.array(jsonValue),
   z.strictObject({ data: z.array(jsonValue) }),
@@ -1840,6 +1911,7 @@ var normalizedArrayWrappers = z.union([
   z.strictObject({ assets: z.array(jsonValue) }),
   z.strictObject({ derivatives: z.array(jsonValue) }),
   z.strictObject({ subscriptions: z.array(jsonValue) }),
+  z.strictObject({ savingsPlans: z.array(jsonValue) }),
   z.strictObject({ activities: z.array(jsonValue) }),
   z.strictObject({ timeline: z.array(jsonValue) }),
   z.strictObject({ actions: z.array(jsonValue) }),
@@ -1891,9 +1963,9 @@ var ibanRelationshipsSchema = accountRelationshipsSchema.refine(
   { message: "Expected at least one account relationship with bankingInfo.iban." }
 );
 var orderDestinationsResponseSchema = z.union([
-  normalizedArrayWrappers,
+  z.array(orderDestinationSchema),
   z.strictObject({
-    destinations: z.array(jsonValue),
+    destinations: z.array(orderDestinationSchema),
     preferredMarketDataProvider: optionalNullableString,
     preferredOrderDestination: optionalNullableString
   })
@@ -2079,6 +2151,7 @@ var schemaRegistry = [
   entry("auth.session", "Auth web session", "rest", "read", "GET /api/v1/auth/web/session", sessionSchema),
   entry("auth.account", "Auth account", "rest", "read", "GET /api/v2/auth/account", accountSchema),
   entry("account.personalDetails", "Personal details", "rest", "read", "GET /api/v1/customer/personal-details", jsonRecord),
+  entry("account.appUsageConsents", "App usage data consents", "rest", "read", "GET /api/v1/customer/app-usage-data-consents", jsonValue),
   entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", accountRelationshipsSchema),
   entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord),
   entry("assets.search", "Asset search", "websocket", "read", "neonSearch", normalizedArrayWrappers, { variants: ["stock", "crypto", "etf -> fund", "mutualFund", "privateFund", "bond", "synthetic"] }),
@@ -2088,7 +2161,7 @@ var schemaRegistry = [
   entry("orders.all", "Orders list", "rest", "read", "GET /web-trading-gateway/api/customer/v1/orders", normalizedArrayWrappers),
   entry("orders.mutualFunds", "Mutual fund orders", "rest", "read", "GET /api-gateway/mutual-funds/api/v1/orders", normalizedArrayWrappers),
   entry("orders.privateMarkets", "Private market orders", "rest", "read", "GET /api/v1/private-markets/orders/all", normalizedArrayWrappers),
-  entry("orders.orderUpdates", "Order update stream", "websocket", "read", "orderUpdates", jsonValue, { live: { sample: "stream" } }),
+  entry("orders.orderUpdates", "Order update stream", "websocket", "read", "orderUpdates", orderTradeSchema, { live: { sample: "stream" } }),
   entry("orders.fees", "Order fee preview", "websocket", "read", "orderFeesV2", jsonValue),
   entry("orders.submit", "Submit brokerage order", "websocket", "highRiskMutation", "simpleCreateOrder", orderMutationResponseSchema, { variants: orderMutationVariants }),
   entry("orders.cancel", "Cancel brokerage order", "websocket", "highRiskMutation", "cancelOrder", orderMutationResponseSchema, { variants: orderMutationVariants }),
@@ -2099,13 +2172,17 @@ var schemaRegistry = [
   entry("portfolio.savingsPlans", "Savings plans", "websocket", "read", "savingsPlans", normalizedArrayWrappers),
   entry("portfolio.privateMarketsPositions", "Private markets positions", "websocket", "read", "privateMarketsPositions", jsonValue),
   entry("portfolio.portfolioChart", "Portfolio chart", "rest", "read", "GET /api-gateway/portfolio-chart/v2/chart", jsonValue),
+  entry("portfolio.bondValuation", "Bond valuation", "websocket", "read", "bondValuationV2", jsonValue),
+  entry("portfolio.fixedSavingsValuation", "Fixed savings valuation", "websocket", "read", "fixedSavingsValuation", jsonValue),
   entry("market.subscriptions", "Market subscriptions", "rest", "read", "GET /api-gateway/subscriptions/api/v1/subscriptions", z.array(marketSubscriptionSchema)),
   entry("market.entitlements", "Market topic entitlements", "rest", "read", "GET /api-gateway/subscriptions/api/v1/entitlements/topics/{topic}", marketEntitlementsSchema),
-  entry("market.candles", "Price history candles", "websocket", "read", "aggregateHistoryLightV2", jsonValue, { variants: ["stock", "crypto"] }),
+  entry("market.candles.standard", "Stock, ETF and fund price history candles", "websocket", "read", "tradeAggregateHistory", standardCandlesResponseSchema, { variants: ["stock", "etf", "fund", "mutualFund"] }),
+  entry("market.candles.light", "Derivative and crypto price history candles", "websocket", "read", "aggregateHistoryLightV2", lightCandlesResponseSchema, { variants: ["derivative", "crypto"] }),
+  entry("market.candles.bond", "Bond yield history candles", "rest", "read", "GET /api-gateway/quotes-api/v1/instruments/{isin}.{exchangeId}/ytm/aggregateHistory", bondCandlesResponseSchema, { variants: ["bond"] }),
   entry("market.quote", "Market quote", "websocket", "read", "ticker", jsonValue, { variants: ["stock", "crypto"] }),
   entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
   entry("market.availableL2Books", "Available L2 books", "websocket", "read", "instrument", jsonValue),
-  entry("market.l2OrderBook", "L2 order book stream", "websocket", "read", "L2", jsonValue, { live: { sample: "stream" } }),
+  entry("market.l2OrderBook", "L2 order book stream", "websocket", "read", "L2", l2OrderBookSchema, { live: { sample: "stream" } }),
   entry("timeline.list", "Timeline activity", "websocket", "read", "timelineActivityLog", timelineActivityResponseSchema),
   entry("timeline.actions", "Timeline actions", "websocket", "read", "timelineActionsV2", normalizedArrayWrappers),
   entry("timeline.detail", "Timeline detail", "websocket", "read", "timelineDetailV2", jsonRecord),
@@ -2124,16 +2201,29 @@ var schemaRegistry = [
   entry("trading.availableSize", "Available size", "websocket", "read", "availableSize", jsonValue),
   entry("trading.homeOrderDestination", "Home order destination and capabilities", "websocket", "read", "homeInstrumentExchange", jsonValue),
   entry("trading.orderDestinations", "Order destinations", "rest", "read", "GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE", orderDestinationsResponseSchema),
-  entry("trading.trades", "Trades", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades", normalizedArrayWrappers),
-  entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", jsonValue),
+  entry("trading.orderBookSnapshot", "Execution order-book snapshot", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades/{tradeId}/order-book-snapshot", orderBookSnapshotSchema),
+  entry("trading.tapeSnapshot", "Execution tape snapshot", "rest", "read", "GET /web-trading-gateway/api/customer/v1/trades/{tradeId}/tape-snapshot", tapeSnapshotSchema),
+  entry("trading.dailyPnl", "Daily PnL", "rest", "read", "POST /web-trading-gateway/api/customer/v1/pnl/daily", dailyPnlResponseSchema),
+  entry("trading.tape", "Last trades tape", "websocket", "read", "tape", jsonValue, { live: { sample: "stream" } }),
+  entry("trading.tradeAggregateHistory", "Trade aggregate history", "websocket", "read", "tradeAggregateHistory", jsonValue),
   entry("discovery.exchangeDetails", "Exchange details", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges-details", normalizedArrayWrappers),
   entry("discovery.exchangeSchedule", "Exchange schedule", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule", jsonRecord),
   entry("discovery.instrumentStatus", "Instrument status", "rest", "read", "GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}", jsonRecord),
-  entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", jsonValue),
-  entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", jsonValue),
-  entry("discovery.watchlists.clone", "Clone watchlist", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.rename", "Rename watchlist", "rest", "lowRiskMutation", "PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
-  entry("discovery.watchlists.delete", "Delete watchlist", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
+  entry("discovery.watchlists", "Watchlists", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists", z.union([
+    z.array(watchlistSchema),
+    z.strictObject({ watchlists: z.array(watchlistSchema) }),
+    z.strictObject({ data: z.array(watchlistSchema) })
+  ])),
+  entry("discovery.watchlists.items", "Watchlist items", "rest", "read", "GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", z.union([
+    z.array(watchlistItemSchema),
+    z.strictObject({ items: z.array(watchlistItemSchema) }),
+    z.strictObject({
+      total: z.number(),
+      items: z.array(watchlistItemSchema),
+      cursor: z.string().nullable()
+    }),
+    z.strictObject({ data: z.array(watchlistItemSchema) })
+  ])),
   entry("discovery.watchlists.addItem", "Add watchlist item", "rest", "lowRiskMutation", "POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.watchlists.removeItem", "Remove watchlist item", "rest", "lowRiskMutation", "DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}", watchlistMutationSchema, { live: { sample: "cleanup" } }),
   entry("discovery.screeners", "Screeners", "rest", "read", "GET /api-gateway/screeners/api/v2/screeners", jsonValue),
@@ -2144,6 +2234,7 @@ var schemaRegistry = [
   entry("tax.exemptionOrder", "Tax exemption order", "rest", "read", "GET /api/v1/taxes/exemptionorders", jsonValue),
   entry("tax.taxResidencies", "Tax residencies", "rest", "read", "GET /api/v1/auth/account/change/taxresidencies", jsonValue),
   entry("tax.taxResidencyCountries", "Tax residency countries", "rest", "read", "GET /api/v1/country/taxresidency", jsonValue),
+  entry("tax.accountUtilization", "Tax wrapper account utilization", "websocket", "read", "taxWrapperAccountUtilization", jsonValue),
   entry("payments.paymentMethods", "Payment methods", "rest", "read", "GET /api/v2/payment/methods", jsonValue),
   entry("payments.iban", "IBAN information", "rest", "read", "GET /api/v1/customer/relationships/detailed", ibanRelationshipsSchema)
 ];
@@ -2174,7 +2265,7 @@ function schemaCatalogMarkdown() {
     lines.push(`| \`${entry2.name}\` | \`${entry2.risk}\` | \`${entry2.transport}\` | \`${entry2.request.replaceAll("|", "\\|")}\` | ${entry2.variants?.join(", ") ?? ""} |`);
   }
   lines.push("");
-  lines.push("`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests.");
+  lines.push("`highRiskMutation` entries can move money or alter live orders. Unattended probes require explicit clock, venue-state, price-distance, non-replay, and cleanup safeguards.");
   return `${lines.join("\n")}
 `;
 }
@@ -2341,6 +2432,7 @@ var DEFAULT_ENDPOINTS = {
   "market.subscriptions": "/api-gateway/subscriptions/api/v1/subscriptions",
   "market.entitlements": "/api-gateway/subscriptions/api/v1/entitlements/topics/{topic}",
   "market.candles": "/api/v2/market-data/candles",
+  "market.bondCandles": "/api-gateway/quotes-api/v1/instruments/{assetId}.{exchangeId}/ytm/aggregateHistory",
   "market.liveFeed": "/api/v2/market-data/live-feed",
   "market.availableL2Books": "/api/v2/market-data/l2/venues",
   "market.l2OrderBook": "/api/v2/market-data/l2/orderbook"
@@ -2365,6 +2457,7 @@ var accountOperations = {
   session: endpoint("auth.session", "auth.session"),
   accountSettings: endpoint("auth.account", "auth.account"),
   personalDetails: rest("account.personalDetails", "/api/v1/customer/personal-details"),
+  appUsageConsents: rest("account.appUsageConsents", "/api/v1/customer/app-usage-data-consents"),
   relationships: {
     ...rest("account.relationships", "/api/v1/customer/relationships/detailed"),
     normalize: (raw) => normalizeAccountRelationships(raw)
@@ -2403,9 +2496,6 @@ var discoveryOperations = {
     query: ({ pageSize }) => ({ pageSize: pageSize ?? 200 }),
     normalize: identity
   },
-  cloneWatchlist: mutation("discovery.watchlists.clone", "POST", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/clone`),
-  renameWatchlist: mutation("discovery.watchlists.rename", "PUT", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, ({ name }) => ({ name })),
-  deleteWatchlist: mutation("discovery.watchlists.delete", "DELETE", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`),
   addWatchlistItem: mutation("discovery.watchlists.addItem", "POST", ({ watchlistId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, ({ instrumentId, options }) => ({ instrument_id: instrumentId, item_rank: -1, ...options })),
   removeWatchlistItem: mutation("discovery.watchlists.removeItem", "DELETE", ({ watchlistId, instrumentId }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`),
   screeners: rest("discovery.screeners", "/api-gateway/screeners/api/v2/screeners"),
@@ -2463,6 +2553,9 @@ var AccountApi = class {
   personalDetails() {
     return this.operations.executeRaw(accountOperations.personalDetails, {});
   }
+  appUsageConsents() {
+    return this.operations.executeRaw(accountOperations.appUsageConsents, {});
+  }
   relationships() {
     return this.operations.execute(accountOperations.relationships, {});
   }
@@ -2488,10 +2581,12 @@ var DocumentsApi = class {
   }
 };
 var TaxApi = class {
-  constructor(operations) {
+  constructor(operations, runtime) {
     this.operations = operations;
+    this.runtime = runtime;
   }
   operations;
+  runtime;
   taxInformation() {
     return this.rawTaxInformation();
   }
@@ -2515,6 +2610,14 @@ var TaxApi = class {
   }
   rawTaxResidencyCountries() {
     return this.operations.executeRaw(customerOperations.taxResidencyCountries, {});
+  }
+  async accountUtilization(secAccNo) {
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
+    const raw = await this.runtime.raw.query({
+      type: "taxWrapperAccountUtilization",
+      secAccNo: accountNumber
+    });
+    return this.runtime.validateRaw("tax.accountUtilization", raw);
   }
 };
 var PaymentsApi = class {
@@ -2578,24 +2681,6 @@ var DiscoveryApi = class {
   }
   rawWatchlists() {
     return this.operations.executeRaw(discoveryOperations.watchlists, {});
-  }
-  cloneWatchlist(watchlistId) {
-    return this.rawCloneWatchlist(watchlistId);
-  }
-  rawCloneWatchlist(watchlistId) {
-    return this.operations.executeRaw(discoveryOperations.cloneWatchlist, { watchlistId });
-  }
-  renameWatchlist(watchlistId, name) {
-    return this.rawRenameWatchlist(watchlistId, name);
-  }
-  rawRenameWatchlist(watchlistId, name) {
-    return this.operations.executeRaw(discoveryOperations.renameWatchlist, { watchlistId, name });
-  }
-  deleteWatchlist(watchlistId) {
-    return this.rawDeleteWatchlist(watchlistId);
-  }
-  rawDeleteWatchlist(watchlistId) {
-    return this.operations.executeRaw(discoveryOperations.deleteWatchlist, { watchlistId });
   }
   addWatchlistItem(watchlistId, instrumentId, options = {}) {
     return this.rawAddWatchlistItem(watchlistId, instrumentId, options);
@@ -2957,10 +3042,10 @@ function normalizeOrderTrade(value) {
     expiredAt: epochMillis(source.expiredAt),
     cancelledAt: epochMillis(source.canceledAt),
     rejectedAt: epochMillis(source.rejectedAt),
-    trades: Array.isArray(source.trades) ? source.trades.map(normalizeTrade2) : []
+    trades: Array.isArray(source.trades) ? source.trades.map(normalizeTrade) : []
   });
 }
-function normalizeTrade2(value) {
+function normalizeTrade(value) {
   const source = record(value);
   return compact({
     id: uuid(source.id),
@@ -3459,6 +3544,179 @@ function logWire(direction, value) {
   console.log(`[handelsrepublik] websocket:${direction}`, value);
 }
 
+// src/market-specs.ts
+var marketSubscriptionsSpec = {
+  endpoint: "market.subscriptions",
+  schemaName: "market.subscriptions",
+  normalize: (raw) => arrayPayload(raw).map(normalizeSubscription)
+};
+var marketEntitlementsSpec = {
+  endpoint: "market.entitlements",
+  schemaName: "market.entitlements",
+  pathParams: ({ topic }) => ({ topic }),
+  query: ({ options }) => ({ exchangeId: options.exchangeIds.join(",") }),
+  normalize: normalizeMarketEntitlementSet
+};
+var lightCandlesSpec = {
+  schemaName: "market.candles.light",
+  resource: lightCandleResource,
+  normalize: (raw) => arrayPayload(raw).map(normalizeCandle)
+};
+var lightCandleSeriesSpec = {
+  schemaName: "market.candles.light",
+  resource: lightCandleResource,
+  normalize: normalizeCandleSeries
+};
+var standardCandlesSpec = {
+  schemaName: "market.candles.standard",
+  resource: standardCandleResource,
+  normalize: (raw) => arrayPayload(raw).map(normalizeCandle)
+};
+var standardCandleSeriesSpec = {
+  schemaName: "market.candles.standard",
+  resource: standardCandleResource,
+  normalize: normalizeCandleSeries
+};
+var bondCandlesSpec = {
+  endpoint: "market.bondCandles",
+  schemaName: "market.candles.bond",
+  pathParams: ({ assetId, exchangeId }) => ({ assetId, exchangeId }),
+  query: ({ range, from, to }) => ({ range: range ?? rangeForDates(from, to) }),
+  normalize: (raw, params) => normalizeBondCandles(raw, params)
+};
+var bondCandleSeriesSpec = {
+  ...bondCandlesSpec,
+  normalize: (raw, params) => ({
+    ...normalizeCandleSeries(raw),
+    resolutionMs: candleResolutionMs(params.timeframe),
+    candles: normalizeBondCandles(raw, params)
+  })
+};
+var availableCandleResolutionsSpec = {
+  schemaName: "assets.get",
+  resource: (params) => ({ type: "instrument", id: params.assetId }),
+  normalize: (raw) => candleResolutionsForInstrumentType(normalizeAsset(raw).type)
+};
+var availableL2BooksSpec = {
+  schemaName: "market.availableL2Books",
+  resource: (params) => ({ type: "instrument", id: params.assetId }),
+  normalize: (raw) => normalizeL2Venues(raw)
+};
+var quoteSpec = {
+  schemaName: "market.quote",
+  resource: (params) => ({ type: "ticker", id: `${params.assetId}.${params.exchangeId}` }),
+  normalize: (raw, params) => normalizeMarketQuote(raw, params.assetId, params.exchangeId)
+};
+var liveFeedSpec = {
+  schemaName: "market.liveFeed",
+  topic: "tickerV3",
+  payload: (params) => ({
+    isin: params.assetId,
+    exchangeId: params.exchangeId,
+    unit: "EUR",
+    fields: params.fields
+  }),
+  normalize: (raw) => normalizeLiveFeedEvent(raw)
+};
+var l2OrderBookSpec = {
+  schemaName: "market.l2OrderBook",
+  topic: "L2",
+  request: (params) => ({ instrumentId: { isin: params.assetId, exchangeId: params.exchangeId } }),
+  normalize: (raw) => normalizeL2OrderBook(raw)
+};
+function lightCandleResource(params) {
+  const resolution = candleResolutionMs(params.timeframe);
+  if (![6e5, 36e5, 144e5, 864e5, 6048e5].includes(resolution)) {
+    throw new TypeError("Derivative and crypto candles support only 10m, 1h, 4h, 1d, and 1w resolutions.");
+  }
+  return {
+    type: "aggregateHistoryLightV2",
+    isin: params.assetId,
+    exchangeId: params.exchangeId,
+    resolution,
+    range: params.range,
+    from: params.from ? toIso(params.from) : void 0,
+    until: params.to ? toIso(params.to) : void 0,
+    unit: params.unit?.trim() || "EUR"
+  };
+}
+function normalizeBondCandles(raw, params) {
+  const resolution = candleResolutionMs(params.timeframe);
+  if (resolution !== 864e5 && resolution !== 6048e5) {
+    throw new TypeError("Bond candles support only 1d and 1w resolutions.");
+  }
+  const daily = arrayPayload(raw).map(normalizeCandle);
+  if (resolution === 864e5) return daily;
+  const weeks = /* @__PURE__ */ new Map();
+  for (const candle of daily) {
+    const date = new Date(candle.time);
+    const day = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() - day + 1);
+    date.setUTCHours(0, 0, 0, 0);
+    const key = date.toISOString();
+    const values = weeks.get(key) ?? [];
+    values.push(candle);
+    weeks.set(key, values);
+  }
+  return [...weeks.entries()].map(([time, candles]) => {
+    const sorted = [...candles].sort((left, right) => left.time.localeCompare(right.time));
+    const volumes = sorted.flatMap((candle) => candle.volume === void 0 ? [] : [candle.volume]);
+    return {
+      time,
+      open: sorted[0].open,
+      high: Math.max(...sorted.map((candle) => candle.high)),
+      low: Math.min(...sorted.map((candle) => candle.low)),
+      close: sorted.at(-1).close,
+      ...volumes.length ? { volume: volumes.reduce((sum, value) => sum + value, 0) } : {},
+      raw: sorted.map((candle) => candle.raw)
+    };
+  });
+}
+function standardCandleResource(params) {
+  const until = params.to ? toEpochMs(params.to) : Date.now();
+  const from = params.from ? toEpochMs(params.from) : until - rangeDurationMs(params.range ?? "1m");
+  return {
+    type: "tradeAggregateHistory",
+    isin: params.assetId,
+    exchangeId: params.exchangeId,
+    resolution: candleResolutionMs(params.timeframe),
+    from: Math.max(from, 1),
+    until: Math.max(until, 1)
+  };
+}
+function toIso(value) {
+  return value instanceof Date ? value.toISOString() : value;
+}
+function toEpochMs(value) {
+  const result = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  if (!Number.isFinite(result)) throw new TypeError(`Invalid candle date ${String(value)}.`);
+  return result;
+}
+function rangeForDates(from, to) {
+  if (!from) return "1y";
+  const duration = (to ? toEpochMs(to) : Date.now()) - toEpochMs(from);
+  if (duration <= rangeDurationMs("1d")) return "1d";
+  if (duration <= rangeDurationMs("5d")) return "5d";
+  if (duration <= rangeDurationMs("1m")) return "1m";
+  if (duration <= rangeDurationMs("3m")) return "3m";
+  if (duration <= rangeDurationMs("6m")) return "6m";
+  return "1y";
+}
+function rangeDurationMs(range) {
+  const durations = {
+    "1d": 864e5,
+    "5d": 5 * 864e5,
+    "1m": 31 * 864e5,
+    "3m": 92 * 864e5,
+    "6m": 183 * 864e5,
+    "1y": 366 * 864e5,
+    "3y": 3 * 366 * 864e5,
+    "5y": 5 * 366 * 864e5,
+    max: 10 * 366 * 864e5
+  };
+  return durations[range] ?? durations["1y"];
+}
+
 // src/raw.ts
 import WebSocket from "ws";
 var RawApi = class {
@@ -3702,14 +3960,14 @@ var TradeRepublicClient = class _TradeRepublicClient {
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
     this.orders = new OrdersApi(this.runtime);
     this.portfolio = new PortfolioApi(this.runtime);
-    this.market = new MarketApi(this.resources);
+    this.market = new MarketApi(this.runtime);
     this.timeline = new TimelineApi(this.raw, this.validateRaw);
     this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
     this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
     this.trading = new TradingApi(this.runtime);
     this.discovery = new DiscoveryApi(this.operations);
     this.documents = new DocumentsApi(this.operations);
-    this.tax = new TaxApi(this.operations);
+    this.tax = new TaxApi(this.operations, this.runtime);
     this.payments = new PaymentsApi(this.operations);
     this.web = new WebApi(this.runtime);
   }
@@ -4551,6 +4809,22 @@ var PortfolioApi = class {
       ...options
     }));
   }
+  async bondValuation(instrumentId, secAccNo, options = {}) {
+    const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
+    return validated(this.validateRaw, "portfolio.bondValuation", this.raw.query({
+      type: "bondValuationV2",
+      instrumentId: requiredString(instrumentId, "instrumentId"),
+      secAccNo: accountNumber
+    }, pickTimeoutOptions(options)));
+  }
+  async fixedSavingsValuation(instrumentId, secAccNo, options = {}) {
+    const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
+    return validated(this.validateRaw, "portfolio.fixedSavingsValuation", this.raw.query({
+      type: "fixedSavingsValuation",
+      instrumentId: requiredString(instrumentId, "instrumentId"),
+      secAccNo: accountNumber
+    }, pickTimeoutOptions(options)));
+  }
   async positionsForAccount(secAccNo, options = {}) {
     const raw = await validated(this.validateRaw, "portfolio.current", this.raw.query({ type: "compactPortfolioByTypeV2", secAccNo }, pickTimeoutOptions(options)));
     return normalizePortfolio(raw);
@@ -4595,9 +4869,11 @@ function createRawSchemaValidator(mode = true, onFailure) {
   return validateRawResponse;
 }
 var MarketApi = class {
-  constructor(resources) {
-    this.resources = resources;
+  constructor(runtime) {
+    this.runtime = runtime;
+    this.resources = runtime.resources;
   }
+  runtime;
   resources;
   subscriptions() {
     return this.resources.query(marketSubscriptionsSpec, void 0);
@@ -4610,13 +4886,19 @@ var MarketApi = class {
     return this.resources.query(marketEntitlementsSpec, { topic, options });
   }
   candleQuery(options) {
-    return new CandleQuery(this.resources, options);
+    return new CandleQuery((page) => this.candles(page), options);
   }
-  candles(options) {
-    return this.resources.query(candlesSpec, options);
+  async candles(options) {
+    const source = await this.resolveCandleSource(options);
+    if (source === "bond") return this.resources.query(bondCandlesSpec, options);
+    if (source === "light") return this.resources.query(lightCandlesSpec, options);
+    return this.resources.query(standardCandlesSpec, options);
   }
-  candleSeries(options) {
-    return this.resources.query(candleSeriesSpec, options);
+  async candleSeries(options) {
+    const source = await this.resolveCandleSource(options);
+    if (source === "bond") return this.resources.query(bondCandleSeriesSpec, options);
+    if (source === "light") return this.resources.query(lightCandleSeriesSpec, options);
+    return this.resources.query(standardCandleSeriesSpec, options);
   }
   availableCandleResolutions(options) {
     return this.resources.query(availableCandleResolutionsSpec, options);
@@ -4641,6 +4923,16 @@ var MarketApi = class {
   }
   l2OrderBook(assetId, exchangeId, options = {}) {
     return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
+  }
+  async resolveCandleSource(options) {
+    const type = options.instrumentType;
+    if (type === "bond") return "bond";
+    if (type === "crypto" || type === "derivative") return "light";
+    if (type) return "standard";
+    const resolutions = await this.availableCandleResolutions({ assetId: options.assetId });
+    if (resolutions.length === 2 && resolutions.includes("1d") && resolutions.includes("1w")) return "bond";
+    if (resolutions.length === 5 && resolutions.includes("10m") && resolutions.includes("4h")) return "light";
+    return "standard";
   }
 };
 var TimelineApi = class {
@@ -4815,17 +5107,48 @@ var TradingApi = class {
       ...query
     }));
   }
-  async trades(query = {}) {
-    return arrayPayload(await this.rawTrades(query)).map(normalizeTrade);
+  orderBookSnapshot(tradeId) {
+    return this.rawOrderBookSnapshot(tradeId);
   }
-  rawTrades(query = {}) {
-    return validated(this.validateRaw, "trading.trades", this.http.request("GET", "/web-trading-gateway/api/customer/v1/trades", void 0, query));
+  rawOrderBookSnapshot(tradeId) {
+    return validated(this.validateRaw, "trading.orderBookSnapshot", this.http.request(
+      "GET",
+      `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(requiredString(tradeId, "tradeId"))}/order-book-snapshot`
+    ));
+  }
+  tapeSnapshot(tradeId) {
+    return this.rawTapeSnapshot(tradeId);
+  }
+  rawTapeSnapshot(tradeId) {
+    return validated(this.validateRaw, "trading.tapeSnapshot", this.http.request(
+      "GET",
+      `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(requiredString(tradeId, "tradeId"))}/tape-snapshot`
+    ));
   }
   dailyPnl(items) {
     return this.rawDailyPnl(items);
   }
   rawDailyPnl(items) {
     return validated(this.validateRaw, "trading.dailyPnl", this.http.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { items }));
+  }
+  tape(isin, exchangeId, unit = "EUR") {
+    const mapperUnit = unit === "PKT" ? "PTS" : unit === "PRZ" ? "PCT" : unit;
+    return toSubscription(this.raw.subscribeResource({
+      type: "tape",
+      isin: requiredString(isin, "isin"),
+      exchangeId: requiredString(exchangeId, "exchangeId"),
+      unit: mapperUnit
+    })).map((raw) => this.validateRaw("trading.tape", raw));
+  }
+  tradeAggregateHistory(isin, exchangeId, resolution, from, until) {
+    return validated(this.validateRaw, "trading.tradeAggregateHistory", this.raw.query({
+      type: "tradeAggregateHistory",
+      isin: requiredString(isin, "isin"),
+      exchangeId: requiredString(exchangeId, "exchangeId"),
+      resolution: positiveNumber(resolution, "resolution"),
+      from: positiveNumber(from, "from"),
+      ...until === void 0 ? {} : { until: positiveNumber(until, "until") }
+    }));
   }
   resolveSecuritiesAccountNumber() {
     return this.runtime.resolveSecuritiesAccountNumber();
@@ -4937,8 +5260,11 @@ var WebApi = class {
   orderDestinations(isin, query = {}) {
     return this.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, { query });
   }
-  trades(query = {}) {
-    return this.request("GET", "/web-trading-gateway/api/customer/v1/trades", { query });
+  orderBookSnapshot(tradeId) {
+    return this.request("GET", `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/order-book-snapshot`);
+  }
+  tapeSnapshot(tradeId) {
+    return this.request("GET", `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/tape-snapshot`);
   }
   dailyPnl(items) {
     return this.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { body: { items } });
@@ -5105,7 +5431,6 @@ export {
   candleResolutionsForInstrumentType,
   classifyMapperOperation,
   collectTradeRepublicWafToken,
-  collectTradeRepublicWebContext,
   redactSession,
   schemaCatalogMarkdown,
   schemaRegistry,

@@ -21,6 +21,10 @@ export class AccountApi {
     return this.operations.executeRaw(accountOperations.personalDetails, {});
   }
 
+  appUsageConsents(): Promise<unknown> {
+    return this.operations.executeRaw(accountOperations.appUsageConsents, {});
+  }
+
   relationships(): Promise<AccountRelationship[]> {
     return this.operations.execute(accountOperations.relationships, {});
   }

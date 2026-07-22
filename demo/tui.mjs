@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import { PNG } from 'pngjs';
-import { FileSessionStore, TradeRepublicClient, collectTradeRepublicWebContext } from '../dist/index.js';
+import { FileSessionStore, TradeRepublicClient, collectTradeRepublicWafToken } from '../dist/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sessionPath = process.env.TR_SESSION_FILE || join(here, '.demo-session.json');
@@ -45,7 +45,7 @@ const state = {
   schemaWarning: '',
   client: undefined,
   browser: undefined,
-  webContext: undefined,
+  wafToken: undefined,
   session: undefined,
   reloginInFlight: false,
   sessionRecoveryInFlight: false,
@@ -773,11 +773,11 @@ async function boot() {
     state.browser = await launchBrowser();
     const stopWafLoading = startWafLoading();
     try {
-      state.webContext = await collectTradeRepublicWebContext(state.browser, {
+      state.wafToken = await collectTradeRepublicWafToken(state.browser, {
         timeoutMs: 20_000,
         settleMs: 0,
       });
-      state.client.useWebContext(state.webContext);
+      state.client.setWafToken(state.wafToken);
     } finally {
       stopWafLoading();
     }
@@ -854,7 +854,7 @@ async function validateRestoredSession() {
 async function discardSavedSession() {
   if (!state.client) return;
   await state.client.auth.clearSession().catch(() => undefined);
-  if (state.webContext) state.client.useWebContext(state.webContext);
+  if (state.wafToken) state.client.setWafToken(state.wafToken);
   state.session = undefined;
 }
 

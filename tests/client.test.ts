@@ -1470,12 +1470,17 @@ describe('TradeRepublicClient', () => {
   it('finishes the isolated reconnect lifecycle after an ambiguous mutation', async () => {
     const disconnects: unknown[] = [];
     const reconnects: unknown[] = [];
+    let resolveReconnect!: () => void;
+    const reconnected = new Promise<void>((resolve) => { resolveReconnect = resolve; });
     let submissions = 0;
     const client = TradeRepublicClient.create({
       websocketMode: 'isolated',
       websocketReconnectDelayMs: 0,
       onWebSocketDisconnect: (event) => { disconnects.push(event); },
-      onWebSocketReconnect: (event) => { reconnects.push(event); },
+      onWebSocketReconnect: (event) => {
+        reconnects.push(event);
+        resolveReconnect();
+      },
       websocketFactory: () => {
         const socket = new FakeSocket((payload) => {
           if (payload.type !== 'simpleCreateOrder') return;
@@ -1490,8 +1495,11 @@ describe('TradeRepublicClient', () => {
       instrumentId: 'US0378331005', exchangeId: 'LSX', side: 'buy', mode: 'market', size: 1,
       lastClientPrice: 201.5, clientProcessId: 'isolated-process-1', secAccNo: '0000000000',
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
     const result = await pending;
+    await Promise.race([
+      reconnected,
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('timed out waiting for isolated reconnect')), 1_000)),
+    ]);
 
     expect(result.status).toBe('outcomeUnknown');
     expect(submissions).toBe(1);
@@ -1659,6 +1667,45 @@ describe('TradeRepublicClient', () => {
     expect(parseSubPayload(sockets[7]?.sent[1])).toEqual({ type: 'priceForOrderV2', unit: 'EUR', isin: 'US1', exchangeId: 'LSX', side: 'buy' });
   });
 
+  it('exposes unique app-consent, valuation, tape, aggregate, and tax-wrapper reads', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const sockets: FakeSocket[] = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetchSequence(calls, [jsonResponse({ consents: [] })]),
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          if (payload.type === 'bondValuationV2') socket.emit('message', `${id} A ${JSON.stringify({ value: 100 })}`);
+          if (payload.type === 'fixedSavingsValuation') socket.emit('message', `${id} A ${JSON.stringify({ value: 101 })}`);
+          if (payload.type === 'taxWrapperAccountUtilization') socket.emit('message', `${id} A ${JSON.stringify({ utilized: 1 })}`);
+          if (payload.type === 'tradeAggregateHistory') socket.emit('message', `${id} A ${JSON.stringify({ aggregates: [] })}`);
+          if (payload.type === 'tape') socket.emit('message', `${id} A ${JSON.stringify({ trades: [] })}`);
+        });
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    await expect(client.account.appUsageConsents()).resolves.toEqual({ consents: [] });
+    await expect(client.portfolio.bondValuation('DE1', '0000000001')).resolves.toEqual({ value: 100 });
+    await expect(client.portfolio.fixedSavingsValuation('DE1', '0000000001')).resolves.toEqual({ value: 101 });
+    await expect(client.tax.accountUtilization('0000000001')).resolves.toEqual({ utilized: 1 });
+    await expect(client.trading.tradeAggregateHistory('US1', 'LSX', 60_000, 1, 2)).resolves.toEqual({ aggregates: [] });
+    const tape = client.trading.tape('US1', 'LSX');
+    const event = await tape[Symbol.asyncIterator]().next();
+    expect(event).toEqual({ done: false, value: { trades: [] } });
+    tape.close();
+
+    expect(new URL(calls[0]?.url ?? 'https://invalid.local/').pathname).toBe('/api/v1/customer/app-usage-data-consents');
+    const payloads = sockets.map((socket) => parseSubPayload(socket.sent[1]));
+    assert.deepEqual(payloads, [
+      { type: 'bondValuationV2', instrumentId: 'DE1', secAccNo: '0000000001' },
+      { type: 'fixedSavingsValuation', instrumentId: 'DE1', secAccNo: '0000000001' },
+      { type: 'taxWrapperAccountUtilization', secAccNo: '0000000001' },
+      { type: 'tradeAggregateHistory', isin: 'US1', exchangeId: 'LSX', resolution: 60_000, from: 1, until: 2 },
+      { type: 'tape', isin: 'US1', exchangeId: 'LSX', unit: 'EUR' },
+    ]);
+  });
+
   it('exposes REST-backed discovery, account, docs, tax, payment, and trading APIs', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
@@ -1675,8 +1722,19 @@ describe('TradeRepublicClient', () => {
           preferredMarketDataProvider: 'LSX',
           preferredOrderDestination: 'LSX',
         }),
-        jsonResponse({ trades: [{ tradeId: 't1', isin: 'US1', amount: { value: '12', currency: 'EUR' } }] }),
-        jsonResponse({ pnl: 1 }),
+        jsonResponse({ priceLevels: { bidLevels: [{ price: 10, qty: 2 }], askLevels: [{ price: 11, qty: 3 }] } }),
+        jsonResponse({ trades: [{ timestamp: '2026-07-22T10:00:00Z', price: { value: 10.5, currency: 'EUR' }, size: 1 }] }),
+        jsonResponse([{
+          currentQty: 1,
+          day: '2026-07-22',
+          instrumentId: 'US1',
+          intradayOpenCost: 0,
+          realizedBase: 0,
+          secAccNo: '0000000001',
+          sodOpenQty: 1,
+          sodQty: 1,
+          sodSoldQty: 0,
+        }]),
         jsonResponse({ account: true }),
         jsonResponse({ name: 'Example' }),
         jsonResponse({
@@ -1736,10 +1794,15 @@ describe('TradeRepublicClient', () => {
     await expect(client.trading.orderDestinations('US1', { side: 'BUY' })).resolves.toEqual([
       expect.objectContaining({ id: 'LSX', name: 'Lang & Schwarz' }),
     ]);
-    await expect(client.trading.trades({ page: 1 })).resolves.toEqual([
-      expect.objectContaining({ id: 't1', isin: 'US1', amount: 12, currency: 'EUR' }),
-    ]);
-    await expect(client.trading.dailyPnl([{ id: 'US1' }])).resolves.toEqual({ pnl: 1 });
+    await expect(client.trading.orderBookSnapshot('trade/1')).resolves.toEqual({
+      priceLevels: { bidLevels: [{ price: 10, qty: 2 }], askLevels: [{ price: 11, qty: 3 }] },
+    });
+    await expect(client.trading.tapeSnapshot('trade/1')).resolves.toEqual({
+      trades: [{ timestamp: '2026-07-22T10:00:00Z', price: { value: 10.5, currency: 'EUR' }, size: 1 }],
+    });
+    await expect(client.trading.dailyPnl([{
+      secAccNo: '0000000001', instrumentId: 'US1', day: '2026-07-22', quantity: 1,
+    }])).resolves.toEqual([expect.objectContaining({ instrumentId: 'US1' })]);
     await expect(client.account.accountSettings()).resolves.toEqual({ account: true });
     await expect(client.account.personalDetails()).resolves.toEqual({ name: 'Example' });
     await expect(client.account.relationships()).resolves.toEqual([
@@ -1793,7 +1856,8 @@ describe('TradeRepublicClient', () => {
       '/api-gateway/screeners/api/v2/screeners/options',
       '/api-gateway/pro-trading/api/v1/user-preferences',
       '/api-gateway/order-router/api/v2/instruments/US1/destinations',
-      '/web-trading-gateway/api/customer/v1/trades',
+      '/web-trading-gateway/api/customer/v1/trades/trade%2F1/order-book-snapshot',
+      '/web-trading-gateway/api/customer/v1/trades/trade%2F1/tape-snapshot',
       '/web-trading-gateway/api/customer/v1/pnl/daily',
       '/api/v2/auth/account',
       '/api/v1/customer/personal-details',
@@ -1809,9 +1873,10 @@ describe('TradeRepublicClient', () => {
     ]);
     expect(new URL(calls[7]?.url ?? 'https://invalid.local/').searchParams.get('side')).toBe('BUY');
     expect(new URL(calls[7]?.url ?? 'https://invalid.local/').searchParams.get('jurisdiction')).toBe('DE');
-    expect(new URL(calls[8]?.url ?? 'https://invalid.local/').searchParams.get('page')).toBe('1');
-    expect(calls[9]?.init.method).toBe('POST');
-    expect(calls[9]?.init.body).toBe(JSON.stringify({ items: [{ id: 'US1' }] }));
+    expect(calls[10]?.init.method).toBe('POST');
+    expect(calls[10]?.init.body).toBe(JSON.stringify({
+      items: [{ secAccNo: '0000000001', instrumentId: 'US1', day: '2026-07-22', quantity: 1 }],
+    }));
   });
 
   it('exposes low-risk price alarm mapper mutations', async () => {
@@ -1876,30 +1941,21 @@ describe('TradeRepublicClient', () => {
     client.close();
   });
 
-  it('exposes low-risk watchlist REST mutations', async () => {
+  it('exposes supported default-watchlist item mutations', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
       fetch: mockFetchSequence(calls, [
-        jsonResponse({ id: 'watchlist-1', name: 'sdk-test-watchlist-copy' }),
-        jsonResponse({ id: 'watchlist-1', name: 'sdk-test-watchlist-renamed' }),
         jsonResponse({ id: 'watchlist-1', instrumentId: 'US1' }),
-        new Response(null, { status: 204 }),
         new Response(null, { status: 204 }),
       ]),
     });
 
-    await expect(client.discovery.cloneWatchlist('source-watchlist')).resolves.toEqual({ id: 'watchlist-1', name: 'sdk-test-watchlist-copy' });
-    await expect(client.discovery.renameWatchlist('watchlist-1', 'sdk-test-watchlist-renamed')).resolves.toEqual({ id: 'watchlist-1', name: 'sdk-test-watchlist-renamed' });
     await expect(client.discovery.addWatchlistItem('watchlist-1', 'US1')).resolves.toEqual({ id: 'watchlist-1', instrumentId: 'US1' });
     await expect(client.discovery.removeWatchlistItem('watchlist-1', 'US1')).resolves.toEqual(undefined);
-    await expect(client.discovery.deleteWatchlist('watchlist-1')).resolves.toEqual(undefined);
 
     expect(calls.map((call) => [call.init.method, new URL(call.url).pathname, call.init.body])).toEqual([
-      ['POST', '/api-gateway/watchlists/api/v2/watchlists/source-watchlist/clone', undefined],
-      ['PUT', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1', JSON.stringify({ name: 'sdk-test-watchlist-renamed' })],
       ['POST', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1/items', JSON.stringify({ instrument_id: 'US1', item_rank: -1 })],
       ['DELETE', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1/items/US1', undefined],
-      ['DELETE', '/api-gateway/watchlists/api/v2/watchlists/watchlist-1', undefined],
     ]);
   });
 
@@ -1920,11 +1976,80 @@ describe('TradeRepublicClient', () => {
       assetId: 'US1',
       exchangeId: 'LSX',
       timeframe: '1h',
+      instrumentType: 'derivative',
       from: '2026-07-01T00:00:00.000Z',
     })).resolves.toEqual([
       expect.objectContaining({ time: '2026-07-02T12:00:00.000Z', open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }),
     ]);
     expect(sockets[0]?.sent[0]).toMatch(/^connect 34 /);
+  });
+
+  it('routes stock candles through trade aggregate history', async () => {
+    const payloads: Array<Record<string, unknown>> = [];
+    const client = TradeRepublicClient.create({
+      websocketFactory: () => {
+        const socket = new FakeSocket((payload, id) => {
+          payloads.push(payload);
+          socket.emit('message', `${id} A ${JSON.stringify({
+            aggregates: [{ time: 1_784_294_157_408, open: 200, high: 202, low: 199, close: 201, volume: 10 }],
+            resolution: 60_000,
+            sourceCurrency: 'EUR',
+          })}`);
+        });
+        return socket;
+      },
+    });
+
+    await expect(client.market.candles({
+      assetId: 'US0378331005',
+      exchangeId: 'LSX',
+      timeframe: '1m',
+      instrumentType: 'stock',
+      from: '2026-07-01T00:00:00.000Z',
+      to: '2026-07-02T00:00:00.000Z',
+    })).resolves.toEqual([
+      expect.objectContaining({ open: 200, high: 202, low: 199, close: 201, volume: 10 }),
+    ]);
+    expect(payloads).toEqual([
+      expect.objectContaining({
+        type: 'tradeAggregateHistory',
+        isin: 'US0378331005',
+        exchangeId: 'LSX',
+        resolution: 60_000,
+      }),
+    ]);
+  });
+
+  it('routes bond candles through yield history and aggregates calendar weeks', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const client = TradeRepublicClient.create({
+      fetch: mockFetch(calls, {
+        aggregates: [
+          { time: '2026-07-20T00:00:00.000Z', open: 3, high: 4, low: 2, close: 3.5, adjValue: 3.5 },
+          { time: '2026-07-21T00:00:00.000Z', open: 3.5, high: 5, low: 3, close: 4.5, adjValue: 4.5 },
+          { time: '2026-07-27T00:00:00.000Z', open: 4.5, high: 4.75, low: 4, close: 4.25, adjValue: 4.25 },
+        ],
+        resolution: 86_400_000,
+        sourceCurrency: null,
+      }),
+    });
+
+    await expect(client.market.candles({
+      assetId: 'DE0001102622',
+      exchangeId: 'LSX',
+      timeframe: '1w',
+      instrumentType: 'bond',
+    })).resolves.toEqual([
+      expect.objectContaining({
+        time: '2026-07-20T00:00:00.000Z', open: 3, high: 5, low: 2, close: 4.5,
+      }),
+      expect.objectContaining({
+        time: '2026-07-27T00:00:00.000Z', open: 4.5, high: 4.75, low: 4, close: 4.25,
+      }),
+    ]);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api-gateway/quotes-api/v1/instruments/DE0001102622.LSX/ytm/aggregateHistory');
+    expect(url.searchParams.get('range')).toBe('1y');
   });
 });
 

@@ -1,7 +1,7 @@
 import { ZodType } from 'zod';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.entitlements' | 'market.candles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
+type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.entitlements' | 'market.candles' | 'market.bondCandles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
 type EndpointMap = Partial<Record<EndpointKey, string>>;
 type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
 interface RawSchemaValidationFailure {
@@ -514,15 +514,43 @@ interface OrderPriceQuote {
     time?: string | undefined;
     raw: unknown;
 }
-interface Trade {
-    id: string;
-    isin?: string | undefined;
-    side?: string | undefined;
-    quantity?: number | undefined;
-    amount?: number | undefined;
-    currency?: string | undefined;
-    executedAt?: string | undefined;
-    raw: unknown;
+interface ExecutionOrderBookSnapshotLevel {
+    price: number;
+    qty: number;
+}
+interface ExecutionOrderBookSnapshot {
+    priceLevels: {
+        bidLevels: ExecutionOrderBookSnapshotLevel[];
+        askLevels: ExecutionOrderBookSnapshotLevel[];
+    };
+}
+interface ExecutionTapeSnapshotTrade {
+    timestamp: string | number;
+    price: {
+        value: string | number;
+        currency: string;
+    };
+    size: number;
+}
+interface ExecutionTapeSnapshot {
+    trades: ExecutionTapeSnapshotTrade[];
+}
+interface DailyPnlRequestItem {
+    secAccNo: string;
+    instrumentId: string;
+    day: string;
+    quantity: number;
+}
+interface DailyPnlResult {
+    currentQty: number;
+    day: string;
+    instrumentId: string;
+    intradayOpenCost: number;
+    realizedBase: number;
+    secAccNo: string;
+    sodOpenQty: number;
+    sodQty: number;
+    sodSoldQty: number;
 }
 interface ExchangeDetails {
     id: string;
@@ -555,6 +583,7 @@ interface CandleDownloadOptions {
     assetId: string;
     exchangeId: string;
     timeframe: CandleResolution;
+    instrumentType?: AssetSearchType | undefined;
     range?: CandleRange | undefined;
     from?: string | Date | undefined;
     to?: string | Date | undefined;
@@ -776,6 +805,43 @@ declare class AuthApi {
     private pollLoginProgress;
 }
 
+declare class CandleQuery {
+    private readonly fetchPage;
+    private readonly options;
+    constructor(fetchPage: (options: CandleDownloadOptions) => Promise<Candle[]>, options: CandleDownloadOptions);
+    fetch(): Promise<Candle[]>;
+    pages(options?: {
+        maxCandlesPerRequest?: number;
+    }): AsyncIterable<Candle[]>;
+    download(options?: {
+        maxCandlesPerRequest?: number;
+    }): Promise<Candle[]>;
+}
+
+interface OperationBase<TParams, TResult> {
+    name: string;
+    schemaName?: string | undefined;
+    normalize: (raw: unknown, params: TParams) => TResult;
+}
+interface RestOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
+    transport: 'rest';
+    method?: HttpMethod | undefined;
+    path?: string | ((params: TParams) => string) | undefined;
+    endpoint?: EndpointKey | undefined;
+    pathParams?: ((params: TParams) => Record<string, string | number>) | undefined;
+    query?: ((params: TParams) => Record<string, string | number | boolean | undefined>) | undefined;
+    body?: ((params: TParams) => unknown) | undefined;
+}
+declare class OperationClient {
+    private readonly http;
+    private readonly validateRaw;
+    private readonly endpoints?;
+    constructor(http: HttpClient, validateRaw: RawSchemaValidator, endpoints?: EndpointResolver | undefined);
+    execute<TParams, TResult>(operation: RestOperation<TParams, TResult>, params: TParams): Promise<TResult>;
+    executeRaw<TParams, TResult>(operation: RestOperation<TParams, TResult>, params: TParams): Promise<unknown>;
+    private resolvePath;
+}
+
 declare class TradeRepublicError extends Error {
     readonly cause?: unknown | undefined;
     constructor(message: string, cause?: unknown | undefined);
@@ -895,43 +961,6 @@ declare class ResourceClient {
     protobufStream<TParams, TResult>(spec: ProtobufStreamSpec<TParams, TResult>, params: TParams): Subscription<TResult>;
 }
 
-declare class CandleQuery {
-    private readonly resources;
-    private readonly options;
-    constructor(resources: ResourceClient, options: CandleDownloadOptions);
-    fetch(): Promise<Candle[]>;
-    pages(options?: {
-        maxCandlesPerRequest?: number;
-    }): AsyncIterable<Candle[]>;
-    download(options?: {
-        maxCandlesPerRequest?: number;
-    }): Promise<Candle[]>;
-}
-
-interface OperationBase<TParams, TResult> {
-    name: string;
-    schemaName?: string | undefined;
-    normalize: (raw: unknown, params: TParams) => TResult;
-}
-interface RestOperation<TParams, TResult> extends OperationBase<TParams, TResult> {
-    transport: 'rest';
-    method?: HttpMethod | undefined;
-    path?: string | ((params: TParams) => string) | undefined;
-    endpoint?: EndpointKey | undefined;
-    pathParams?: ((params: TParams) => Record<string, string | number>) | undefined;
-    query?: ((params: TParams) => Record<string, string | number | boolean | undefined>) | undefined;
-    body?: ((params: TParams) => unknown) | undefined;
-}
-declare class OperationClient {
-    private readonly http;
-    private readonly validateRaw;
-    private readonly endpoints?;
-    constructor(http: HttpClient, validateRaw: RawSchemaValidator, endpoints?: EndpointResolver | undefined);
-    execute<TParams, TResult>(operation: RestOperation<TParams, TResult>, params: TParams): Promise<TResult>;
-    executeRaw<TParams, TResult>(operation: RestOperation<TParams, TResult>, params: TParams): Promise<unknown>;
-    private resolvePath;
-}
-
 interface AccountIdentityAdapter {
     get(): string | undefined;
     set(value: string): void;
@@ -959,6 +988,7 @@ declare class AccountApi {
     session(): Promise<unknown>;
     accountSettings(): Promise<unknown>;
     personalDetails(): Promise<unknown>;
+    appUsageConsents(): Promise<unknown>;
     relationships(): Promise<AccountRelationship[]>;
     rawRelationships(): Promise<unknown>;
     cardsHome(): Promise<unknown>;
@@ -972,7 +1002,8 @@ declare class DocumentsApi {
 }
 declare class TaxApi {
     private readonly operations;
-    constructor(operations: OperationClient);
+    private readonly runtime;
+    constructor(operations: OperationClient, runtime: ClientRuntime);
     taxInformation(): Promise<unknown>;
     rawTaxInformation(): Promise<unknown>;
     exemptionOrder(): Promise<unknown>;
@@ -981,6 +1012,7 @@ declare class TaxApi {
     rawTaxResidencies(): Promise<unknown>;
     taxResidencyCountries(): Promise<unknown>;
     rawTaxResidencyCountries(): Promise<unknown>;
+    accountUtilization(secAccNo?: string): Promise<unknown>;
 }
 declare class PaymentsApi {
     private readonly operations;
@@ -1008,12 +1040,6 @@ declare class DiscoveryApi {
         pageSize?: number;
     }): Promise<unknown>;
     rawWatchlists(): Promise<unknown>;
-    cloneWatchlist(watchlistId: string): Promise<unknown>;
-    rawCloneWatchlist(watchlistId: string): Promise<unknown>;
-    renameWatchlist(watchlistId: string, name: string): Promise<unknown>;
-    rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown>;
-    deleteWatchlist(watchlistId: string): Promise<unknown>;
-    rawDeleteWatchlist(watchlistId: string): Promise<unknown>;
     addWatchlistItem(watchlistId: string, instrumentId: string, options?: Record<string, unknown>): Promise<unknown>;
     rawAddWatchlistItem(watchlistId: string, instrumentId: string, options?: Record<string, unknown>): Promise<unknown>;
     removeWatchlistItem(watchlistId: string, instrumentId: string): Promise<unknown>;
@@ -1030,7 +1056,7 @@ interface TradeRepublicBrowserLike {
     newContext(options?: TradeRepublicBrowserContextOptions): Promise<TradeRepublicBrowserContextLike>;
 }
 type TradeRepublicBrowserContextOptions = Record<string, unknown>;
-interface CollectTradeRepublicWebContextOptions {
+interface CollectTradeRepublicWafTokenOptions {
     appUrl?: string | undefined;
     apiUrl?: string | undefined;
     contextOptions?: TradeRepublicBrowserContextOptions | undefined;
@@ -1038,7 +1064,6 @@ interface CollectTradeRepublicWebContextOptions {
     settleMs?: number | undefined;
     waitUntil?: string | undefined;
 }
-type CollectTradeRepublicWafTokenOptions = CollectTradeRepublicWebContextOptions;
 interface TradeRepublicBrowserContextLike {
     newPage(): Promise<TradeRepublicPageLike>;
     cookies(urls?: string | string[]): Promise<TradeRepublicCookieLike[]>;
@@ -1068,7 +1093,6 @@ interface TradeRepublicCookieLike {
     path?: string | undefined;
     expires?: number | undefined;
 }
-declare function collectTradeRepublicWebContext(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWebContextOptions): Promise<TradeRepublicWebContext>;
 declare function collectTradeRepublicWafToken(browser: TradeRepublicBrowserLike, options?: CollectTradeRepublicWafTokenOptions): Promise<TradeRepublicWafToken>;
 
 interface TradeRepublicBrowserLaunchOptions {
@@ -1210,14 +1234,21 @@ declare class PortfolioApi {
         currency?: string;
         instrumentCategories?: string;
     }): Promise<unknown>;
+    bondValuation(instrumentId: string, secAccNo?: string, options?: {
+        timeoutMs?: number;
+    }): Promise<unknown>;
+    fixedSavingsValuation(instrumentId: string, secAccNo?: string, options?: {
+        timeoutMs?: number;
+    }): Promise<unknown>;
     positionsForAccount(secAccNo: string, options?: {
         timeoutMs?: number;
     }): Promise<Portfolio>;
     private resolveSecuritiesAccountNumber;
 }
 declare class MarketApi {
+    private readonly runtime;
     private readonly resources;
-    constructor(resources: ResourceClient);
+    constructor(runtime: ClientRuntime);
     subscriptions(): Promise<MarketSubscription[]>;
     entitlements(topic: MarketDataTopic, options: MarketEntitlementsOptions): Promise<MarketEntitlementSet>;
     candleQuery(options: CandleDownloadOptions): CandleQuery;
@@ -1233,6 +1264,7 @@ declare class MarketApi {
     availableL2Books(assetId: string): Promise<L2Venue[]>;
     subscribeL2OrderBook(options: L2OrderBookOptions): Subscription<L2OrderBook>;
     l2OrderBook(assetId: string, exchangeId: string, options?: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'>): Subscription<L2OrderBook>;
+    private resolveCandleSource;
 }
 declare class TimelineApi {
     private readonly raw;
@@ -1360,10 +1392,14 @@ declare class TradingApi {
         timeoutMs?: number;
     }): Promise<unknown>;
     rawOrderDestinations(isin: string, query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-    trades(query?: Record<string, string | number | boolean | undefined>): Promise<Trade[]>;
-    rawTrades(query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-    dailyPnl(items: unknown[]): Promise<unknown>;
-    rawDailyPnl(items: unknown[]): Promise<unknown>;
+    orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot>;
+    rawOrderBookSnapshot(tradeId: string): Promise<unknown>;
+    tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot>;
+    rawTapeSnapshot(tradeId: string): Promise<unknown>;
+    dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]>;
+    rawDailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]>;
+    tape(isin: string, exchangeId: string, unit?: string): Subscription<unknown>;
+    tradeAggregateHistory(isin: string, exchangeId: string, resolution: number, from: number, until?: number): Promise<unknown>;
     private resolveSecuritiesAccountNumber;
 }
 declare class WebApi {
@@ -1421,8 +1457,9 @@ declare class WebApi {
     exchangeSchedule(exchange: string): Promise<unknown>;
     instrumentStatus(isin: string, exchange: string): Promise<unknown>;
     orderDestinations(isin: string, query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-    trades(query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-    dailyPnl(items: unknown[]): Promise<unknown>;
+    orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot>;
+    tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot>;
+    dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]>;
     documents(): Promise<unknown>;
     personalDetails(): Promise<unknown>;
     relationships(): Promise<unknown>;
@@ -1479,7 +1516,7 @@ interface TradeRepublicSchemaEntry {
         sample?: 'once' | 'stream' | 'cleanup' | undefined;
     } | undefined;
 }
-declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
+declare const schemaRegistry: readonly [TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry, TradeRepublicSchemaEntry];
 declare function validateRawResponse(schemaName: string, value: unknown): unknown;
 declare function schemaCatalogMarkdown(): string;
 
@@ -1525,4 +1562,4 @@ declare const MARKET_DATA_STREAM_TOPICS: {
 type MarketDataStream = keyof typeof MARKET_DATA_STREAM_TOPICS;
 declare function venueDisplayName(exchangeId: string): string;
 
-export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafTokenOptions, type CollectTradeRepublicWebContextOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstantLoginChallengeHandler, type InstrumentNewsItem, type InstrumentStatus, type KnownVenueId, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type LoginWithPinOptions, type LoginWithQrOptions, MARKET_DATA_STREAM_TOPICS, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataStream, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type PollLoginOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StartLoginWithPinOptions, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type Trade, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafTokenOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafToken, type TradeRepublicWebContext, VENUE_DISPLAY_NAMES, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafToken, collectTradeRepublicWebContext, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse, venueDisplayName };
+export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafTokenOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type DailyPnlRequestItem, type DailyPnlResult, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, type ExecutionOrderBookSnapshot, type ExecutionOrderBookSnapshotLevel, type ExecutionTapeSnapshot, type ExecutionTapeSnapshotTrade, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstantLoginChallengeHandler, type InstrumentNewsItem, type InstrumentStatus, type KnownVenueId, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type LoginWithPinOptions, type LoginWithQrOptions, MARKET_DATA_STREAM_TOPICS, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataStream, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type PollLoginOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StartLoginWithPinOptions, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafTokenOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafToken, type TradeRepublicWebContext, VENUE_DISPLAY_NAMES, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafToken, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse, venueDisplayName };

@@ -21,7 +21,7 @@ export {
   candleResolutionMs,
   candleResolutionsForInstrumentType,
 } from './candle-resolutions.js';
-export { collectTradeRepublicWafToken, collectTradeRepublicWebContext } from './waf.js';
+export { collectTradeRepublicWafToken } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
 export { MapperRequestError } from './mapper-connection.js';
 export { classifyMapperOperation } from './raw.js';
@@ -35,7 +35,6 @@ export type { MapperDeliveryState, MapperRequestFailureReason } from './mapper-c
 export type { RawOperationKind, RawQueryOptions, RawSubscription, RawSubscriptionOptions } from './raw.js';
 export type { SchemaRisk, SchemaTransport, TradeRepublicSchemaEntry } from './schemas/registry.js';
 export type {
-  CollectTradeRepublicWebContextOptions,
   CollectTradeRepublicWafTokenOptions,
   TradeRepublicBrowserContextLike,
   TradeRepublicBrowserLike,
@@ -59,7 +58,13 @@ export type {
   CandleTimeframe,
   CashSummary,
   Derivative,
+  DailyPnlRequestItem,
+  DailyPnlResult,
   EndpointMap,
+  ExecutionOrderBookSnapshot,
+  ExecutionOrderBookSnapshotLevel,
+  ExecutionTapeSnapshot,
+  ExecutionTapeSnapshotTrade,
   ExchangeDetails,
   ExchangeSchedule,
   HttpMethod,
@@ -137,7 +142,6 @@ export type {
   TimelineDetail,
   TimelineDetailKind,
   TimelineItem,
-  Trade,
   TradeRepublicClientOptions,
   TradeRepublicDefaultHeaders,
   TradeRepublicDeviceInfo,

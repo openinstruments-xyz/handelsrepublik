@@ -53,30 +53,6 @@ export class DiscoveryApi {
     return this.operations.executeRaw(discoveryOperations.watchlists, {});
   }
 
-  cloneWatchlist(watchlistId: string): Promise<unknown> {
-    return this.rawCloneWatchlist(watchlistId);
-  }
-
-  rawCloneWatchlist(watchlistId: string): Promise<unknown> {
-    return this.operations.executeRaw(discoveryOperations.cloneWatchlist, { watchlistId });
-  }
-
-  renameWatchlist(watchlistId: string, name: string): Promise<unknown> {
-    return this.rawRenameWatchlist(watchlistId, name);
-  }
-
-  rawRenameWatchlist(watchlistId: string, name: string): Promise<unknown> {
-    return this.operations.executeRaw(discoveryOperations.renameWatchlist, { watchlistId, name });
-  }
-
-  deleteWatchlist(watchlistId: string): Promise<unknown> {
-    return this.rawDeleteWatchlist(watchlistId);
-  }
-
-  rawDeleteWatchlist(watchlistId: string): Promise<unknown> {
-    return this.operations.executeRaw(discoveryOperations.deleteWatchlist, { watchlistId });
-  }
-
   addWatchlistItem(watchlistId: string, instrumentId: string, options: Record<string, unknown> = {}): Promise<unknown> {
     return this.rawAddWatchlistItem(watchlistId, instrumentId, options);
   }

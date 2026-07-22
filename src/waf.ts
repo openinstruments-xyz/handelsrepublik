@@ -6,7 +6,7 @@ export interface TradeRepublicBrowserLike {
 
 export type TradeRepublicBrowserContextOptions = Record<string, unknown>;
 
-export interface CollectTradeRepublicWebContextOptions {
+export interface CollectTradeRepublicWafTokenOptions {
   appUrl?: string | undefined;
   apiUrl?: string | undefined;
   contextOptions?: TradeRepublicBrowserContextOptions | undefined;
@@ -14,8 +14,6 @@ export interface CollectTradeRepublicWebContextOptions {
   settleMs?: number | undefined;
   waitUntil?: string | undefined;
 }
-
-export type CollectTradeRepublicWafTokenOptions = CollectTradeRepublicWebContextOptions;
 
 export interface TradeRepublicBrowserContextLike {
   newPage(): Promise<TradeRepublicPageLike>;
@@ -61,9 +59,9 @@ const RELEVANT_HEADER_NAMES = new Set([
   'x-tr-platform',
 ]);
 
-export async function collectTradeRepublicWebContext(
+async function collectTradeRepublicBrowserContext(
   browser: TradeRepublicBrowserLike,
-  options: CollectTradeRepublicWebContextOptions = {},
+  options: CollectTradeRepublicWafTokenOptions = {},
 ): Promise<TradeRepublicWebContext> {
   const appUrl = options.appUrl ?? DEFAULT_APP_URL;
   const apiUrl = options.apiUrl ?? DEFAULT_API_URL;
@@ -103,7 +101,7 @@ export async function collectTradeRepublicWafToken(
   browser: TradeRepublicBrowserLike,
   options: CollectTradeRepublicWafTokenOptions = {},
 ): Promise<TradeRepublicWafToken> {
-  return toTradeRepublicWafToken(await collectTradeRepublicWebContext(browser, options));
+  return toTradeRepublicWafToken(await collectTradeRepublicBrowserContext(browser, options));
 }
 
 export function toTradeRepublicWafToken(context: TradeRepublicWebContext): TradeRepublicWafToken {

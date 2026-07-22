@@ -22,6 +22,7 @@ export type EndpointKey =
   | 'market.subscriptions'
   | 'market.entitlements'
   | 'market.candles'
+  | 'market.bondCandles'
   | 'market.liveFeed'
   | 'market.availableL2Books'
   | 'market.l2OrderBook';
@@ -647,15 +648,48 @@ export interface OrderPriceQuote {
   raw: unknown;
 }
 
-export interface Trade {
-  id: string;
-  isin?: string | undefined;
-  side?: string | undefined;
-  quantity?: number | undefined;
-  amount?: number | undefined;
-  currency?: string | undefined;
-  executedAt?: string | undefined;
-  raw: unknown;
+export interface ExecutionOrderBookSnapshotLevel {
+  price: number;
+  qty: number;
+}
+
+export interface ExecutionOrderBookSnapshot {
+  priceLevels: {
+    bidLevels: ExecutionOrderBookSnapshotLevel[];
+    askLevels: ExecutionOrderBookSnapshotLevel[];
+  };
+}
+
+export interface ExecutionTapeSnapshotTrade {
+  timestamp: string | number;
+  price: {
+    value: string | number;
+    currency: string;
+  };
+  size: number;
+}
+
+export interface ExecutionTapeSnapshot {
+  trades: ExecutionTapeSnapshotTrade[];
+}
+
+export interface DailyPnlRequestItem {
+  secAccNo: string;
+  instrumentId: string;
+  day: string;
+  quantity: number;
+}
+
+export interface DailyPnlResult {
+  currentQty: number;
+  day: string;
+  instrumentId: string;
+  intradayOpenCost: number;
+  realizedBase: number;
+  secAccNo: string;
+  sodOpenQty: number;
+  sodQty: number;
+  sodSoldQty: number;
 }
 
 export interface ExchangeDetails {
@@ -709,6 +743,7 @@ export interface CandleDownloadOptions {
   assetId: string;
   exchangeId: string;
   timeframe: CandleResolution;
+  instrumentType?: AssetSearchType | undefined;
   range?: CandleRange | undefined;
   from?: string | Date | undefined;
   to?: string | Date | undefined;

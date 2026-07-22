@@ -28,6 +28,7 @@ describe('market abstractions', () => {
       assetId: 'US1',
       exchangeId: 'LSX',
       timeframe: '1h',
+      instrumentType: 'derivative',
       from: '2026-07-02T00:00:00.000Z',
       to: '2026-07-02T03:00:00.000Z',
     }, { maxCandlesPerRequest: 2 });

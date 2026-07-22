@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
 import qrcodeTerminal from 'qrcode-terminal';
-import { collectTradeRepublicWebContext, FileSessionStore, TradeRepublicClient } from '../dist/index.js';
+import { collectTradeRepublicWafToken, FileSessionStore, TradeRepublicClient } from '../dist/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sessionPath = process.env.TR_SESSION_FILE || join(here, '.demo-session.json');
@@ -109,7 +109,8 @@ const helperSignatures = new Map([
   ['exchangeSchedule', 'exchangeSchedule(exchange?: string)'],
   ['instrumentStatus', 'instrumentStatus(isin?: string, exchange?: string)'],
   ['orderDestinations', 'orderDestinations(isin?: string, query?: object)'],
-  ['trades', 'trades(query?: object)'],
+  ['orderBookSnapshot', 'orderBookSnapshot(tradeId: string)'],
+  ['tapeSnapshot', 'tapeSnapshot(tradeId: string)'],
   ['dailyPnl', 'dailyPnl(items?: unknown[])'],
   ['documents', 'documents()'],
   ['personalDetails', 'personalDetails()'],
@@ -216,15 +217,16 @@ async function ensureLoginContext(options = {}) {
 
   const browser = await launchBrowserForLoginContext();
   try {
-    console.log(`Collecting Trade Republic web context (${missingContext.join(', ')} missing)...`);
-    const webContext = await collectTradeRepublicWebContext(browser, {
+    console.log(`Collecting Trade Republic WAF token (${missingContext.join(', ')} missing)...`);
+    const wafToken = await collectTradeRepublicWafToken(browser, {
       timeoutMs: options.webContextTimeoutMs ?? options.contextTimeoutMs ?? 60_000,
       settleMs: options.webContextSettleMs ?? 1_000,
     });
-    client.useWebContext(webContext);
+    client.setWafToken(wafToken);
     runtimeConfig = {
       ...runtimeConfig,
-      ...runtimeConfigFromWebContext(webContext),
+      awsWafToken: wafToken.awsWafToken,
+      xsrfToken: wafToken.xsrfToken,
     };
   } finally {
     await browser.close().catch(() => undefined);
@@ -1161,9 +1163,14 @@ async function orderDestinations(isin = EXAMPLE_ASSET_ID, query = {}) {
   return client.trading.orderDestinations(isin, query);
 }
 
-async function trades(query = {}) {
+async function orderBookSnapshot(tradeId) {
   await ensureSession();
-  return client.trading.trades(query);
+  return client.trading.orderBookSnapshot(tradeId);
+}
+
+async function tapeSnapshot(tradeId) {
+  await ensureSession();
+  return client.trading.tapeSnapshot(tradeId);
 }
 
 async function dailyPnl(items = []) {
@@ -1434,10 +1441,6 @@ function serializeCookieRecord(cookies) {
 function missingLoginContext(config) {
   const missing = [];
   if (!config.awsWafToken) missing.push('TR_AWS_WAF_TOKEN');
-  if (!config.cookie) missing.push('TR_COOKIE');
-  if (!config.trAppVersion) missing.push('TR_APP_VERSION');
-  if (!config.trPlatform) missing.push('TR_PLATFORM');
-  if (!config.trDeviceInfo) missing.push('TR_DEVICE_INFO');
   return missing;
 }
 
@@ -1662,7 +1665,8 @@ Object.assign(replContext, {
   exchangeSchedule,
   instrumentStatus,
   orderDestinations,
-  trades,
+  orderBookSnapshot,
+  tapeSnapshot,
   dailyPnl,
   documents,
   personalDetails,

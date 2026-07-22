@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
-  collectTradeRepublicWebContext,
+  collectTradeRepublicWafToken,
   MemorySessionStore,
   TradeRepublicClient,
 } from '../src/index.js';
@@ -53,12 +53,12 @@ async function run(): Promise<void> {
   let client: TradeRepublicClient | undefined;
 
   try {
-    console.log('Collecting the Trade Republic browser context and WAF token...');
-    const webContext = await collectTradeRepublicWebContext(browser, {
+    console.log('Collecting the Trade Republic WAF token...');
+    const wafToken = await collectTradeRepublicWafToken(browser, {
       timeoutMs: 60_000,
       settleMs: 1_000,
     });
-    client = TradeRepublicClient.create({ sessionStore, webContext });
+    client = TradeRepublicClient.create({ sessionStore, wafToken });
 
     const session = await loginWithRotatingQr(client);
     assertAuthMaterial(session);
@@ -239,7 +239,7 @@ function gh(args: string[], input?: string, capture = false): Promise<string> {
 function parseOptions(args: string[]): Options {
   const options: Options = {
     secret: 'TR_SESSION_JSON',
-    workflow: 'live-integration.yml',
+    workflow: 'general-read-only-validation.yml',
     ref: 'main',
     deviceName: 'handelsrepublik github actions',
     timeoutMs: 10 * 60_000,
@@ -265,7 +265,7 @@ function parseOptions(args: string[]): Options {
 Options:
   --repo OWNER/REPO       GitHub repository (defaults to the current repo)
   --secret NAME           Repository secret (default: TR_SESSION_JSON)
-  --workflow FILE         Workflow file/name (default: live-integration.yml)
+  --workflow FILE         Workflow file/name (default: general-read-only-validation.yml)
   --ref BRANCH            Branch to dispatch (default: main)
   --device-name NAME      Trade Republic device label
   --timeout-minutes N     QR approval timeout (default: 10)

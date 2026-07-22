@@ -22,6 +22,7 @@ export const DEFAULT_ENDPOINTS: Required<EndpointMap> = {
   'market.subscriptions': '/api-gateway/subscriptions/api/v1/subscriptions',
   'market.entitlements': '/api-gateway/subscriptions/api/v1/entitlements/topics/{topic}',
   'market.candles': '/api/v2/market-data/candles',
+  'market.bondCandles': '/api-gateway/quotes-api/v1/instruments/{assetId}.{exchangeId}/ytm/aggregateHistory',
   'market.liveFeed': '/api/v2/market-data/live-feed',
   'market.availableL2Books': '/api/v2/market-data/l2/venues',
   'market.l2OrderBook': '/api/v2/market-data/l2/orderbook',

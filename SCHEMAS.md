@@ -7,6 +7,7 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `auth.session` | `read` | `rest` | `GET /api/v1/auth/web/session` |  |
 | `auth.account` | `read` | `rest` | `GET /api/v2/auth/account` |  |
 | `account.personalDetails` | `read` | `rest` | `GET /api/v1/customer/personal-details` |  |
+| `account.appUsageConsents` | `read` | `rest` | `GET /api/v1/customer/app-usage-data-consents` |  |
 | `account.relationships` | `read` | `rest` | `GET /api/v1/customer/relationships/detailed` |  |
 | `account.cardsHome` | `read` | `rest` | `GET /api/v1/card/cards/home` |  |
 | `assets.search` | `read` | `websocket` | `neonSearch` | stock, crypto, etf -> fund, mutualFund, privateFund, bond, synthetic |
@@ -27,9 +28,13 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `portfolio.savingsPlans` | `read` | `websocket` | `savingsPlans` |  |
 | `portfolio.privateMarketsPositions` | `read` | `websocket` | `privateMarketsPositions` |  |
 | `portfolio.portfolioChart` | `read` | `rest` | `GET /api-gateway/portfolio-chart/v2/chart` |  |
+| `portfolio.bondValuation` | `read` | `websocket` | `bondValuationV2` |  |
+| `portfolio.fixedSavingsValuation` | `read` | `websocket` | `fixedSavingsValuation` |  |
 | `market.subscriptions` | `read` | `rest` | `GET /api-gateway/subscriptions/api/v1/subscriptions` |  |
 | `market.entitlements` | `read` | `rest` | `GET /api-gateway/subscriptions/api/v1/entitlements/topics/{topic}` |  |
-| `market.candles` | `read` | `websocket` | `aggregateHistoryLightV2` | stock, crypto |
+| `market.candles.standard` | `read` | `websocket` | `tradeAggregateHistory` | stock, etf, fund, mutualFund |
+| `market.candles.light` | `read` | `websocket` | `aggregateHistoryLightV2` | derivative, crypto |
+| `market.candles.bond` | `read` | `rest` | `GET /api-gateway/quotes-api/v1/instruments/{isin}.{exchangeId}/ytm/aggregateHistory` | bond |
 | `market.quote` | `read` | `websocket` | `ticker` | stock, crypto |
 | `market.liveFeed` | `read` | `websocket` | `tickerV3` | stock, crypto |
 | `market.availableL2Books` | `read` | `websocket` | `instrument` |  |
@@ -52,16 +57,16 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `trading.availableSize` | `read` | `websocket` | `availableSize` |  |
 | `trading.homeOrderDestination` | `read` | `websocket` | `homeInstrumentExchange` |  |
 | `trading.orderDestinations` | `read` | `rest` | `GET /api-gateway/order-router/api/v2/instruments/{isin}/destinations?jurisdiction=DE` |  |
-| `trading.trades` | `read` | `rest` | `GET /web-trading-gateway/api/customer/v1/trades` |  |
+| `trading.orderBookSnapshot` | `read` | `rest` | `GET /web-trading-gateway/api/customer/v1/trades/{tradeId}/order-book-snapshot` |  |
+| `trading.tapeSnapshot` | `read` | `rest` | `GET /web-trading-gateway/api/customer/v1/trades/{tradeId}/tape-snapshot` |  |
 | `trading.dailyPnl` | `read` | `rest` | `POST /web-trading-gateway/api/customer/v1/pnl/daily` |  |
+| `trading.tape` | `read` | `websocket` | `tape` |  |
+| `trading.tradeAggregateHistory` | `read` | `websocket` | `tradeAggregateHistory` |  |
 | `discovery.exchangeDetails` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/exchanges-details` |  |
 | `discovery.exchangeSchedule` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/exchanges/{exchange}/schedule` |  |
 | `discovery.instrumentStatus` | `read` | `rest` | `GET /api-gateway/instrument-universe/api/v1/instruments/{isin}/status/{exchange}` |  |
 | `discovery.watchlists` | `read` | `rest` | `GET /api-gateway/watchlists/api/v2/watchlists` |  |
 | `discovery.watchlists.items` | `read` | `rest` | `GET /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items` |  |
-| `discovery.watchlists.clone` | `lowRiskMutation` | `rest` | `POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/clone` |  |
-| `discovery.watchlists.rename` | `lowRiskMutation` | `rest` | `PUT /api-gateway/watchlists/api/v2/watchlists/{watchlistId}` |  |
-| `discovery.watchlists.delete` | `lowRiskMutation` | `rest` | `DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}` |  |
 | `discovery.watchlists.addItem` | `lowRiskMutation` | `rest` | `POST /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items` |  |
 | `discovery.watchlists.removeItem` | `lowRiskMutation` | `rest` | `DELETE /api-gateway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrumentId}` |  |
 | `discovery.screeners` | `read` | `rest` | `GET /api-gateway/screeners/api/v2/screeners` |  |
@@ -72,7 +77,8 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `tax.exemptionOrder` | `read` | `rest` | `GET /api/v1/taxes/exemptionorders` |  |
 | `tax.taxResidencies` | `read` | `rest` | `GET /api/v1/auth/account/change/taxresidencies` |  |
 | `tax.taxResidencyCountries` | `read` | `rest` | `GET /api/v1/country/taxresidency` |  |
+| `tax.accountUtilization` | `read` | `websocket` | `taxWrapperAccountUtilization` |  |
 | `payments.paymentMethods` | `read` | `rest` | `GET /api/v2/payment/methods` |  |
 | `payments.iban` | `read` | `rest` | `GET /api/v1/customer/relationships/detailed` |  |
 
-`highRiskMutation` entries can move money or alter live orders and must never be exercised by unattended integration tests.
+`highRiskMutation` entries can move money or alter live orders. Unattended probes require explicit clock, venue-state, price-distance, non-replay, and cleanup safeguards.

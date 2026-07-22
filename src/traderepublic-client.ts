@@ -14,13 +14,17 @@ import { TradeRepublicProtocolError } from './errors.js';
 import {
   availableL2BooksSpec,
   availableCandleResolutionsSpec,
-  candleSeriesSpec,
-  candlesSpec,
+  bondCandleSeriesSpec,
+  bondCandlesSpec,
+  lightCandleSeriesSpec,
+  lightCandlesSpec,
   l2OrderBookSpec,
   liveFeedSpec,
   marketEntitlementsSpec,
   marketSubscriptionsSpec,
   quoteSpec,
+  standardCandleSeriesSpec,
+  standardCandlesSpec,
 } from './market-specs.js';
 import {
   arrayPayload,
@@ -42,7 +46,6 @@ import {
   normalizeTimelineAction,
   normalizeTimelineDetail,
   normalizeTimelineItem,
-  normalizeTrade,
 } from './normalizers.js';
 import { defaultWebSocketFactory, RawApi, type RawQueryOptions, type RawSubscriptionOptions } from './raw.js';
 import { ResourceClient, toSubscription, type Subscription } from './resource.js';
@@ -66,6 +69,10 @@ import type {
   CandleTimeframe,
   CashSummary,
   Derivative,
+  DailyPnlRequestItem,
+  DailyPnlResult,
+  ExecutionOrderBookSnapshot,
+  ExecutionTapeSnapshot,
   IbanInfo,
   InstrumentNewsItem,
   L2OrderBook,
@@ -109,7 +116,6 @@ import type {
   TimelineDetail,
   TimelineDetailKind,
   TimelineItem,
-  Trade,
   TradeRepublicClientOptions,
   TradeRepublicDeviceInfo,
   TradeRepublicWafToken,
@@ -233,14 +239,14 @@ export class TradeRepublicClient {
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
     this.orders = new OrdersApi(this.runtime);
     this.portfolio = new PortfolioApi(this.runtime);
-    this.market = new MarketApi(this.resources);
+    this.market = new MarketApi(this.runtime);
     this.timeline = new TimelineApi(this.raw, this.validateRaw);
     this.priceAlarms = new PriceAlarmsApi(this.raw, this.validateRaw);
     this.instruments = new InstrumentsApi(this.raw, this.validateRaw);
     this.trading = new TradingApi(this.runtime);
     this.discovery = new DiscoveryApi(this.operations);
     this.documents = new DocumentsApi(this.operations);
-    this.tax = new TaxApi(this.operations);
+    this.tax = new TaxApi(this.operations, this.runtime);
     this.payments = new PaymentsApi(this.operations);
     this.web = new WebApi(this.runtime);
   }
@@ -1225,6 +1231,24 @@ export class PortfolioApi {
     }));
   }
 
+  async bondValuation(instrumentId: string, secAccNo?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
+    const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
+    return validated(this.validateRaw, 'portfolio.bondValuation', this.raw.query({
+      type: 'bondValuationV2',
+      instrumentId: requiredString(instrumentId, 'instrumentId'),
+      secAccNo: accountNumber,
+    }, pickTimeoutOptions(options)));
+  }
+
+  async fixedSavingsValuation(instrumentId: string, secAccNo?: string, options: { timeoutMs?: number } = {}): Promise<unknown> {
+    const accountNumber = secAccNo ?? await this.resolveSecuritiesAccountNumber();
+    return validated(this.validateRaw, 'portfolio.fixedSavingsValuation', this.raw.query({
+      type: 'fixedSavingsValuation',
+      instrumentId: requiredString(instrumentId, 'instrumentId'),
+      secAccNo: accountNumber,
+    }, pickTimeoutOptions(options)));
+  }
+
   async positionsForAccount(secAccNo: string, options: { timeoutMs?: number } = {}): Promise<Portfolio> {
     const raw = await validated(this.validateRaw, 'portfolio.current', this.raw.query({ type: 'compactPortfolioByTypeV2', secAccNo }, pickTimeoutOptions(options)));
     return normalizePortfolio(raw);
@@ -1280,7 +1304,11 @@ function createRawSchemaValidator(
 }
 
 export class MarketApi {
-  constructor(private readonly resources: ResourceClient) {}
+  private readonly resources: ResourceClient;
+
+  constructor(private readonly runtime: ClientRuntime) {
+    this.resources = runtime.resources;
+  }
 
   subscriptions(): Promise<MarketSubscription[]> {
     return this.resources.query(marketSubscriptionsSpec, undefined);
@@ -1295,15 +1323,21 @@ export class MarketApi {
   }
 
   candleQuery(options: CandleDownloadOptions): CandleQuery {
-    return new CandleQuery(this.resources, options);
+    return new CandleQuery((page) => this.candles(page), options);
   }
 
-  candles(options: CandleDownloadOptions): Promise<Candle[]> {
-    return this.resources.query(candlesSpec, options);
+  async candles(options: CandleDownloadOptions): Promise<Candle[]> {
+    const source = await this.resolveCandleSource(options);
+    if (source === 'bond') return this.resources.query(bondCandlesSpec, options);
+    if (source === 'light') return this.resources.query(lightCandlesSpec, options);
+    return this.resources.query(standardCandlesSpec, options);
   }
 
-  candleSeries(options: CandleDownloadOptions): Promise<CandleSeries> {
-    return this.resources.query(candleSeriesSpec, options);
+  async candleSeries(options: CandleDownloadOptions): Promise<CandleSeries> {
+    const source = await this.resolveCandleSource(options);
+    if (source === 'bond') return this.resources.query(bondCandleSeriesSpec, options);
+    if (source === 'light') return this.resources.query(lightCandleSeriesSpec, options);
+    return this.resources.query(standardCandleSeriesSpec, options);
   }
 
   availableCandleResolutions(options: AvailableCandleResolutionsOptions): Promise<CandleTimeframe[]> {
@@ -1336,6 +1370,17 @@ export class MarketApi {
 
   l2OrderBook(assetId: string, exchangeId: string, options: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'> = {}): Subscription<L2OrderBook> {
     return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
+  }
+
+  private async resolveCandleSource(options: CandleDownloadOptions): Promise<'standard' | 'light' | 'bond'> {
+    const type = options.instrumentType;
+    if (type === 'bond') return 'bond';
+    if (type === 'crypto' || type === 'derivative') return 'light';
+    if (type) return 'standard';
+    const resolutions = await this.availableCandleResolutions({ assetId: options.assetId });
+    if (resolutions.length === 2 && resolutions.includes('1d') && resolutions.includes('1w')) return 'bond';
+    if (resolutions.length === 5 && resolutions.includes('10m') && resolutions.includes('4h')) return 'light';
+    return 'standard';
   }
 }
 
@@ -1543,20 +1588,61 @@ export class TradingApi {
     }));
   }
 
-  async trades(query: Record<string, string | number | boolean | undefined> = {}): Promise<Trade[]> {
-    return arrayPayload(await this.rawTrades(query)).map(normalizeTrade);
+  orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot> {
+    return this.rawOrderBookSnapshot(tradeId) as Promise<ExecutionOrderBookSnapshot>;
   }
 
-  rawTrades(query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
-    return validated(this.validateRaw, 'trading.trades', this.http.request('GET', '/web-trading-gateway/api/customer/v1/trades', undefined, query));
+  rawOrderBookSnapshot(tradeId: string): Promise<unknown> {
+    return validated(this.validateRaw, 'trading.orderBookSnapshot', this.http.request(
+      'GET',
+      `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(requiredString(tradeId, 'tradeId'))}/order-book-snapshot`,
+    ));
   }
 
-  dailyPnl(items: unknown[]): Promise<unknown> {
+  tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot> {
+    return this.rawTapeSnapshot(tradeId) as Promise<ExecutionTapeSnapshot>;
+  }
+
+  rawTapeSnapshot(tradeId: string): Promise<unknown> {
+    return validated(this.validateRaw, 'trading.tapeSnapshot', this.http.request(
+      'GET',
+      `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(requiredString(tradeId, 'tradeId'))}/tape-snapshot`,
+    ));
+  }
+
+  dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]> {
     return this.rawDailyPnl(items);
   }
 
-  rawDailyPnl(items: unknown[]): Promise<unknown> {
+  rawDailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]> {
     return validated(this.validateRaw, 'trading.dailyPnl', this.http.request('POST', '/web-trading-gateway/api/customer/v1/pnl/daily', { items }));
+  }
+
+  tape(isin: string, exchangeId: string, unit = 'EUR'): Subscription<unknown> {
+    const mapperUnit = unit === 'PKT' ? 'PTS' : unit === 'PRZ' ? 'PCT' : unit;
+    return toSubscription(this.raw.subscribeResource({
+      type: 'tape',
+      isin: requiredString(isin, 'isin'),
+      exchangeId: requiredString(exchangeId, 'exchangeId'),
+      unit: mapperUnit,
+    })).map((raw) => this.validateRaw('trading.tape', raw));
+  }
+
+  tradeAggregateHistory(
+    isin: string,
+    exchangeId: string,
+    resolution: number,
+    from: number,
+    until?: number,
+  ): Promise<unknown> {
+    return validated(this.validateRaw, 'trading.tradeAggregateHistory', this.raw.query({
+      type: 'tradeAggregateHistory',
+      isin: requiredString(isin, 'isin'),
+      exchangeId: requiredString(exchangeId, 'exchangeId'),
+      resolution: positiveNumber(resolution, 'resolution'),
+      from: positiveNumber(from, 'from'),
+      ...(until === undefined ? {} : { until: positiveNumber(until, 'until') }),
+    }));
   }
 
   private resolveSecuritiesAccountNumber(): Promise<string> {
@@ -1709,11 +1795,15 @@ export class WebApi {
     return this.request('GET', `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, { query });
   }
 
-  trades(query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
-    return this.request('GET', '/web-trading-gateway/api/customer/v1/trades', { query });
+  orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot> {
+    return this.request('GET', `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/order-book-snapshot`);
   }
 
-  dailyPnl(items: unknown[]): Promise<unknown> {
+  tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot> {
+    return this.request('GET', `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/tape-snapshot`);
+  }
+
+  dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]> {
     return this.request('POST', '/web-trading-gateway/api/customer/v1/pnl/daily', { body: { items } });
   }
 

@@ -1,16 +1,14 @@
-import type { ResourceClient } from './resource.js';
-import { candlesSpec } from './market-specs.js';
 import { candleResolutionMs } from './candle-resolutions.js';
 import type { Candle, CandleDownloadOptions } from './types.js';
 
 export class CandleQuery {
   constructor(
-    private readonly resources: ResourceClient,
+    private readonly fetchPage: (options: CandleDownloadOptions) => Promise<Candle[]>,
     private readonly options: CandleDownloadOptions,
   ) {}
 
   fetch(): Promise<Candle[]> {
-    return this.resources.query(candlesSpec, this.options);
+    return this.fetchPage(this.options);
   }
 
   async *pages(options: { maxCandlesPerRequest?: number } = {}): AsyncIterable<Candle[]> {
@@ -26,7 +24,7 @@ export class CandleQuery {
     let cursor = asDate(this.options.from);
     while (cursor < to) {
       const next = new Date(Math.min(cursor.getTime() + stepMs, to.getTime()));
-      yield await this.resources.query(candlesSpec, {
+      yield await this.fetchPage({
         ...this.options,
         from: cursor,
         to: next,

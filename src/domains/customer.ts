@@ -1,3 +1,4 @@
+import type { ClientRuntime } from '../client-runtime.js';
 import { customerOperations } from '../operation-specs.js';
 import type { OperationClient } from '../operations.js';
 import type { IbanInfo } from '../types.js';
@@ -15,7 +16,10 @@ export class DocumentsApi {
 }
 
 export class TaxApi {
-  constructor(private readonly operations: OperationClient) {}
+  constructor(
+    private readonly operations: OperationClient,
+    private readonly runtime: ClientRuntime,
+  ) {}
 
   taxInformation(): Promise<unknown> {
     return this.rawTaxInformation();
@@ -47,6 +51,15 @@ export class TaxApi {
 
   rawTaxResidencyCountries(): Promise<unknown> {
     return this.operations.executeRaw(customerOperations.taxResidencyCountries, {});
+  }
+
+  async accountUtilization(secAccNo?: string): Promise<unknown> {
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
+    const raw = await this.runtime.raw.query({
+      type: 'taxWrapperAccountUtilization',
+      secAccNo: accountNumber,
+    });
+    return this.runtime.validateRaw('tax.accountUtilization', raw);
   }
 }
 

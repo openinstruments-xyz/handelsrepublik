@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, expect, it } from './test-compat.js';
 import {
   collectTradeRepublicWafToken,
-  collectTradeRepublicWebContext,
   TradeRepublicClient,
 } from '../src/index.js';
 import type {
@@ -13,36 +12,11 @@ import type {
   TradeRepublicRequestLike,
 } from '../src/index.js';
 
-describe('collectTradeRepublicWebContext', () => {
-  it('extracts WAF headers and cookies from a Playwright-like browser', async () => {
-    const browser = new FakeBrowser();
-
-    const context = await collectTradeRepublicWebContext(browser, {
-      timeoutMs: 1_000,
-      settleMs: 0,
-    });
-
-    expect(context).toMatchObject({
-      awsWafToken: 'waf-token',
-      xsrfToken: 'xsrf-cookie',
-      headers: {
-        'x-tr-app-version': '1.2.3',
-        'x-tr-platform': 'web',
-        'x-tr-device-info': 'test-device',
-      },
-      cookies: {
-        tr_session: 'session-cookie',
-        'XSRF-TOKEN': 'xsrf-cookie',
-      },
-    });
-    expect(context.cookieHeader).toContain('tr_session=session-cookie');
-    expect(browser.context?.closed).toBe(true);
-  });
-
+describe('collectTradeRepublicWafToken', () => {
   it('decodes the WAF token storage value without confusing it with the refresh timestamp', async () => {
     const browser = new FakeBrowser(false);
 
-    const context = await collectTradeRepublicWebContext(browser, {
+    const context = await collectTradeRepublicWafToken(browser, {
       timeoutMs: 1_000,
       settleMs: 0,
     });

@@ -174,6 +174,7 @@ describe('public convenience methods', () => {
       assetId: 'US1',
       exchangeId: 'LSX',
       timeframe: '1h',
+      instrumentType: 'derivative',
       from: '2026-07-01T00:00:00.000Z',
     }).fetch()).resolves.toEqual([
       expect.objectContaining({ time: '2026-07-01T12:00:00.000Z', close: 1.5 }),

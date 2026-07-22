@@ -16,6 +16,7 @@ export const accountOperations = {
   session: endpoint('auth.session', 'auth.session'),
   accountSettings: endpoint('auth.account', 'auth.account'),
   personalDetails: rest('account.personalDetails', '/api/v1/customer/personal-details'),
+  appUsageConsents: rest('account.appUsageConsents', '/api/v1/customer/app-usage-data-consents'),
   relationships: {
     ...rest('account.relationships', '/api/v1/customer/relationships/detailed'),
     normalize: (raw: unknown): AccountRelationship[] => normalizeAccountRelationships(raw),
@@ -55,9 +56,6 @@ export const discoveryOperations = {
     query: ({ pageSize }: { watchlistId: string; pageSize?: number }) => ({ pageSize: pageSize ?? 200 }),
     normalize: identity<unknown>,
   } satisfies RestOperation<{ watchlistId: string; pageSize?: number }, unknown>,
-  cloneWatchlist: mutation('discovery.watchlists.clone', 'POST', ({ watchlistId }: { watchlistId: string }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/clone`),
-  renameWatchlist: mutation('discovery.watchlists.rename', 'PUT', ({ watchlistId }: { watchlistId: string; name: string }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`, ({ name }: { watchlistId: string; name: string }) => ({ name })),
-  deleteWatchlist: mutation('discovery.watchlists.delete', 'DELETE', ({ watchlistId }: { watchlistId: string }) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}`),
   addWatchlistItem: mutation('discovery.watchlists.addItem', 'POST', ({ watchlistId }: WatchlistItemParams) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items`, ({ instrumentId, options }: WatchlistItemParams) => ({ instrument_id: instrumentId, item_rank: -1, ...options })),
   removeWatchlistItem: mutation('discovery.watchlists.removeItem', 'DELETE', ({ watchlistId, instrumentId }: Omit<WatchlistItemParams, 'options'>) => `/api-gateway/watchlists/api/v2/watchlists/${encodeURIComponent(watchlistId)}/items/${encodeURIComponent(instrumentId)}`),
   screeners: rest('discovery.screeners', '/api-gateway/screeners/api/v2/screeners'),

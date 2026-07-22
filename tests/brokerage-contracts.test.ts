@@ -3,7 +3,7 @@ import { describe, expect, it } from './test-compat.js';
 import { TradeRepublicClient } from '../src/index.js';
 import { FakeSocket } from './fake-socket.js';
 
-describe('captured brokerage contracts', () => {
+describe('captured brokerage behavior', () => {
   it('maps friendly month and year validity choices to broker expiry payloads', async () => {
     const client = TradeRepublicClient.create();
     const base = {
@@ -100,6 +100,7 @@ describe('captured brokerage contracts', () => {
       assetId: 'DE000FC95YR4',
       exchangeId: 'SGL',
       timeframe: '10m',
+      instrumentType: 'derivative',
       range: '5d',
     });
 
