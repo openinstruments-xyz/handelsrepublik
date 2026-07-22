@@ -1572,6 +1572,10 @@ types and do not judge whether changing market values are plausible.
 Every independent server check is a named Actions step. Later steps still run
 after an earlier failure, while the workflow remains red. This
 makes schema drift attributable without hiding additional failures.
+All live workflows share the `live-tr-session-main` concurrency group with a
+maximal queue. GitHub therefore keeps each triggered workflow visible as its
+own run while executing session-consuming workflows one at a time instead of
+canceling additional pending runs.
 
 The local read, venue and reversible-mutation suites can also be run directly:
 

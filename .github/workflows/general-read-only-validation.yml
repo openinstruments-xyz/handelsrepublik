@@ -13,6 +13,7 @@ permissions:
 
 concurrency:
   group: live-tr-session-main
+  queue: max
   cancel-in-progress: false
 
 jobs:
