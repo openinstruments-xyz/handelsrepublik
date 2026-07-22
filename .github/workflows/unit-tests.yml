@@ -1,4 +1,4 @@
-name: unit tests
+name: run unit tests (client, schemas, transports, normalizers, sessions, venues, WAF)
 
 on:
   push:

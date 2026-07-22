@@ -1,0 +1,237 @@
+name: general read-only validation of account and asset information (sessions, account, assets, derivatives, candles, orders, portfolio, timeline, documents, taxes, payments)
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 1,11 * * *"
+      timezone: Europe/Berlin
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-tr-session-main
+  cancel-in-progress: false
+
+jobs:
+  live-read-only:
+    name: run general read-only live validations
+    if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: configure ephemeral session path
+        run: echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+      - name: materialize encrypted test session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: node --import tsx scripts/ci-session.ts materialize "$TR_SESSION_FILE"
+      - name: refresh Trade Republic session
+        run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
+      - name: mark live session ready
+        id: live-ready
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+      - name: restore and refresh the persisted session
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- session.restore-refresh
+      - name: validate the current account response
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.current
+      - name: validate the current account session
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.session
+      - name: validate account settings
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.settings
+      - name: validate personal details without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.personal-details
+      - name: validate account relationships without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.relationships
+      - name: validate the cards overview
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.cards
+      - name: validate app usage consents
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- account.app-usage-consents
+      - name: search every supported asset class
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- assets.search-all-classes
+      - name: load details for every supported asset class
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- assets.details-all-classes
+      - name: validate paginated asset listing
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- assets.pagination
+      - name: search derivatives
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- derivatives.search
+      - name: list derivatives for an underlying
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- derivatives.list
+      - name: load derivative details
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- derivatives.details
+      - name: validate all, open, closed, and executed order history
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- orders.history
+      - name: validate mutual-fund order history
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- orders.mutual-funds
+      - name: validate private-market order history
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- orders.private-markets
+      - name: prepare an order and validate the fee preview without submitting
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- orders.prepare-preview-fees
+      - name: validate the current portfolio
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.current
+      - name: validate cash response
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.cash
+      - name: validate mark-to-market response
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.mark-to-market
+      - name: validate positions for the resolved securities account
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.account-positions
+      - name: validate savings plans
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.savings-plans
+      - name: validate private-market positions
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.private-markets
+      - name: validate portfolio chart points
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.chart
+      - name: validate all standard AAPL candle timeframes and OHLCV fields
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- candles.standard-aapl
+      - name: validate all derivative candle timeframes and OHLCV fields
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- candles.derivative
+      - name: validate all crypto candle timeframes and OHLCV fields
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- candles.crypto
+      - name: validate all bond candle timeframes and OHLCV fields
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- candles.bond
+      - name: validate ETF and fund candle responses
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- candles.etf-fund-smoke
+      - name: validate market subscriptions
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- market.subscriptions
+      - name: validate timeline items
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- timeline.list
+      - name: validate timeline actions
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- timeline.actions
+      - name: validate an available timeline detail
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- timeline.detail
+      - name: validate price alarms without mutation
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- price-alarms.list
+      - name: validate price-alarm notifications
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- price-alarms.notifications
+      - name: validate instrument news
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.news
+      - name: validate ETF details
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.etf-details
+      - name: validate ETF composition
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.etf-composition
+      - name: validate fund details
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.fund-details
+      - name: validate fund composition
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.fund-composition
+      - name: validate crypto details
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.crypto-details
+      - name: validate bond yield to maturity
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- instruments.bond-yield-to-maturity
+      - name: validate bond valuation
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.bond-valuation
+      - name: validate fixed-savings valuation
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- portfolio.fixed-savings-valuation
+      - name: validate available trading size
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- trading.available-size
+      - name: validate execution order-book and tape snapshots
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- trading.execution-snapshots
+      - name: validate daily PnL
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- trading.daily-pnl
+      - name: validate aggregate trade history
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- trading.aggregate-history
+      - name: validate exchange discovery
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- discovery.exchanges
+      - name: validate the default watchlist and its items
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- discovery.watchlists
+      - name: validate screeners
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- discovery.screeners
+      - name: validate screener options
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- discovery.screener-options
+      - name: validate user preferences
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- discovery.user-preferences
+      - name: validate document metadata without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- documents.list
+      - name: validate tax information without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- tax.information
+      - name: validate tax exemption order without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- tax.exemption-order
+      - name: validate tax residencies without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- tax.residencies
+      - name: validate tax-residency countries
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- tax.residency-countries
+      - name: validate tax-wrapper account utilization
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- tax.account-utilization
+      - name: validate payment methods without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- payments.methods
+      - name: validate IBAN shape without logging values
+        if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        run: npm run test:integration:case -- payments.iban
+      - name: rotate encrypted GitHub session secret
+        if: ${{ always() && steps.live-ready.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
+        run: gh secret set TR_SESSION_JSON --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
+      - name: remove materialized session
+        if: always()
+        run: rm -f "$TR_SESSION_FILE"

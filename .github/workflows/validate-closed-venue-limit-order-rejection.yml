@@ -1,0 +1,82 @@
+name: validate closed-venue limit-order rejection (EUR 1 limit buy, exchangeClosed response)
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 1 * * *"
+      timezone: Europe/Berlin
+  workflow_dispatch:
+    inputs:
+      confirm_order_request:
+        description: 'I understand this sends a real EUR 1 limit order that must be rejected.'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-tr-session-main
+  cancel-in-progress: false
+
+jobs:
+  time-gate:
+    name: require 23:00–05:00 Europe/Berlin
+    if: >-
+      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' ||
+        (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_request))
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.clock.outputs.eligible }}
+    steps:
+      - id: clock
+        name: validate closed-market time window
+        env:
+          TZ: Europe/Berlin
+        run: |
+          minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
+          if (( minutes >= 1380 || minutes < 300 )); then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping outside 23:00–05:00 Europe/Berlin."
+          fi
+
+  closed-limit-order:
+    name: submit EUR 1 limit buy and require exchangeClosed
+    needs: time-gate
+    if: needs.time-gate.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: configure ephemeral session path
+        run: echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+      - name: materialize encrypted test session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: node --import tsx scripts/ci-session.ts materialize "$TR_SESSION_FILE"
+      - name: refresh Trade Republic session
+        id: live-ready
+        run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
+      - name: validate closed venue and rejected one-share EUR 1 limit buy
+        run: npm run test:integration:closed-limit-order
+      - name: rotate encrypted GitHub session secret
+        if: ${{ always() && steps.live-ready.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
+        run: gh secret set TR_SESSION_JSON --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
+      - name: remove materialized session
+        if: always()
+        run: rm -f "$TR_SESSION_FILE"

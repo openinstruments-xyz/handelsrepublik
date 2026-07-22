@@ -1,4 +1,4 @@
-name: quality
+name: validate package quality (typecheck, build, distribution)
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   quality:
-    name: typecheck and build
+    name: typecheck, build, and verify committed distribution
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -28,3 +28,5 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - name: verify the committed distribution is current
+        run: git diff --exit-code -- dist
