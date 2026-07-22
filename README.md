@@ -7,25 +7,34 @@
 
 **Scheduled live tests**
 
-[![scheduled non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
-[![scheduled closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
-[![scheduled closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
-[![scheduled open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
+[![scheduled account and assets](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/general-read-only-validation.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/general-read-only-validation.yml)
+[![scheduled closed destinations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml)
+[![scheduled open venue](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml)
+[![scheduled reversible mutations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml)
+[![scheduled closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml)
+[![scheduled closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml)
+[![scheduled open limit lifecycle](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml/badge.svg?branch=main&event=schedule)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml)
 
 **Manually triggered live tests**
 
-[![manual non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
-[![manual closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
-[![manual closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
-[![manual open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
+[![manual account and assets](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/general-read-only-validation.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/general-read-only-validation.yml)
+[![manual closed destinations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml)
+[![manual open venue](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml)
+[![manual reversible mutations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml)
+[![manual closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml)
+[![manual closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml)
+[![manual open limit lifecycle](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml)
 [![manual market buy on live account](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)
 
 **Latest result per live workflow**
 
-[![latest non-order](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-integration.yml)
-[![latest closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
-[![latest closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
-[![latest open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
+[![latest account and assets](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/general-read-only-validation.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/general-read-only-validation.yml)
+[![latest closed destinations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml)
+[![latest open venue](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml)
+[![latest reversible mutations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml)
+[![latest closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml)
+[![latest closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml)
+[![latest open limit lifecycle](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml)
 [![latest market buy on live account](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)
 
 ## Overview
@@ -64,7 +73,9 @@ response payloads.
 
 Some SDK methods can place or cancel real orders. Applications are responsible
 for user confirmation, reconciliation, regulatory obligations, and deciding how
-to store account and order data. Do not use live mutations in unattended tests.
+to store account and order data. This repository's unattended order probes are
+limited to closed-venue rejection checks and deeply non-marketable, cleanup-
+backed limit orders; do not generalize those safeguards to application code.
 
 Treat sessions, cookies, WAF tokens, QR challenges, account payloads, documents,
 tax data, order data, and raw mapper responses as secrets.
@@ -76,12 +87,10 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 
 ## Installation
 
-Development happens on the main branch. Please only use tagged releases (e.g. `#v0.1.0`). Using the latest tagged release is recommended.
-
 Install the package directly from GitHub:
 
 ```bash
-npm install github:VIEWVIEWVIEW/handelsrepublik#v0.1.0
+npm install github:VIEWVIEWVIEW/handelsrepublik
 ```
 
 The package is ESM-only and includes its compiled `dist` output. Consumers do
@@ -464,10 +473,9 @@ alice.setWafToken(nextWafToken);
 bob.setWafToken(nextWafToken);
 ```
 
-`collectTradeRepublicWebContext()` remains available for advanced compatibility
-use, but it captures a broader browser context that can contain account cookies
-and headers. Do not share its result between accounts. Prefer the narrow
-`collectWafToken()` or `collectTradeRepublicWafToken()` interfaces.
+Both `collectWafToken()` and `collectTradeRepublicWafToken()` return only the
+shareable WAF token; their result contains no account cookies or captured
+browser headers.
 
 ## Authentication workflows
 
@@ -1063,11 +1071,11 @@ that distinction clearly and reconcile ambiguous outcomes before retrying.
 After reconnect, the application can inspect current and historical broker data:
 
 ```ts
-const [allOrders, openOrders, closedOrders, trades] = await Promise.all([
+const [allOrders, openOrders, closedOrders, executedOrders] = await Promise.all([
   tr.orders.all({ limit: 100 }),
   tr.orders.open(),
   tr.orders.closed(),
-  tr.trading.trades({ page: 1 }),
+  tr.orders.executed(),
 ]);
 ```
 
@@ -1153,7 +1161,7 @@ does not yet have a first-class SDK method.
 | `tr.derivatives` | Search derivatives, list knockout, warrant, and factor products for an underlying, and load details. |
 | `tr.portfolio` | Portfolio, cash, mark-to-market value, savings plans, private-market positions, and chart data. |
 | `tr.orders` | List and filter regular, executed, mutual-fund, and private-market orders; preview, prepare, submit, cancel, replace, and stream updates. |
-| `tr.trading` | Order prices, available size, destinations and home venues, trades, and daily PnL. |
+| `tr.trading` | Order prices, available size, destinations and home venues, execution snapshots, daily PnL, live tape, and aggregate trade history. |
 | `tr.market` | Quotes, candles and paged downloads, live feeds, market-data plans and entitlements, L2 venue discovery, and L2 order books. |
 | `tr.timeline` | Timeline entries, actions, and details. |
 | `tr.priceAlarms` | List, create, cancel, and read protobuf price-alarm notifications. |
@@ -1167,6 +1175,60 @@ does not yet have a first-class SDK method.
 
 Methods that need a securities account number resolve it from the active session
 or account profile unless the method accepts and receives an explicit value.
+
+Less common observed reads have first-class namespace entry points as well:
+
+```ts
+const consents = await tr.account.appUsageConsents();
+const utilization = await tr.tax.accountUtilization();
+const bondValue = await tr.portfolio.bondValuation(bondIsin);
+const fixedSavingsValue = await tr.portfolio.fixedSavingsValuation(bondIsin);
+const aggregates = await tr.trading.tradeAggregateHistory(
+  isin,
+  exchangeId,
+  60_000,
+  Date.now() - 86_400_000,
+  Date.now(),
+);
+
+const executed = await tr.orders.executed();
+const tradeId = executed
+  .map((order) => order.raw)
+  .filter((raw): raw is Record<string, unknown> => raw !== null && typeof raw === 'object')
+  .flatMap((raw) => Array.isArray(raw.trades) ? raw.trades : [])
+  .find((trade): trade is { tradeId: string } => (
+    trade !== null
+    && typeof trade === 'object'
+    && typeof (trade as Record<string, unknown>).tradeId === 'string'
+  ))?.tradeId;
+if (tradeId) {
+  const orderBookAtExecution = await tr.trading.orderBookSnapshot(tradeId);
+  const tapeAtExecution = await tr.trading.tapeSnapshot(tradeId);
+  console.log(orderBookAtExecution, tapeAtExecution);
+}
+
+const secAccNo = tr.securitiesAccountNumber;
+if (secAccNo) {
+  const dailyPnl = await tr.trading.dailyPnl([{
+    secAccNo,
+    instrumentId: isin,
+    day: new Date().toISOString().slice(0, 10),
+    quantity: 1,
+  }]);
+  console.log(dailyPnl);
+}
+
+const tape = tr.trading.tape(isin, exchangeId);
+for await (const update of tape) {
+  console.log(update);
+  tape.close();
+  break;
+}
+```
+
+The observed watchlist backend currently supports reading the built-in default
+watchlist and adding or removing its items. The SDK deliberately does not expose
+custom-watchlist create, rename, clone, or delete methods.
 
 Normalized results keep their original private-API payload in `raw`:
 
@@ -1412,8 +1474,7 @@ bytes.
 
 The package also exports focused lower-level helpers:
 
-- WAF-token/browser collection: `collectTradeRepublicWafToken()` and the broader
-  `collectTradeRepublicWebContext()`.
+- WAF-token/browser collection: `collectTradeRepublicWafToken()`.
 - Session handling: `FileSessionStore`, `MemorySessionStore`, and
   `redactSession()`.
 - Candles: `CandleQuery`, resolution constants, `candleResolutionMs()`, and
@@ -1444,7 +1505,8 @@ as a general SDK demo.
 - Redact secrets before logging errors or raw payloads.
 - Use separate encrypted storage and access control for each account.
 - Call `tr.close()` when disposing a long-lived client.
-- Never place, cancel, or repeat an order from an unattended test.
+- Keep unattended order tests behind explicit clock, venue-state, price-distance,
+  non-replay, and cleanup safeguards.
 - Treat `outcomeUnknown` as a business state requiring investigation.
 - Do not use this SDK as a broker compliance or suitability layer.
 
@@ -1467,66 +1529,86 @@ REST and mapper calls live in `src/operation-specs.ts` and run through
 order preparation, submission, and cancellation remain explicit workflows.
 `MapperConnection` owns multiplexing and reconnect behavior.
 
-Unit tests use mocked HTTP and websocket transports. Live integration tests
-reuse a saved demo session and run non-order Trade Republic operations:
+Unit tests use mocked HTTP and websocket transports. Live tests use a saved
+session and enable raw-response validation. Captured concrete response variants
+use strict schemas: an unknown response field or incompatible field type fails
+its visible Actions step before normalization. An empty list is valid when the
+endpoint allows it; the step summary then says that the item schema was not
+observed in that run instead of claiming that an unseen item shape was proven.
+
+Run the read-only suite or one stable case locally:
 
 ```powershell
 $env:TR_SESSION_FILE = './demo/.demo-session.json'
-npm run test:integration:non-order
+npm run test:integration
+npm run test:integration:case -- candles.standard-aapl
 ```
 
-`npm run test:integration` remains an alias for the non-order suite.
+The live workflow matrix is:
 
-Disposable price-alarm and watchlist mutation checks run by default and always
-include cleanup.
+| Workflow | Triggers | Gate | Exact checks |
+| --- | --- | --- | --- |
+| General read-only validation | push to `main`, manual, 01:00 and 11:00 daily | none | Session restore/refresh; account, session, settings, personal details, relationships, cards and app-usage consents; search, details and pagination for every asset class; derivative search/list/details; all/open/closed/executed, mutual-fund and private-market order reads; order preparation, preview and fees without submission; portfolio, cash, mark-to-market, positions, savings plans, private markets and chart; every candle matrix below; market subscriptions; timeline, price-alert, news and instrument-class reads; account-specific valuations, available size, execution order-book/tape snapshots when an executed trade ID exists, daily PnL and aggregate history; exchanges, default watchlist, screeners, preferences, documents, taxes, payment methods and IBAN shape. |
+| Closed-market destination validation | push to `main`, manual, 01:00 daily | 23:00–05:00 Berlin, then live venue state | Order destinations for stock, ETF, fund, mutual fund, private fund, derivative, crypto, bond and synthetic assets; LSX exchange schedule, instrument status and quotation. Crypto is validated as returned and may remain open around the clock. |
+| Open-market venue validation | push to `main`, manual, 11:00 weekdays | weekdays 09:30–17:00 Berlin, then an explicitly open destination | Order destinations and home destination; buy/sell `priceForOrder` quotes; normal quotation; market subscriptions and L2 entitlements; ticker, last-trade/tape and L2 stream payloads. `priceForOrder` is the venue-specific executable reference-price response used when preparing an order; this workflow reads it but creates no order. |
+| Reversible account mutations | push to `main`, manual, 01:00 and 11:00 daily | none | Create/list/delete a disposable EUR 1 Apple price alert; add/verify/remove one candidate instrument in the built-in default watchlist. Cleanup runs in `finally`. Custom watchlist creation, rename, clone and deletion are not supported by the observed backend and are not part of the SDK. |
+| Closed-venue limit rejection | push to `main`, manual, 01:30 daily | 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit one Apple share with a EUR 1 limit and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
+| Closed-venue market rejection | push to `main`, manual, 01:45 daily | 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit an amount-based EUR 1 Apple market buy and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
+| Open-venue limit lifecycle | push to `main`, manual, 11:30 weekdays | weekdays 09:30–17:00 Berlin in workflow and test; destination must report open and bid at least EUR 10 | Select NVIDIA, Apple or Microsoft automatically; open the order-update stream; submit one share at EUR 1; require a created/open update; replace it with EUR 0.50; require old-order cancellation and new-order creation updates; cancel the replacement; require its cancellation update; retry cleanup in `finally`. |
+| Market buy on live account | manual only | explicit owner confirmation; automatic open market-order venue | Buy a custom ISIN with a user-entered gross budget of at most EUR 5, wait for execution and leave the position in the account. No automatic sell. |
 
-Closed-exchange order rejection integration is a separate suite. It requires an
-explicit instrument and exchange:
+The AAPL standard candle matrix requires `1m`, `3m`, `5m`, `10m`, `15m`,
+`20m`, `30m`, `45m`, `1h`, `2h`, `4h`, `1d`, `1w`, and `1M` responses.
+Derivative and crypto fixtures require `10m`, `1h`, `4h`, `1d`, and `1w`;
+bonds require `1d` and `1w`; ETF and mutual-fund fixtures receive a separate
+daily smoke test. `market.candles()` routes stocks, ETFs and funds through
+`tradeAggregateHistory`, derivatives and crypto through
+`aggregateHistoryLightV2`, and bonds through the venue's YTM-history endpoint.
+AAPL candles must contain timestamp and OHLCV fields. The other variants must
+contain timestamp and OHLC fields; volume is type-checked when the endpoint
+provides it. The tests only require those values to exist with the documented
+types and do not judge whether changing market values are plausible.
+
+Every independent server check is a named Actions step. Later steps still run
+after an earlier failure, while the workflow remains red. This
+makes schema drift attributable without hiding additional failures.
+
+The local read, venue and reversible-mutation suites can also be run directly:
 
 ```powershell
-$env:TR_SESSION_FILE = './demo/.demo-session.json'
-$env:TR_INTEGRATION_ORDER_ISIN = 'DE0007164600'
-$env:TR_INTEGRATION_ORDER_EXCHANGE = 'LSX'
-$env:TR_INTEGRATION_OPEN_BUY_LIMIT_EUR = '1'
-npm run test:integration:order-rejections
+npm run test:integration:read
+npm run test:integration:closed-venue
+npm run test:integration:open-venue
+npm run test:integration:mutations
 ```
 
-It submits a EUR 1 amount-based limit buy only when the selected exchange
-explicitly reports as closed. The buy limit uses the current bid so the request
-is non-marketable if the venue state changes. The suite then asserts the
-`exchangeClosed` outcome and verifies the nonexistent order cancellation
-result. While the venue is closed,
-it also submits a EUR 1 market buy and requires the same rejection. While the
-venue is open, it instead submits one share at the configured deeply
-non-marketable buy limit, requires that limit to be no more than 10% of the live
-bid, and cancels the accepted order immediately with a `finally` cleanup retry.
-The market-order probe has an additional clock guard: at or after 05:00
-Europe/Berlin it always skips before authentication or submission, even if the
-venue API unexpectedly reports closed.
+The three protected order probes have separate local commands. They retain the
+same clock and live-venue gates as GitHub Actions:
 
-Three dedicated **live venue-state order integration** workflows run on
-weekdays so every time-dependent probe has its own workflow history and status
-badge. The closed-limit probe runs at 00:30, the closed-market probe at 01:00,
-and the open-limit cancellation probe at 10:45 Europe/Berlin. Scheduled runs
-default to Apple (`US0378331005`), LSX, a EUR 1 closed-venue amount-based limit
-buy, and a EUR 1 open-venue buy limit. Manual runs require the relevant inputs
-and explicit confirmation that real order requests will be sent. The
-closed-market workflow gates the session/authentication job on the current
-Europe/Berlin time, so that job is marked skipped at or after 05:00. The test
-also retains its own clock guard before authentication or submission as a
-second safety layer.
+```powershell
+npm run test:integration:closed-limit-order
+npm run test:integration:closed-market-order
+npm run test:integration:open-limit-order
+```
+
+The closed probes are expected to be rejected and therefore should not incur a
+broker order fee. The open limit lifecycle uses deliberately non-marketable
+prices, but it still sends real orders and cannot provide an absolute no-fill
+guarantee. The manual market buy intentionally executes and can cost up to EUR
+5 plus the expected EUR 1 fee.
 
 Successful live buying uses a different suite and workflow. The
 **execute market buy on live account** workflow has only a `workflow_dispatch`
 trigger. It
-requires an ISIN, market-buy amount in EUR, and explicit confirmation that a
-real market buy will execute. The test automatically selects the first
+requires an ISIN, gross purchase budget in EUR, and explicit confirmation that
+a real market buy will execute. The test automatically selects the first
 broker-provided destination that explicitly reports `open: true` and supports
 market orders; it skips without submitting an order if none is available. It
-fetches that venue's current buy quote and uses the ask (or fallback market
-price) to derive the amount-based order quantity. The live workflow explicitly
-uses a size step of `1`, so that quantity is rounded down to whole units. It caps
-the buy at EUR 5 (plus the expected EUR 1 fee) and waits for the buy to execute.
+fetches that venue's current buy quote and buys as many whole units as fit within
+the budget at the ask (or fallback market price). The live workflow explicitly
+uses a size step of `1`, so the calculated quantity is rounded down. It caps the
+gross purchase budget at EUR 5; the expected EUR 1 fee is additional. It waits
+for the buy to execute.
 It does not automatically sell the purchased quantity, which remains in the
 account.
 Configure required reviewers on the `live-order-tests` GitHub environment before
@@ -1534,22 +1616,10 @@ using it.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
-GitHub Actions runs `npm test`, `npm run typecheck`, and `npm run build` on every
-push, pull request, and manual quality/unit run. A separate account integration
-workflow has no push or pull-request trigger. It runs
-`npm run test:integration:non-order` only on `main`, only for the repository
-owner, and only after its unit-test gate passes. It runs at 10:15 and 16:15
-Europe/Berlin on weekdays to refresh the account session, and the repository
-owner can also start it manually. Those times keep the scheduled AAPL/XETR L2
-test inside Xetra's 09:00-17:30 German market hours even when GitHub starts the
-workflow up to an hour late.
-
-The no-order GitHub workflow includes cleanup-backed price-alarm and watchlist
-mutations. The three venue-state probes and successful order execution run in
-the dedicated workflows described above.
-The live suite fails on all endpoint errors;
-optional local mutation probes skip unsupported rename and clone operations for
-Trade Republic's built-in default watchlist.
+Quality and unit workflows run on every push and pull request. Every live
+workflow except the real market buy runs on pushes to `main`; time-dependent
+jobs stop at their first time gate when the current Berlin window does not fit.
+The real market buy remains manual-only.
 
 When the GitHub repository session secret expires, renew it from a maintainer machine:
 
@@ -1562,7 +1632,7 @@ collect the matching Trade Republic web context and WAF token, renders a QR code
 terminal, and waits for approval in the Trade Republic app. Short-lived QR
 challenges are replaced automatically until approval or the overall timeout. It
 then updates the repository-level `TR_SESSION_JSON` secret, dispatches
-`live-integration.yml` on `main`, and watches the new workflow run. The new
+`general-read-only-validation.yml` on `main`, and watches the new workflow run. The new
 session is held in memory and is not written to the repository. Keeping the
 live job free of a GitHub `environment` prevents test runs from appearing as
 deployments.
