@@ -60,6 +60,7 @@ export async function submitLiveMarketBuy(
     mode: 'market',
     amount,
     lastClientPrice,
+    sizeStep: 1,
     validity: 'day',
     timeoutMs: 60_000,
   });

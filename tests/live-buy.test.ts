@@ -25,6 +25,9 @@ describe('live market buy integration helper', () => {
           if (options.lastClientPrice === undefined) {
             throw new TypeError('Amount-based market orders require lastClientPrice.');
           }
+          if (options.sizeStep !== 1) {
+            throw new Error('Could not determine the order size step. Pass sizeStep explicitly.');
+          }
           return {
             status: 'succeeded',
             orderId: 'order-1',
@@ -41,6 +44,7 @@ describe('live market buy integration helper', () => {
     assert.equal(result.status, 'submitted');
     assert.equal(submittedOptions?.lastClientPrice, 0.51);
     assert.equal(submittedOptions?.amount, 5);
+    assert.equal(submittedOptions?.sizeStep, 1);
   });
 
   it('does not submit when the selected venue has no positive current price', async () => {
