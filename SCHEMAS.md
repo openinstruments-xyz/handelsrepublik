@@ -9,8 +9,6 @@ Generated from `src/schemas/registry.ts`. These schemas validate raw Trade Repub
 | `account.personalDetails` | `read` | `rest` | `GET /api/v1/customer/personal-details` |  |
 | `account.relationships` | `read` | `rest` | `GET /api/v1/customer/relationships/detailed` |  |
 | `account.cardsHome` | `read` | `rest` | `GET /api/v1/card/cards/home` |  |
-| `boards.list` | `read` | `rest` | `GET /api-gateway/pro-trading/api/v2/boards` |  |
-| `boards.detail` | `read` | `rest` | `GET /api-gateway/pro-trading/api/v2/boards/{boardId}` |  |
 | `assets.search` | `read` | `websocket` | `neonSearch` | stock, crypto, etf -> fund, mutualFund, privateFund, bond, synthetic |
 | `assets.get` | `read` | `websocket` | `instrument` |  |
 | `derivatives.search` | `read` | `websocket` | `neonSearch type=derivative` |  |

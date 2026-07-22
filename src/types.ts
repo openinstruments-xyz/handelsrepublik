@@ -7,8 +7,6 @@ export type EndpointKey =
   | 'auth.loginProcess'
   | 'auth.account'
   | 'auth.session'
-  | 'boards.list'
-  | 'boards.detail'
   | 'assets.search'
   | 'assets.detail'
   | 'assets.all'
@@ -97,20 +95,6 @@ export interface IbanInfo {
   accountHolder?: string | undefined;
   customerId?: string | undefined;
   relationshipType?: string | undefined;
-  raw: unknown;
-}
-
-export interface Board {
-  id: string;
-  name?: string | undefined;
-  widgets: BoardWidget[];
-  raw: unknown;
-}
-
-export interface BoardWidget {
-  id: string;
-  type: string;
-  settings?: Record<string, unknown> | undefined;
   raw: unknown;
 }
 

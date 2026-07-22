@@ -1114,7 +1114,12 @@ describe('TradeRepublicClient', () => {
               error: {
                 code: 'exchangeClosed',
                 message: 'Exchange is closed',
-                details: { exchangeId: 'LSX', isin: 'US0378331005', isNostro: false },
+                details: {
+                  exchangeId: 'LSX',
+                  isin: 'US0378331005',
+                  isNostro: false,
+                  clientProcessId: 'failed-process-1',
+                },
               },
             })}`);
           }
@@ -1137,6 +1142,7 @@ describe('TradeRepublicClient', () => {
           exchangeId: 'LSX',
           isin: 'US0378331005',
           isNostro: false,
+          clientProcessId: 'failed-process-1',
         },
       },
     });
@@ -1347,7 +1353,16 @@ describe('TradeRepublicClient', () => {
         const socket = new FakeSocket((payload, id) => {
           payloads.push(payload);
           if (payload.type === 'cancelOrder') {
-            socket.emit('message', `${id} A ${JSON.stringify({ status: 'failed', error: { code: 'orderNotFound' } })}`);
+            socket.emit('message', `${id} A ${JSON.stringify({
+              status: 'failed',
+              orderId: 'old-order',
+              message: 'Could not find the order',
+              error: {
+                code: 'orderNotFound',
+                message: 'Order not found',
+                details: { orderId: 'old-order', userId: 'user-1' },
+              },
+            })}`);
           }
         });
         return socket;
@@ -1359,7 +1374,11 @@ describe('TradeRepublicClient', () => {
       previousOrderId: 'old-order',
       cancellation: {
         status: 'failed',
-        error: { code: 'orderNotFound', raw: { code: 'orderNotFound' } },
+        error: {
+          code: 'orderNotFound',
+          message: 'Order not found',
+          details: { orderId: 'old-order', userId: 'user-1' },
+        },
       },
     });
     expect(payloads).toEqual([{ type: 'cancelOrder', orderId: 'old-order' }]);

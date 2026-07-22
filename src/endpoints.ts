@@ -7,8 +7,6 @@ export const DEFAULT_ENDPOINTS: Required<EndpointMap> = {
   'auth.loginProcess': '/api/v2/auth/web/login/processes/{processId}',
   'auth.account': '/api/v2/auth/account',
   'auth.session': '/api/v1/auth/web/session',
-  'boards.list': '/api-gateway/pro-trading/api/v2/boards',
-  'boards.detail': '/api-gateway/pro-trading/api/v2/boards/{boardId}',
   'assets.search': '/api/v2/search/instruments',
   'assets.detail': '/api/v2/instruments/{assetId}',
   'assets.all': '/api/v2/instruments',

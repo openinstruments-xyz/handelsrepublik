@@ -4,7 +4,7 @@ import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { CandleQuery } from './candles.js';
 import { ClientRuntime, firstStringByKey } from './client-runtime.js';
 import { EndpointResolver } from './endpoints.js';
-import { AccountApi, BoardsApi } from './domains/account.js';
+import { AccountApi } from './domains/account.js';
 import { DocumentsApi, PaymentsApi, TaxApi } from './domains/customer.js';
 import { DiscoveryApi } from './domains/discovery.js';
 import { HttpClient } from './http.js';
@@ -156,7 +156,6 @@ export class TradeRepublicClient {
   readonly auth: AuthApi;
   readonly raw: RawApi;
   readonly account: AccountApi;
-  readonly boards: BoardsApi;
   readonly assets: AssetsApi;
   readonly derivatives: DerivativesApi;
   readonly orders: OrdersApi;
@@ -229,7 +228,6 @@ export class TradeRepublicClient {
     });
     this.operations = this.runtime.operations;
     this.account = new AccountApi(this.operations);
-    this.boards = new BoardsApi(this.operations);
     this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
@@ -251,7 +249,7 @@ export class TradeRepublicClient {
     return new TradeRepublicClient(options);
   }
 
-  static async collectWafContext(
+  static async collectWafToken(
     options: TradeRepublicCollectWafContextOptions = {},
   ): Promise<TradeRepublicWafContext> {
     const { browser, browserLaunchOptions, ...collectionOptions } = options;

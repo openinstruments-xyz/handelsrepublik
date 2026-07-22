@@ -84,13 +84,12 @@ describe('public convenience methods', () => {
     expect(client.getSession()).toEqual({});
   });
 
-  it('calls account, board, and read-only order convenience endpoints', async () => {
+  it('calls account and read-only order convenience endpoints', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
       rawSchemaValidation: false,
       fetch: mockFetchSequence(calls, [
         jsonResponse({ session: 'active' }),
-        jsonResponse([{ id: 'board-1', name: 'Main' }]),
         jsonResponse({ orders: [{ id: 'fund-order', status: 'EXECUTED' }] }),
         jsonResponse({ orders: [{ id: 'private-order', status: 'OPEN' }] }),
         jsonResponse({ raw: 'detailed' }, 201, { 'x-test': 'present' }),
@@ -98,9 +97,6 @@ describe('public convenience methods', () => {
     });
 
     await expect(client.account.session()).resolves.toEqual({ session: 'active' });
-    await expect(client.boards.list()).resolves.toEqual([
-      expect.objectContaining({ id: 'board-1', name: 'Main' }),
-    ]);
     await expect(client.orders.mutualFunds({ page: 2, filters: { status: 'EXECUTED' } })).resolves.toEqual([
       expect.objectContaining({ id: 'fund-order', status: 'EXECUTED' }),
     ]);
@@ -120,17 +116,16 @@ describe('public convenience methods', () => {
     const urls = calls.map((call) => new URL(call.url));
     expect(urls.map((url) => url.pathname)).toEqual([
       '/api/v1/auth/web/session',
-      '/api-gateway/pro-trading/api/v2/boards',
       '/api-gateway/mutual-funds/api/v1/orders',
       '/api/v1/private-markets/orders/all',
       '/demo-check',
     ]);
-    expect(urls[2]?.searchParams.get('page')).toBe('2');
-    expect(urls[2]?.searchParams.get('status')).toBe('EXECUTED');
-    expect(urls[3]?.searchParams.get('pageNumber')).toBe('3');
-    expect(urls[3]?.searchParams.get('status')).toBe('OPEN');
-    expect(urls[4]?.searchParams.get('source')).toBe('tui');
-    expect(calls[4]?.init.body).toBe(JSON.stringify({ ok: true }));
+    expect(urls[1]?.searchParams.get('page')).toBe('2');
+    expect(urls[1]?.searchParams.get('status')).toBe('EXECUTED');
+    expect(urls[2]?.searchParams.get('pageNumber')).toBe('3');
+    expect(urls[2]?.searchParams.get('status')).toBe('OPEN');
+    expect(urls[3]?.searchParams.get('source')).toBe('tui');
+    expect(calls[3]?.init.body).toBe(JSON.stringify({ ok: true }));
   });
 
   it('normalizes portfolio convenience queries and resolves explicit positions', async () => {

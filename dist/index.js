@@ -268,24 +268,6 @@ function sumExecutionSize(value) {
   }
   return sawSize ? total : void 0;
 }
-function normalizeBoard(value) {
-  const record2 = asRecord(value);
-  return {
-    id: stringValue(record2.id, record2.boardId),
-    name: optionalString(record2.name, record2.title),
-    widgets: arrayPayload(record2.widgets).map(normalizeBoardWidget),
-    raw: value
-  };
-}
-function normalizeBoardWidget(value) {
-  const record2 = asRecord(value);
-  return {
-    id: stringValue(record2.id, record2.widgetId),
-    type: stringValue(record2.type, record2.widgetType),
-    settings: objectPayload(record2.settings),
-    raw: value
-  };
-}
 function normalizePortfolio(value) {
   const record2 = asRecord(value);
   const source = Array.isArray(record2.categories) ? record2.categories : arrayPayload(value);
@@ -766,9 +748,6 @@ function normalizeTimestamp(value) {
   }
   if (/^\d+$/.test(value)) return normalizeTimestamp(Number(value));
   return value;
-}
-function objectPayload(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 }
 function moneyAmount(value) {
   const record2 = asRecord(value);
@@ -1977,18 +1956,89 @@ var orderMutationStatusSchema = z.enum([
   "succeeded",
   "failed"
 ]);
-var orderMutationErrorSchema = z.object({
-  code: z.string().optional(),
+var otherOrderMutationErrorCodeSchema = z.enum([
+  "cashMissing",
+  "currentQuoteMissing",
+  "instrumentSuspended",
+  "internalError",
+  "invalidSecurityDerivative",
+  "invalidSecurityNonDerivative",
+  "limitDenied",
+  "maxQuantityExceeded",
+  "noRefPriceAvailable",
+  "noRouteToMarket",
+  "orderAlreadyDeleted",
+  "orderAlreadyExists",
+  "orderRejectedAtExchange",
+  "portfolioInactive",
+  "quoteMissing",
+  "savingsplanSharesMissingToday",
+  "sharesMissing",
+  "shortPositionNotAllowed",
+  "timeoutError",
+  "unknownInstrument"
+]);
+var otherOrderMutationErrorDetailsSchema = z.strictObject({
+  exchangeId: z.string().optional(),
+  isin: z.string().optional(),
+  orderId: z.string().optional(),
+  userId: z.string().optional(),
+  clientProcessId: z.string().optional(),
+  isNostro: z.boolean().optional()
+});
+var otherOrderMutationErrorSchema = z.strictObject({
+  code: otherOrderMutationErrorCodeSchema,
   message: z.string().optional(),
-  details: jsonRecord.optional()
-}).passthrough();
-var orderMutationResponseSchema = z.object({
+  details: otherOrderMutationErrorDetailsSchema.optional()
+});
+var exchangeClosedErrorSchema = z.strictObject({
+  code: z.literal("exchangeClosed"),
+  message: z.string(),
+  details: z.strictObject({
+    exchangeId: z.string(),
+    isin: z.string(),
+    isNostro: z.boolean(),
+    clientProcessId: z.string()
+  })
+});
+var orderNotFoundErrorSchema = z.strictObject({
+  code: z.literal("orderNotFound"),
+  message: z.string(),
+  details: z.strictObject({
+    orderId: z.string(),
+    userId: z.string()
+  })
+});
+var exchangeClosedResponseSchema = z.strictObject({
+  status: z.literal("failed"),
+  message: z.string(),
+  error: exchangeClosedErrorSchema
+});
+var orderNotFoundResponseSchema = z.strictObject({
+  status: z.literal("failed"),
+  orderId: z.string(),
+  message: z.string(),
+  error: orderNotFoundErrorSchema
+});
+var otherOrderMutationErrorValueSchema = z.union([
+  z.string(),
+  otherOrderMutationErrorSchema
+]);
+var otherOrderMutationResponseSchema = z.strictObject({
   status: orderMutationStatusSchema,
   orderId: z.string().optional(),
   id: z.string().optional(),
   message: z.string().optional(),
-  error: z.union([z.string(), orderMutationErrorSchema, z.array(jsonValue)]).optional()
-}).strict();
+  error: z.union([
+    otherOrderMutationErrorValueSchema,
+    z.array(otherOrderMutationErrorValueSchema)
+  ]).optional()
+});
+var orderMutationResponseSchema = z.union([
+  exchangeClosedResponseSchema,
+  orderNotFoundResponseSchema,
+  otherOrderMutationResponseSchema
+]);
 var orderMutationVariants = [
   "received",
   "waiting",
@@ -2031,8 +2081,6 @@ var schemaRegistry = [
   entry("account.personalDetails", "Personal details", "rest", "read", "GET /api/v1/customer/personal-details", jsonRecord),
   entry("account.relationships", "Account relationships", "rest", "read", "GET /api/v1/customer/relationships/detailed", accountRelationshipsSchema),
   entry("account.cardsHome", "Cards home", "rest", "read", "GET /api/v1/card/cards/home", jsonRecord),
-  entry("boards.list", "Boards list", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards", normalizedArrayWrappers),
-  entry("boards.detail", "Board detail", "rest", "read", "GET /api-gateway/pro-trading/api/v2/boards/{boardId}", jsonRecord),
   entry("assets.search", "Asset search", "websocket", "read", "neonSearch", normalizedArrayWrappers, { variants: ["stock", "crypto", "etf -> fund", "mutualFund", "privateFund", "bond", "synthetic"] }),
   entry("assets.get", "Instrument detail", "websocket", "read", "instrument", jsonRecord),
   entry("derivatives.search", "Derivative search", "websocket", "read", "neonSearch type=derivative", normalizedArrayWrappers),
@@ -2278,8 +2326,6 @@ var DEFAULT_ENDPOINTS = {
   "auth.loginProcess": "/api/v2/auth/web/login/processes/{processId}",
   "auth.account": "/api/v2/auth/account",
   "auth.session": "/api/v1/auth/web/session",
-  "boards.list": "/api-gateway/pro-trading/api/v2/boards",
-  "boards.detail": "/api-gateway/pro-trading/api/v2/boards/{boardId}",
   "assets.search": "/api/v2/search/instruments",
   "assets.detail": "/api/v2/instruments/{assetId}",
   "assets.all": "/api/v2/instruments",
@@ -2324,20 +2370,6 @@ var accountOperations = {
     normalize: (raw) => normalizeAccountRelationships(raw)
   },
   cardsHome: rest("account.cardsHome", "/api/v1/card/cards/home")
-};
-var boardOperations = {
-  list: {
-    ...endpoint("boards.list", "boards.list"),
-    normalize: (raw) => arrayPayload(raw).map(normalizeBoard)
-  },
-  detail: {
-    transport: "rest",
-    name: "boards.detail",
-    schemaName: "boards.detail",
-    endpoint: "boards.detail",
-    pathParams: ({ boardId }) => ({ boardId }),
-    normalize: (raw) => normalizeBoard(raw)
-  }
 };
 var discoveryOperations = {
   exchangeDetails: {
@@ -2439,18 +2471,6 @@ var AccountApi = class {
   }
   cardsHome() {
     return this.operations.executeRaw(accountOperations.cardsHome, {});
-  }
-};
-var BoardsApi = class {
-  constructor(operations) {
-    this.operations = operations;
-  }
-  operations;
-  list() {
-    return this.operations.execute(boardOperations.list, {});
-  }
-  get(boardId) {
-    return this.operations.execute(boardOperations.detail, { boardId });
   }
 };
 
@@ -3611,7 +3631,6 @@ var TradeRepublicClient = class _TradeRepublicClient {
   auth;
   raw;
   account;
-  boards;
   assets;
   derivatives;
   orders;
@@ -3678,7 +3697,6 @@ var TradeRepublicClient = class _TradeRepublicClient {
     });
     this.operations = this.runtime.operations;
     this.account = new AccountApi(this.operations);
-    this.boards = new BoardsApi(this.operations);
     this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
@@ -3698,7 +3716,7 @@ var TradeRepublicClient = class _TradeRepublicClient {
   static create(options = {}) {
     return new _TradeRepublicClient(options);
   }
-  static async collectWafContext(options = {}) {
+  static async collectWafToken(options = {}) {
     const { browser, browserLaunchOptions, ...collectionOptions } = options;
     if (browser) {
       if (browserLaunchOptions) {

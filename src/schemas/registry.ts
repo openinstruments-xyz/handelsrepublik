@@ -209,19 +209,98 @@ const orderMutationStatusSchema = z.enum([
   'failed',
 ]);
 
-const orderMutationErrorSchema = z.object({
-  code: z.string().optional(),
-  message: z.string().optional(),
-  details: jsonRecord.optional(),
-}).passthrough();
+const otherOrderMutationErrorCodeSchema = z.enum([
+  'cashMissing',
+  'currentQuoteMissing',
+  'instrumentSuspended',
+  'internalError',
+  'invalidSecurityDerivative',
+  'invalidSecurityNonDerivative',
+  'limitDenied',
+  'maxQuantityExceeded',
+  'noRefPriceAvailable',
+  'noRouteToMarket',
+  'orderAlreadyDeleted',
+  'orderAlreadyExists',
+  'orderRejectedAtExchange',
+  'portfolioInactive',
+  'quoteMissing',
+  'savingsplanSharesMissingToday',
+  'sharesMissing',
+  'shortPositionNotAllowed',
+  'timeoutError',
+  'unknownInstrument',
+]);
 
-const orderMutationResponseSchema = z.object({
+const otherOrderMutationErrorDetailsSchema = z.strictObject({
+  exchangeId: z.string().optional(),
+  isin: z.string().optional(),
+  orderId: z.string().optional(),
+  userId: z.string().optional(),
+  clientProcessId: z.string().optional(),
+  isNostro: z.boolean().optional(),
+});
+
+const otherOrderMutationErrorSchema = z.strictObject({
+  code: otherOrderMutationErrorCodeSchema,
+  message: z.string().optional(),
+  details: otherOrderMutationErrorDetailsSchema.optional(),
+});
+
+const exchangeClosedErrorSchema = z.strictObject({
+  code: z.literal('exchangeClosed'),
+  message: z.string(),
+  details: z.strictObject({
+    exchangeId: z.string(),
+    isin: z.string(),
+    isNostro: z.boolean(),
+    clientProcessId: z.string(),
+  }),
+});
+
+const orderNotFoundErrorSchema = z.strictObject({
+  code: z.literal('orderNotFound'),
+  message: z.string(),
+  details: z.strictObject({
+    orderId: z.string(),
+    userId: z.string(),
+  }),
+});
+
+const exchangeClosedResponseSchema = z.strictObject({
+  status: z.literal('failed'),
+  message: z.string(),
+  error: exchangeClosedErrorSchema,
+});
+
+const orderNotFoundResponseSchema = z.strictObject({
+  status: z.literal('failed'),
+  orderId: z.string(),
+  message: z.string(),
+  error: orderNotFoundErrorSchema,
+});
+
+const otherOrderMutationErrorValueSchema = z.union([
+  z.string(),
+  otherOrderMutationErrorSchema,
+]);
+
+const otherOrderMutationResponseSchema = z.strictObject({
   status: orderMutationStatusSchema,
   orderId: z.string().optional(),
   id: z.string().optional(),
   message: z.string().optional(),
-  error: z.union([z.string(), orderMutationErrorSchema, z.array(jsonValue)]).optional(),
-}).strict();
+  error: z.union([
+    otherOrderMutationErrorValueSchema,
+    z.array(otherOrderMutationErrorValueSchema),
+  ]).optional(),
+});
+
+const orderMutationResponseSchema = z.union([
+  exchangeClosedResponseSchema,
+  orderNotFoundResponseSchema,
+  otherOrderMutationResponseSchema,
+]);
 
 const orderMutationVariants = [
   'received',
@@ -267,8 +346,6 @@ export const schemaRegistry = [
   entry('account.personalDetails', 'Personal details', 'rest', 'read', 'GET /api/v1/customer/personal-details', jsonRecord),
   entry('account.relationships', 'Account relationships', 'rest', 'read', 'GET /api/v1/customer/relationships/detailed', accountRelationshipsSchema),
   entry('account.cardsHome', 'Cards home', 'rest', 'read', 'GET /api/v1/card/cards/home', jsonRecord),
-  entry('boards.list', 'Boards list', 'rest', 'read', 'GET /api-gateway/pro-trading/api/v2/boards', normalizedArrayWrappers),
-  entry('boards.detail', 'Board detail', 'rest', 'read', 'GET /api-gateway/pro-trading/api/v2/boards/{boardId}', jsonRecord),
   entry('assets.search', 'Asset search', 'websocket', 'read', 'neonSearch', normalizedArrayWrappers, { variants: ['stock', 'crypto', 'etf -> fund', 'mutualFund', 'privateFund', 'bond', 'synthetic'] }),
   entry('assets.get', 'Instrument detail', 'websocket', 'read', 'instrument', jsonRecord),
   entry('derivatives.search', 'Derivative search', 'websocket', 'read', 'neonSearch type=derivative', normalizedArrayWrappers),

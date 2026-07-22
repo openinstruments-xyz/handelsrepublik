@@ -71,8 +71,6 @@ const helperSignatures = new Map([
   ['derivatives', 'derivatives(query?: string, options?: { underlyingId?: string; direction?: "long" | "short"; limit?: number })'],
   ['derivativesFor', 'derivativesFor(underlyingId?: string, options?: { direction?: "long" | "short"; productType?: string; limit?: number })'],
   ['derivative', 'derivative(derivativeId: string)'],
-  ['boards', 'boards()'],
-  ['board', 'board(boardId: string)'],
   ['candles', 'candles(assetId?: string, exchangeId?: string, timeframe?: string, options?: { from?: string | Date; to?: string | Date; limit?: number })'],
   ['downloadCandles', 'downloadCandles(assetId?: string, exchangeId?: string, timeframe?: string, options?: { from?: string | Date; to?: string | Date; maxCandlesPerRequest?: number })'],
   ['marketSubscriptions', 'marketSubscriptions(options?: { assetId?: string; exchangeId?: string; type?: string })'],
@@ -619,20 +617,6 @@ async function derivative(derivativeId) {
   derivativeId ??= EXAMPLE_ASSET_ID;
   await ensureSession();
   return client.derivatives.get(derivativeId);
-}
-
-async function boards() {
-  await ensureSession();
-  return client.boards.list();
-}
-
-async function board(boardId) {
-  if (!boardId) {
-    const items = await boards();
-    return items[0] ?? null;
-  }
-  await ensureSession();
-  return client.boards.get(boardId);
 }
 
 async function candles(assetId, exchangeId, timeframe = '1h', options = {}) {
@@ -1640,8 +1624,6 @@ Object.assign(replContext, {
   derivatives,
   derivativesFor,
   derivative,
-  boards,
-  board,
   candles,
   downloadCandles,
   marketSubscriptions,

@@ -2,8 +2,6 @@ import type {
   AccountRelationship,
   Asset,
   AssetDetail,
-  Board,
-  BoardWidget,
   Candle,
   CandleSeries,
   CashSummary,
@@ -296,26 +294,6 @@ function sumExecutionSize(value: unknown): number | undefined {
     total += size;
   }
   return sawSize ? total : undefined;
-}
-
-export function normalizeBoard(value: unknown): Board {
-  const record = asRecord(value);
-  return {
-    id: stringValue(record.id, record.boardId),
-    name: optionalString(record.name, record.title),
-    widgets: arrayPayload(record.widgets).map(normalizeBoardWidget),
-    raw: value,
-  };
-}
-
-export function normalizeBoardWidget(value: unknown): BoardWidget {
-  const record = asRecord(value);
-  return {
-    id: stringValue(record.id, record.widgetId),
-    type: stringValue(record.type, record.widgetType),
-    settings: objectPayload(record.settings),
-    raw: value,
-  };
 }
 
 export function normalizePortfolio(value: unknown): Portfolio {
