@@ -16,10 +16,10 @@ const instrumentId = requiredEnvironment('TR_INTEGRATION_ORDER_ISIN');
 const buyAmount = Number(process.env.TR_INTEGRATION_ORDER_AMOUNT_EUR ?? '0.5');
 const maximumBuyAmount = 5;
 
-describe('TradeRepublicClient live buy integration', {
+describe('TradeRepublicClient market buy on live account integration', {
   skip: enabled ? false : 'set the live order execution opt-in to run buy integration tests',
 }, () => {
-  it('buys the configured amount at an automatically selected open venue', { timeout: 300_000 }, async (t) => withLiveDiagnostics('live buy', async () => {
+  it('buys the configured amount at an automatically selected open venue', { timeout: 300_000 }, async (t) => withLiveDiagnostics('market buy on live account', async () => {
     assert.ok(Number.isFinite(buyAmount) && buyAmount > 0, 'TR_INTEGRATION_ORDER_AMOUNT_EUR must be positive');
     assert.ok(buyAmount <= maximumBuyAmount, `live order tests are capped at ${maximumBuyAmount} EUR`);
     const client = await createLiveClient();

@@ -1,4 +1,4 @@
-name: live buy integration
+name: execute market buy on live account
 
 on:
   workflow_dispatch:
@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   orders:
-    name: execute live buy
+    name: execute market buy on live account
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
@@ -70,7 +70,7 @@ jobs:
             fi
             sleep $((attempt * 10))
           done
-      - name: Execute and verify live buy
+      - name: Execute and verify market buy on live account
         run: npm run test:integration:orders
       - name: Remove materialized session
         if: always()

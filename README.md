@@ -18,7 +18,7 @@
 [![manual closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
 [![manual closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
 [![manual open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
-[![manual live buy](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml)
+[![manual market buy on live account](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml/badge.svg?branch=main&event=workflow_dispatch)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)
 
 **Latest result per live workflow**
 
@@ -26,7 +26,7 @@
 [![latest closed limit](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-limit.yml)
 [![latest closed market](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-closed-market.yml)
 [![latest open limit cancel](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-open-limit.yml)
-[![latest live buy](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/live-order-integration.yml)
+[![latest market buy on live account](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml/badge.svg?branch=main)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)
 
 ## Overview
 
@@ -1517,7 +1517,8 @@ also retains its own clock guard before authentication or submission as a
 second safety layer.
 
 Successful live buying uses a different suite and workflow. The
-**live buy integration** workflow has only a `workflow_dispatch` trigger. It
+**execute market buy on live account** workflow has only a `workflow_dispatch`
+trigger. It
 requires an ISIN, market-buy amount in EUR, and explicit confirmation that a
 real market buy will execute. The test automatically selects the first
 broker-provided destination that explicitly reports `open: true` and supports
