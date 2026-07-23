@@ -39,6 +39,7 @@ interface Options {
   debug: boolean;
 }
 
+const sessionEnvironment = 'live-tr-session';
 const options = parseOptions(process.argv.slice(2));
 
 await run();
@@ -47,6 +48,8 @@ async function run(): Promise<void> {
   await gh(['auth', 'status']);
   const repo = options.repo ?? await detectRepository();
   console.log(`GitHub repository: ${repo}`);
+  await ensureEnvironment(repo);
+  const remoteWorkflowReady = await remoteWorkflowUsesEnvironment(repo);
 
   const sessionStore = new MemorySessionStore();
   const browser = await launchBrowser();
@@ -65,17 +68,24 @@ async function run(): Promise<void> {
     console.log('Trade Republic login approved.');
 
     const serialized = `${JSON.stringify(session, null, 2)}\n`;
-    console.log(`Updating repository secret ${repo}/${options.secret}...`);
+    console.log(`Updating environment secret ${repo}/${sessionEnvironment}/${options.secret}...`);
     await gh(
       [
         'secret',
         'set',
         options.secret,
+        '--env',
+        sessionEnvironment,
         '--repo',
         repo,
       ],
       serialized,
     );
+
+    if (!remoteWorkflowReady) {
+      console.log('Environment session updated. Push the workflow migration before running live CI.');
+      return;
+    }
 
     console.log(`Dispatching ${options.workflow} on ${options.ref}...`);
     const dispatchedAt = new Date();
@@ -98,6 +108,38 @@ async function run(): Promise<void> {
     client?.close();
     await browser.close().catch(() => undefined);
   }
+}
+
+async function ensureEnvironment(repo: string): Promise<void> {
+  const output = await gh([
+    'api',
+    `repos/${repo}/environments`,
+    '--paginate',
+    '--jq',
+    '.environments[].name',
+  ], undefined, true);
+  const environments = output.split(/\r?\n/).filter(Boolean);
+  if (environments.includes(sessionEnvironment)) return;
+
+  console.log(`Creating GitHub environment ${repo}/${sessionEnvironment}...`);
+  await gh([
+    'api',
+    '--method',
+    'PUT',
+    `repos/${repo}/environments/${encodeURIComponent(sessionEnvironment)}`,
+    '--silent',
+  ]);
+}
+
+async function remoteWorkflowUsesEnvironment(repo: string): Promise<boolean> {
+  const source = await gh([
+    'api',
+    `repos/${repo}/contents/.github/workflows/${options.workflow}?ref=${encodeURIComponent(options.ref)}`,
+    '--header',
+    'Accept: application/vnd.github.raw+json',
+  ], undefined, true);
+  return source.includes(`environment: ${sessionEnvironment}`)
+    && source.includes(`gh secret set TR_SESSION_JSON --env ${sessionEnvironment}`);
 }
 
 async function loginWithRotatingQr(client: TradeRepublicClient): Promise<Session> {
@@ -264,7 +306,7 @@ function parseOptions(args: string[]): Options {
 
 Options:
   --repo OWNER/REPO       GitHub repository (defaults to the current repo)
-  --secret NAME           Repository secret (default: TR_SESSION_JSON)
+  --secret NAME           Environment secret (default: TR_SESSION_JSON)
   --workflow FILE         Workflow file/name (default: general-read-only-validation.yml)
   --ref BRANCH            Branch to dispatch (default: main)
   --device-name NAME      Trade Republic device label

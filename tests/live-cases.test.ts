@@ -47,6 +47,26 @@ describe('live integration case manifest', () => {
     }
   });
 
+  it('loads and rotates the live session through the job-start environment', () => {
+    const workflowDirectory = join(process.cwd(), '.github', 'workflows');
+    const workflows = readdirSync(workflowDirectory).filter((file) => file.endsWith('.yml'));
+    for (const workflow of workflows) {
+      const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
+      if (!source.includes('TR_SESSION_JSON:')) continue;
+      assert.match(source, /environment: live-tr-session/, `${workflow} must load the shared environment secret`);
+      assert.match(
+        source,
+        /gh secret set TR_SESSION_JSON --env live-tr-session --repo /,
+        `${workflow} must rotate the shared environment secret`,
+      );
+      assert.doesNotMatch(
+        source,
+        /gh secret set TR_SESSION_JSON --repo /,
+        `${workflow} must not rotate the queue-time repository secret`,
+      );
+    }
+  });
+
   it('shows latest, scheduled, and manual workflow status in one README table', () => {
     const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
     assert.match(readme, /\| Workflow \| Latest \| Scheduled \| Manual \|/);

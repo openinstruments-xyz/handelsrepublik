@@ -14,7 +14,7 @@ const sessionPath = resolve(fileArgument);
 
 if (command === 'materialize') {
   const serialized = process.env.TR_SESSION_JSON;
-  assert.ok(serialized, 'The TR_SESSION_JSON GitHub repository secret is missing or empty.');
+  assert.ok(serialized, 'The TR_SESSION_JSON GitHub Actions secret is missing or empty.');
 
   const session = parseSession(serialized);
   assertAuthMaterial(session);
@@ -43,10 +43,10 @@ function parseSession(serialized: string): Session {
   try {
     value = JSON.parse(serialized);
   } catch {
-    throw new Error('The Trade Republic session secret is not valid JSON.');
+    throw new Error('The Trade Republic Actions session secret is not valid JSON.');
   }
 
-  assert.ok(value && typeof value === 'object' && !Array.isArray(value), 'The Trade Republic session secret must contain a JSON object.');
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value), 'The Trade Republic Actions session secret must contain a JSON object.');
   return value as Session;
 }
 
