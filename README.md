@@ -1598,16 +1598,31 @@ for the buy to execute.
 It does not automatically sell the purchased quantity, which remains in the
 account.
 Configure required reviewers on the `live-order-tests` GitHub environment before
-using it.
+using it. Approval happens in a dedicated job; the order itself runs afterward
+in the shared `live-tr-session` environment.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
 Quality and unit workflows run on every push and pull request. Every live
 workflow except the real market buy runs on pushes to `main`; time-dependent
 jobs stop at their first time gate when the current Berlin window does not fit.
-The real market buy remains manual-only.
+The real market buy remains manual-only. Every job that uses the rotating Trade
+Republic session runs in the unprotected `live-tr-session` GitHub environment.
+Keep that environment free of required reviewers so scheduled validations do
+not wait for approval. GitHub reads environment secrets when the referencing
+job starts, so a queued job receives the session saved by the preceding
+serialized workflow instead of the stale value that existed when it was
+queued.
 
-When the GitHub repository session secret expires, renew it from a maintainer machine:
+The reauthentication command creates the shared environment automatically when
+it is missing. To create it separately:
+
+```powershell
+gh api --method PUT repos/VIEWVIEWVIEW/handelsrepublik/environments/live-tr-session
+```
+
+When the GitHub Actions session can no longer be refreshed, renew it from a
+maintainer machine:
 
 ```powershell
 npm run ci:reauth
@@ -1617,17 +1632,18 @@ The command verifies the local GitHub CLI login, opens a browser briefly to
 collect the matching Trade Republic web context and WAF token, renders a QR code in the
 terminal, and waits for approval in the Trade Republic app. Short-lived QR
 challenges are replaced automatically until approval or the overall timeout. It
-then updates the repository-level `TR_SESSION_JSON` secret, dispatches
+then updates the `TR_SESSION_JSON` secret in the `live-tr-session` environment, dispatches
 `general-read-only-validation.yml` on `main`, and watches the new workflow run. The new
-session is held in memory and is not written to the repository. Keeping the
-live job free of a GitHub `environment` prevents test runs from appearing as
-deployments.
+session is held in memory and is not written to the repository. Use
+the default command; it creates and targets `live-tr-session` automatically.
 
 The live workflow also expects the repository-level
 `GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` secret. It must contain a token allowed
-to update Actions secrets for this repository so the refreshed session can be
-rotated after each run.
+to update Actions environment secrets for this repository so the refreshed
+session can be rotated after each run.
 
 Use `npm run ci:reauth -- --no-watch` to return after dispatching, or
-`npm run ci:reauth -- --help` to see repository, workflow, branch,
-timeout, and diagnostic overrides.
+`npm run ci:reauth -- --help` to see repository, workflow, branch, timeout, and
+diagnostic overrides. During the initial migration, the command detects that
+the remote workflow is not ready, seeds the environment secret, and returns
+without dispatching the incompatible workflow.
