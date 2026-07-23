@@ -34,7 +34,11 @@ const COLORS = Object.freeze({
 });
 
 const MAX_FAILURES = 5;
-const MAX_FAILURE_LENGTH = 42;
+const MAX_BADGE_WIDTH = 300;
+const DETAIL_HORIZONTAL_PADDING = 8;
+const DETAIL_PREFIX = '× ';
+const DETAIL_FONT_SIZE = 10;
+const FINAL_BASELINE_PADDING = 10;
 
 function badgeState(run) {
   if (!run) {
@@ -73,20 +77,67 @@ function escapeXml(value) {
     .replaceAll("'", '&apos;');
 }
 
+function estimateTextWidth(value, fontSize) {
+  let width = 0;
+
+  for (const character of value) {
+    if (character === ' ') {
+      width += 0.35;
+    } else if (/[ilI1.,:;!'|]/.test(character)) {
+      width += 0.3;
+    } else if (/[mwMW@%&QO0]/.test(character)) {
+      width += 0.78;
+    } else if (/[A-Z]/.test(character)) {
+      width += 0.67;
+    } else {
+      width += 0.55;
+    }
+  }
+
+  return width * fontSize;
+}
+
+function truncateToWidth(value, maxWidth, fontSize) {
+  if (estimateTextWidth(value, fontSize) <= maxWidth) {
+    return value;
+  }
+
+  const ellipsis = '…';
+  let visible = '';
+
+  for (const character of value) {
+    if (estimateTextWidth(`${visible}${character}${ellipsis}`, fontSize) > maxWidth) {
+      break;
+    }
+    visible += character;
+  }
+
+  return `${visible}${ellipsis}`;
+}
+
 export function renderBadge(message, color, failures = []) {
   const safeMessage = escapeXml(message);
+  const detailTextWidth = MAX_BADGE_WIDTH
+    - DETAIL_HORIZONTAL_PADDING * 2
+    - estimateTextWidth(DETAIL_PREFIX, DETAIL_FONT_SIZE);
   const visibleFailures = failures
     .slice(0, MAX_FAILURES)
-    .map((failure) => failure.length > MAX_FAILURE_LENGTH
-      ? `${failure.slice(0, MAX_FAILURE_LENGTH - 1)}…`
-      : failure);
+    .map((failure) => truncateToWidth(failure, detailTextWidth, DETAIL_FONT_SIZE));
   const hiddenFailureCount = Math.max(0, failures.length - visibleFailures.length);
   const failureLines = hiddenFailureCount > 0
     ? [...visibleFailures, `+${hiddenFailureCount} more`]
     : visibleFailures;
-  const longestLine = Math.max(message.length, ...failureLines.map((line) => line.length + 2));
-  const width = Math.max(46, Math.min(280, Math.ceil(longestLine * 6.4) + 18));
-  const height = 20 + failureLines.length * 16;
+  const contentWidth = Math.max(
+    estimateTextWidth(message, 11) + 14,
+    ...failureLines.map((line) => (
+      estimateTextWidth(`${DETAIL_PREFIX}${line}`, DETAIL_FONT_SIZE)
+      + DETAIL_HORIZONTAL_PADDING * 2
+    )),
+  );
+  const width = Math.max(46, Math.min(MAX_BADGE_WIDTH, Math.ceil(contentWidth)));
+  const height = failureLines.length > 0
+    ? 20 + failureLines.length * 16 + FINAL_BASELINE_PADDING
+    : 20;
   const center = width / 2;
   const accessibleFailures = failures.length > 0
     ? `; failed checks: ${failures.join('; ')}`
@@ -94,7 +145,7 @@ export function renderBadge(message, color, failures = []) {
   const safeAccessibleLabel = escapeXml(`CI: ${message}${accessibleFailures}`);
   const detailRows = failureLines.map((failure, index) => {
     const y = 34 + index * 16;
-    return `    <text x="8" y="${y}">× ${escapeXml(failure)}</text>`;
+    return `    <text x="${DETAIL_HORIZONTAL_PADDING}" y="${y}">${DETAIL_PREFIX}${escapeXml(failure)}</text>`;
   }).join('\n');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" role="img" aria-label="${safeAccessibleLabel}">

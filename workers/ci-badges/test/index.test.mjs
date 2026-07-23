@@ -18,10 +18,30 @@ test('expands failing badges into a vertical failed-check list', () => {
     'validate portfolio <shape>',
   ]);
 
-  assert.match(svg, /height="52"/);
+  assert.match(svg, /height="62"/);
   assert.match(svg, /failed checks: validate cash response; validate portfolio &lt;shape&gt;/);
   assert.match(svg, /× validate cash response/);
   assert.match(svg, /× validate portfolio &lt;shape&gt;/);
+});
+
+test('keeps bottom padding below the final failed check', () => {
+  const svg = renderBadge('failing', '#e05d44', ['validate cash response']);
+  const height = Number(svg.match(/<svg[^>]* height="(\d+)"/)?.[1]);
+  const baselines = [...svg.matchAll(/<text x="8" y="(\d+)"/g)]
+    .map((match) => Number(match[1]));
+  const finalBaseline = baselines.at(-1);
+
+  assert.ok(
+    height - finalBaseline >= 10,
+    `expected at least 10px below the final baseline, received ${height - finalBaseline}px`,
+  );
+});
+
+test('uses the available detail width before truncating', () => {
+  const failure = 'validate closed venue and rejected EUR 1 market buy';
+  const svg = renderBadge('failing', '#e05d44', [failure]);
+
+  assert.match(svg, new RegExp(`× ${failure}<`));
 });
 
 test('limits and truncates long failure lists', () => {
@@ -35,7 +55,7 @@ test('limits and truncates long failure lists', () => {
     'seven',
   ]);
 
-  assert.match(svg, /a{41}…/);
+  assert.match(svg, /a+…/);
   assert.match(svg, /\+2 more/);
   assert.doesNotMatch(svg, />× six<\/text>/);
 });
