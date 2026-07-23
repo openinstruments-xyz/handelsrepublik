@@ -19,7 +19,7 @@
     "prepare": "husky",
     "dev": "npm run build && node ./demo/repl.mjs",
     "start": "npm run build && node ./demo/repl.mjs",
-    "build": "tsup src/index.ts --format esm --dts --sourcemap",
+    "build": "tsup src/index.ts --format esm --dts --sourcemap && node scripts/normalize-source-map.mjs",
     "demo:repl": "npm run build && node ./demo/repl.mjs",
     "demo:tui": "npm run build && node ./demo/tui.mjs",
     "demo:quickstart": "npm run build && node ./demo/quickdemo.mjs",
