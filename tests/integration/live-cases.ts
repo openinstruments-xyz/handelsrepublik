@@ -235,7 +235,9 @@ export const liveCases: readonly LiveCase[] = [
       const destinations = await client.trading.orderDestinations(asset.id);
       assertArray(destinations, `orderDestinations(${type})`);
       if (destinations.length === 0) await note(`${type}: valid empty destinations; item schema not observed`);
-      if (type !== 'crypto') assert.ok(destinations.every((destination) => destination.open !== true), `${type} unexpectedly exposes an open destination`);
+      if (!['crypto', 'mutualFund', 'privateFund'].includes(type)) {
+        assert.ok(destinations.every((destination) => destination.open !== true), `${type} unexpectedly exposes an open destination`);
+      }
     }
   }, 150_000),
   defineLiveCase('closed-venue.exchange-schedule', 'closed-venue', async ({ client }) => assertRecord(await client.discovery.exchangeSchedule(DEFAULT_EXCHANGE), 'exchangeSchedule')),

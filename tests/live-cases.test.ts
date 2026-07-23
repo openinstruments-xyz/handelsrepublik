@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import type { TradeRepublicClient } from '../src/index.js';
 import { liveCases } from './integration/live-cases.js';
 
 describe('live integration case manifest', () => {
@@ -29,6 +30,31 @@ describe('live integration case manifest', () => {
         assert.match(source, new RegExp(`npm run test:integration:case -- ${escapeRegex(testCase.id)}(?:\\r?\\n|$)`));
       }
     }
+  });
+
+  it('allows continuously available asset classes in the closed-market destination check', async () => {
+    const testCase = liveCases.find((candidate) => candidate.id === 'closed-venue.destinations-all-classes');
+    assert.ok(testCase);
+    const requestedTypes: string[] = [];
+    const client = {
+      assets: {
+        search: async (_query: string, options: { type: string }) => {
+          requestedTypes.push(options.type);
+          return [{ id: options.type }];
+        },
+      },
+      trading: {
+        orderDestinations: async (instrumentId: string) => [{
+          id: 'TEST',
+          open: instrumentId === 'crypto' || instrumentId === 'privateFund' || instrumentId === 'mutualFund',
+        }],
+      },
+    } as unknown as TradeRepublicClient;
+
+    await testCase.run({ client, note: async () => undefined });
+    assert.deepEqual(requestedTypes.sort(), [
+      'bond', 'crypto', 'derivative', 'etf', 'fund', 'mutualFund', 'privateFund', 'stock', 'synthetic',
+    ]);
   });
 });
 
