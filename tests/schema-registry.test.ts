@@ -30,6 +30,7 @@ describe('schema registry', () => {
       ['market.candles.light', 'market.candles.json'],
       ['trading.orderDestinations', 'trading.orderDestinations.json'],
       ['orders.submit', 'orders.submit.exchangeClosed.json'],
+      ['orders.submit', 'orders.submit.exchangeClosed.userId.json'],
       ['orders.cancel', 'orders.cancel.orderNotFound.json'],
     ] as const) {
       assert.doesNotThrow(() => validateRawResponse(fixture[0], readFixture(fixture[1])), fixture[0]);

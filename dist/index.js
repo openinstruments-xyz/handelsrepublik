@@ -2066,12 +2066,20 @@ var otherOrderMutationErrorSchema = z.strictObject({
 var exchangeClosedErrorSchema = z.strictObject({
   code: z.literal("exchangeClosed"),
   message: z.string(),
-  details: z.strictObject({
-    exchangeId: z.string(),
-    isin: z.string(),
-    isNostro: z.boolean(),
-    clientProcessId: z.string()
-  })
+  details: z.union([
+    z.strictObject({
+      exchangeId: z.string(),
+      isin: z.string(),
+      isNostro: z.boolean(),
+      clientProcessId: z.string()
+    }),
+    z.strictObject({
+      exchangeId: z.string(),
+      isin: z.string(),
+      isNostro: z.boolean(),
+      userId: z.string()
+    })
+  ])
 });
 var orderNotFoundErrorSchema = z.strictObject({
   code: z.literal("orderNotFound"),
@@ -2116,7 +2124,8 @@ var orderMutationVariants = [
   "waiting",
   "confirmationNeeded",
   "succeeded",
-  "failed: exchangeClosed (observed live)",
+  "failed: exchangeClosed with clientProcessId (observed live)",
+  "failed: exchangeClosed with userId (observed live)",
   "failed: cashMissing",
   "failed: currentQuoteMissing",
   "failed: instrumentSuspended",
