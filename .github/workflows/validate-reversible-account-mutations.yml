@@ -1,4 +1,4 @@
-name: validate reversible account mutations (watchlists, price alerts)
+name: watchlists, price alerts
 
 on:
   push:

@@ -1,4 +1,4 @@
-name: validate venue during opening times (quotations, price-for-order, market subscriptions, last trades/tape, ticker, L2 books, order destinations)
+name: quotations, price-for-order, market subscriptions, last trades/tape, ticker, L2 books, order destinations
 
 on:
   push:

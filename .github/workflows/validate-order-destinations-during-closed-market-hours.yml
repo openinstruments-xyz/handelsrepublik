@@ -1,4 +1,4 @@
-name: validate order destinations during closed-market hours (stocks, ETFs, funds, mutual funds, private funds, derivatives, crypto, bonds, synthetics)
+name: stocks, ETFs, funds, mutual funds, private funds, derivatives, crypto, bonds, synthetics
 
 on:
   push:

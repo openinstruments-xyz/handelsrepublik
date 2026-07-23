@@ -1,4 +1,4 @@
-name: execute market buy on live account (manual custom ISIN, maximum EUR 5, automatic venue selection)
+name: manual custom ISIN, maximum EUR 5, automatic venue selection
 
 on:
   workflow_dispatch:

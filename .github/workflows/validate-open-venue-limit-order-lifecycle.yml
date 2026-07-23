@@ -1,4 +1,4 @@
-name: validate open-venue limit-order lifecycle (order updates, EUR 1 submit, EUR 0.50 replace, cancel, cleanup)
+name: order updates, EUR 1 submit, EUR 0.50 replace, cancel, cleanup
 
 on:
   push:

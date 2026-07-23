@@ -1,4 +1,4 @@
-name: validate closed-venue limit-order rejection (EUR 1 limit buy, exchangeClosed response)
+name: EUR 1 limit buy, exchangeClosed response
 
 on:
   push:

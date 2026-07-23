@@ -1,4 +1,4 @@
-name: validate package quality (typecheck, build, distribution)
+name: typecheck, build, distribution
 
 on:
   push:

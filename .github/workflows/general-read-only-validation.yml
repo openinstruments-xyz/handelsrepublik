@@ -1,4 +1,4 @@
-name: general read-only validation of account and asset information (sessions, account, assets, derivatives, candles, orders, portfolio, timeline, documents, taxes, payments)
+name: sessions, account, assets, derivatives, candles, orders, portfolio, timeline, documents, taxes, payments
 
 on:
   push:

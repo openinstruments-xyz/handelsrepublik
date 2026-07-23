@@ -1,4 +1,4 @@
-name: validate closed-venue market-order rejection (EUR 1 market buy, exchangeClosed response)
+name: EUR 1 market buy, exchangeClosed response
 
 on:
   push:
