@@ -25,12 +25,16 @@ const EVENTS = Object.freeze({
 const COLORS = Object.freeze({
   success: '#4c1',
   failure: '#e05d44',
+  failureDetails: '#24292f',
   running: '#007ec6',
   cancelled: '#9f9f9f',
   skipped: '#9f9f9f',
   neutral: '#dfb317',
   unknown: '#9f9f9f',
 });
+
+const MAX_FAILURES = 5;
+const MAX_FAILURE_LENGTH = 42;
 
 function badgeState(run) {
   if (!run) {
@@ -69,28 +73,55 @@ function escapeXml(value) {
     .replaceAll("'", '&apos;');
 }
 
-export function renderBadge(message, color) {
+export function renderBadge(message, color, failures = []) {
   const safeMessage = escapeXml(message);
-  const width = Math.max(46, Math.ceil(message.length * 6.8) + 14);
+  const visibleFailures = failures
+    .slice(0, MAX_FAILURES)
+    .map((failure) => failure.length > MAX_FAILURE_LENGTH
+      ? `${failure.slice(0, MAX_FAILURE_LENGTH - 1)}…`
+      : failure);
+  const hiddenFailureCount = Math.max(0, failures.length - visibleFailures.length);
+  const failureLines = hiddenFailureCount > 0
+    ? [...visibleFailures, `+${hiddenFailureCount} more`]
+    : visibleFailures;
+  const longestLine = Math.max(message.length, ...failureLines.map((line) => line.length + 2));
+  const width = Math.max(46, Math.min(280, Math.ceil(longestLine * 6.4) + 18));
+  const height = 20 + failureLines.length * 16;
   const center = width / 2;
+  const accessibleFailures = failures.length > 0
+    ? `; failed checks: ${failures.join('; ')}`
+    : '';
+  const safeAccessibleLabel = escapeXml(`CI: ${message}${accessibleFailures}`);
+  const detailRows = failureLines.map((failure, index) => {
+    const y = 34 + index * 16;
+    return `    <text x="8" y="${y}">× ${escapeXml(failure)}</text>`;
+  }).join('\n');
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="CI: ${safeMessage}">
-  <title>CI: ${safeMessage}</title>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" role="img" aria-label="${safeAccessibleLabel}">
+  <title>${safeAccessibleLabel}</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#fff" stop-opacity=".15"/>
     <stop offset="1" stop-opacity=".15"/>
   </linearGradient>
   <rect width="${width}" height="20" rx="3" fill="${color}"/>
   <rect width="${width}" height="20" rx="3" fill="url(#s)"/>
+${failureLines.length > 0
+    ? `  <path d="M0 17h${width}v${height - 20}a3 3 0 0 1-3 3H3a3 3 0 0 1-3-3z" fill="${COLORS.failureDetails}"/>`
+    : ''}
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
     <text x="${center}" y="15" fill="#010101" fill-opacity=".3">${safeMessage}</text>
     <text x="${center}" y="14">${safeMessage}</text>
   </g>
+${failureLines.length > 0
+    ? `  <g fill="#fff" text-anchor="start" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="10">
+${detailRows}
+  </g>`
+    : ''}
 </svg>`;
 }
 
-function svgResponse(message, color, status = 200, cacheable = true) {
-  return new Response(renderBadge(message, color), {
+function svgResponse(message, color, failures = [], status = 200, cacheable = true) {
+  return new Response(renderBadge(message, color, failures), {
     status,
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
@@ -145,6 +176,45 @@ async function loadLatestRun(selection, token) {
   return payload.workflow_runs?.[0];
 }
 
+async function loadFailedChecks(runId, token) {
+  const endpoint = new URL(
+    `https://api.github.com/repos/${OWNER}/${REPOSITORY}/actions/runs/${runId}/jobs`,
+  );
+  endpoint.searchParams.set('filter', 'latest');
+  endpoint.searchParams.set('per_page', '100');
+
+  const response = await fetch(endpoint, {
+    headers: {
+      accept: 'application/vnd.github+json',
+      authorization: `Bearer ${token}`,
+      'user-agent': 'handelsrepublik-ci-badges',
+      'x-github-api-version': API_VERSION,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub returned ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const failures = [];
+
+  for (const job of payload.jobs ?? []) {
+    const failedSteps = (job.steps ?? [])
+      .filter((step) => step.conclusion === 'failure')
+      .map((step) => step.name)
+      .filter((name) => name.toLowerCase() !== 'publish test result table');
+
+    if (failedSteps.length > 0) {
+      failures.push(...failedSteps);
+    } else if (job.conclusion === 'failure') {
+      failures.push(job.name);
+    }
+  }
+
+  return [...new Set(failures)];
+}
+
 export default {
   async fetch(request, env, context) {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -160,7 +230,7 @@ export default {
     }
 
     if (!env.GH_TOKEN) {
-      return svgResponse('unknown', COLORS.unknown, 503, false);
+      return svgResponse('unknown', COLORS.unknown, [], 503, false);
     }
 
     const cache = caches.default;
@@ -172,14 +242,25 @@ export default {
     }
 
     try {
-      const state = badgeState(await loadLatestRun(selection, env.GH_TOKEN));
-      const response = svgResponse(state.message, state.color);
+      const run = await loadLatestRun(selection, env.GH_TOKEN);
+      const state = badgeState(run);
+      let failures = [];
+
+      if (state.message === 'failing' && run?.id) {
+        try {
+          failures = await loadFailedChecks(run.id, env.GH_TOKEN);
+        } catch {
+          // The run status is still useful when GitHub's jobs endpoint is unavailable.
+        }
+      }
+
+      const response = svgResponse(state.message, state.color, failures);
       context.waitUntil(cache.put(request, response.clone()));
       return request.method === 'HEAD'
         ? new Response(null, response)
         : response;
     } catch {
-      return svgResponse('unknown', COLORS.unknown, 502, false);
+      return svgResponse('unknown', COLORS.unknown, [], 502, false);
     }
   },
 };

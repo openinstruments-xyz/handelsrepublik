@@ -6,9 +6,38 @@ import worker, { renderBadge } from '../src/index.mjs';
 test('renders a compact status-only SVG', () => {
   const svg = renderBadge('passing', '#4c1');
 
+  assert.match(svg, /height="20"/);
   assert.match(svg, /aria-label="CI: passing"/);
   assert.match(svg, />passing<\/text>/);
   assert.doesNotMatch(svg, /handelsrepublik/i);
+});
+
+test('expands failing badges into a vertical failed-check list', () => {
+  const svg = renderBadge('failing', '#e05d44', [
+    'validate cash response',
+    'validate portfolio <shape>',
+  ]);
+
+  assert.match(svg, /height="52"/);
+  assert.match(svg, /failed checks: validate cash response; validate portfolio &lt;shape&gt;/);
+  assert.match(svg, /× validate cash response/);
+  assert.match(svg, /× validate portfolio &lt;shape&gt;/);
+});
+
+test('limits and truncates long failure lists', () => {
+  const svg = renderBadge('failing', '#e05d44', [
+    'a'.repeat(80),
+    'two',
+    'three',
+    'four',
+    'five',
+    'six',
+    'seven',
+  ]);
+
+  assert.match(svg, /a{41}…/);
+  assert.match(svg, /\+2 more/);
+  assert.doesNotMatch(svg, />× six<\/text>/);
 });
 
 test('rejects workflows outside the allowlist', async () => {
@@ -31,4 +60,57 @@ test('returns an SVG without exposing configuration errors', async () => {
   assert.equal(response.status, 503);
   assert.equal(response.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
   assert.match(await response.text(), />unknown<\/text>/);
+});
+
+test('loads failed steps only for a failing run', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalCaches = globalThis.caches;
+  const requestedUrls = [];
+
+  globalThis.fetch = async (url) => {
+    requestedUrls.push(String(url));
+
+    if (String(url).includes('/actions/workflows/')) {
+      return Response.json({
+        workflow_runs: [{ id: 123, status: 'completed', conclusion: 'failure' }],
+      });
+    }
+
+    return Response.json({
+      jobs: [{
+        name: 'validation job',
+        conclusion: 'failure',
+        steps: [
+          { name: 'validate cash response', conclusion: 'failure' },
+          { name: 'publish test result table', conclusion: 'failure' },
+        ],
+      }],
+    });
+  };
+  globalThis.caches = {
+    default: {
+      async match() {
+        return undefined;
+      },
+      async put() {},
+    },
+  };
+
+  try {
+    const response = await worker.fetch(
+      new Request('https://example.com/reads/scheduled.svg'),
+      { GH_TOKEN: 'test-token' },
+      { waitUntil() {} },
+    );
+    const svg = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.equal(requestedUrls.length, 2);
+    assert.match(requestedUrls[1], /\/actions\/runs\/123\/jobs/);
+    assert.match(svg, /× validate cash response/);
+    assert.doesNotMatch(svg, /publish test result table/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.caches = originalCaches;
+  }
 });
