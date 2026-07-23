@@ -27,6 +27,8 @@
     "demo:redis": "npm run build && node ./demo/redis-multi-account.mjs",
     "demo:scratchpad": "node --import tsx ./demo/scratchpad.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:ci:record": "node --import tsx scripts/ci-test-report.ts run",
+    "test:ci:summary": "node --import tsx scripts/ci-test-report.ts summary",
     "test:integration": "npm run test:integration:read",
     "test:integration:read": "node --import tsx tests/integration/run-live-suite.ts read",
     "test:integration:case": "node --import tsx tests/integration/run-live-case.ts",

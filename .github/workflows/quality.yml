@@ -26,7 +26,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
+      - name: configure test result path
+        run: echo "CI_TEST_RESULTS_FILE=$RUNNER_TEMP/handelsrepublik-test-results.ndjson" >> "$GITHUB_ENV"
+      - name: typecheck TypeScript sources
+        continue-on-error: true
+        run: npm run test:ci:record -- quality.typecheck "TypeScript typecheck" -- npm run typecheck
+      - name: build package distribution
+        continue-on-error: true
+        run: npm run test:ci:record -- quality.build "Package build" -- npm run build
       - name: verify the committed distribution is current
-        run: git diff --exit-code -- dist
+        continue-on-error: true
+        run: npm run test:ci:record -- quality.distribution "Committed distribution" -- git diff --exit-code -- dist
+      - name: publish test result table
+        if: always()
+        run: npm run test:ci:summary -- "Package quality results"

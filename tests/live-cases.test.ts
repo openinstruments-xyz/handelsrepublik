@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { TradeRepublicClient } from '../src/index.js';
@@ -28,7 +28,30 @@ describe('live integration case manifest', () => {
       const source = readFileSync(join(process.cwd(), '.github', 'workflows', workflow), 'utf8');
       for (const testCase of liveCases.filter((candidate) => candidate.suite === suite)) {
         assert.match(source, new RegExp(`npm run test:integration:case -- ${escapeRegex(testCase.id)}(?:\\r?\\n|$)`));
+        assert.match(source, new RegExp(
+          `continue-on-error: true\\r?\\n\\s+run: npm run test:integration:case -- ${escapeRegex(testCase.id)}(?:\\r?\\n|$)`,
+        ));
       }
+    }
+  });
+
+  it('publishes a result table from every workflow', () => {
+    const workflowDirectory = join(process.cwd(), '.github', 'workflows');
+    const workflows = readdirSync(workflowDirectory).filter((file) => file.endsWith('.yml'));
+    assert.equal(workflows.length, 10);
+    for (const workflow of workflows) {
+      const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
+      assert.match(source, /CI_TEST_RESULTS_FILE=\$RUNNER_TEMP\//, `${workflow} must configure the shared result file`);
+      assert.doesNotMatch(source, /CI_TEST_RESULTS_FILE:\s*\$\{\{\s*runner\.temp\s*\}\}/);
+      assert.match(source, /test:ci:summary/, `${workflow} must publish a result table`);
+    }
+  });
+
+  it('shows latest, scheduled, and manual workflow status in one README table', () => {
+    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    assert.match(readme, /\| Workflow \| Latest \| Scheduled \| Manual \|/);
+    for (const workflow of readdirSync(join(process.cwd(), '.github', 'workflows')).filter((file) => file.endsWith('.yml'))) {
+      assert.match(readme, new RegExp(`actions/workflows/${escapeRegex(workflow)}/badge\\.svg\\?branch=main`));
     }
   });
 

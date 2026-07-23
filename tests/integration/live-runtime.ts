@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { appendFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -9,6 +8,7 @@ import {
   type AssetSearchType,
   type Subscription,
 } from '../../src/index.js';
+import { appendCiResult } from '../../scripts/ci-test-report.js';
 
 export type LiveSuite = 'read' | 'closed-venue' | 'open-venue' | 'mutations';
 
@@ -27,6 +27,7 @@ export interface LiveCase {
 const sessionPath = process.env.TR_SESSION_FILE ?? join(process.cwd(), 'demo', '.demo-session.json');
 
 export async function runLiveCase(testCase: LiveCase): Promise<void> {
+  const startedAt = performance.now();
   if (!existsSync(sessionPath)) {
     throw new Error(`Missing live session ${sessionPath}. Re-authenticate or set TR_SESSION_FILE.`);
   }
@@ -44,13 +45,33 @@ export async function runLiveCase(testCase: LiveCase): Promise<void> {
   };
   try {
     await withTimeout(testCase.run({ client, note }), testCase.timeoutMs, testCase.id);
-    await writeStepSummary(testCase, 'passed', notes);
+    await recordLiveCaseResult(testCase, 'passed', startedAt, notes);
   } catch (error) {
-    await writeStepSummary(testCase, 'failed', notes);
+    await recordLiveCaseResult(testCase, 'failed', startedAt, notes);
     throw error;
   } finally {
     client.close();
   }
+}
+
+async function recordLiveCaseResult(
+  testCase: LiveCase,
+  status: 'passed' | 'failed',
+  startedAt: number,
+  notes: string[],
+): Promise<void> {
+  if (!process.env.CI_TEST_RESULTS_FILE) return;
+  await appendCiResult({
+    id: testCase.id,
+    name: testCase.id,
+    status,
+    durationMs: Math.round(performance.now() - startedAt),
+    note: notes.length > 0
+      ? notes.join('; ')
+      : status === 'passed'
+        ? 'Exact raw and normalized response validation completed.'
+        : 'See the corresponding workflow step log for diagnostics.',
+  });
 }
 
 export function defineLiveCase(
@@ -131,16 +152,4 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-async function writeStepSummary(testCase: LiveCase, status: 'passed' | 'failed', notes: string[]): Promise<void> {
-  const path = process.env.GITHUB_STEP_SUMMARY;
-  if (!path) return;
-  const lines = [
-    `### ${testCase.id}: ${status}`,
-    '',
-    ...(notes.length ? notes.map((note) => `- ${note}`) : ['- Exact raw and normalized response validation completed.']),
-    '',
-  ];
-  await appendFile(path, `${lines.join('\n')}\n`, 'utf8');
 }

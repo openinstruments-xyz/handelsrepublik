@@ -32,10 +32,21 @@ jobs:
           minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
           if (( minutes >= 1380 || minutes < 300 )); then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
+            result="✅ Passed"
+            note="Inside 23:00–05:00 Europe/Berlin; live tests will run."
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             echo "Skipping outside 23:00–05:00 Europe/Berlin."
+            result="⏭️ Skipped"
+            note="Outside 23:00–05:00 Europe/Berlin."
           fi
+          {
+            echo "## Closed-market time gate"
+            echo ""
+            echo "| Test | Result | Notes |"
+            echo "|---|:---:|---|"
+            echo "| Closed-market eligibility | $result | $note |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   closed-market-data:
     name: validate closed-market venue data
@@ -53,7 +64,9 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: configure ephemeral session path
-        run: echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+        run: |
+          echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+          echo "CI_TEST_RESULTS_FILE=$RUNNER_TEMP/handelsrepublik-test-results.ndjson" >> "$GITHUB_ENV"
       - name: materialize encrypted test session
         env:
           TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
@@ -63,15 +76,19 @@ jobs:
         run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
       - name: validate order destinations for every asset class
         if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        continue-on-error: true
         run: npm run test:integration:case -- closed-venue.destinations-all-classes
       - name: validate exchange schedule
         if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        continue-on-error: true
         run: npm run test:integration:case -- closed-venue.exchange-schedule
       - name: validate closed instrument status
         if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        continue-on-error: true
         run: npm run test:integration:case -- closed-venue.instrument-status
       - name: validate closed-market quotation
         if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
+        continue-on-error: true
         run: npm run test:integration:case -- closed-venue.quote
       - name: rotate encrypted GitHub session secret
         if: ${{ always() && steps.live-ready.outcome == 'success' }}
@@ -81,3 +98,6 @@ jobs:
       - name: remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"
+      - name: publish test result table
+        if: always()
+        run: npm run test:ci:summary -- "Closed-market venue results"

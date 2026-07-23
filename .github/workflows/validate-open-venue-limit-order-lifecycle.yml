@@ -43,10 +43,21 @@ jobs:
           minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
           if (( weekday <= 5 && minutes >= 570 && minutes < 1020 )); then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
+            result="✅ Passed"
+            note="Inside weekdays 09:30–17:00 Europe/Berlin; the lifecycle test will run."
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             echo "Skipping outside weekdays 09:30–17:00 Europe/Berlin."
+            result="⏭️ Skipped"
+            note="Outside weekdays 09:30–17:00 Europe/Berlin."
           fi
+          {
+            echo "## Open-market time gate"
+            echo ""
+            echo "| Test | Result | Notes |"
+            echo "|---|:---:|---|"
+            echo "| Open-market eligibility | $result | $note |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   open-limit-order:
     name: stream, submit, replace, cancel, and clean up limit orders
@@ -64,7 +75,9 @@ jobs:
           package-manager-cache: false
       - run: npm ci
       - name: configure ephemeral session path
-        run: echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+        run: |
+          echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+          echo "CI_TEST_RESULTS_FILE=$RUNNER_TEMP/handelsrepublik-test-results.ndjson" >> "$GITHUB_ENV"
       - name: materialize encrypted test session
         env:
           TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
@@ -73,7 +86,8 @@ jobs:
         id: live-ready
         run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
       - name: validate order-update stream and complete limit-order lifecycle
-        run: npm run test:integration:open-limit-order
+        continue-on-error: true
+        run: npm run test:ci:record -- orders.open-limit-lifecycle "Open-venue limit-order lifecycle" -- npm run test:integration:open-limit-order
       - name: rotate encrypted GitHub session secret
         if: ${{ always() && steps.live-ready.outcome == 'success' }}
         env:
@@ -82,3 +96,6 @@ jobs:
       - name: remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"
+      - name: publish test result table
+        if: always()
+        run: npm run test:ci:summary -- "Open-venue limit-order results"

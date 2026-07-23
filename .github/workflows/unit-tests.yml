@@ -26,4 +26,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+      - name: configure test result path
+        run: echo "CI_TEST_RESULTS_FILE=$RUNNER_TEMP/handelsrepublik-test-results.ndjson" >> "$GITHUB_ENV"
+      - name: run unit test suite
+        continue-on-error: true
+        run: npm run test:ci:record -- unit.tests "Unit test suite" -- npm test
+      - name: publish test result table
+        if: always()
+        run: npm run test:ci:summary -- "Unit test results"
