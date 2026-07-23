@@ -1,4 +1,4 @@
-name: sessions, account, assets, derivatives, candles, orders, portfolio, timeline, documents, taxes, payments
+name: sessions, account, instrument discovery/details, derivative catalog, candles, orders, portfolio, timeline, documents, taxes, payments
 
 on:
   push:

@@ -1,4 +1,4 @@
-name: stocks, ETFs, funds, mutual funds, private funds, derivatives, crypto, bonds, synthetics
+name: cross-asset order destinations, exchange schedule, instrument status, closed-market quotations
 
 on:
   push:
