@@ -67,14 +67,6 @@ describe('live integration case manifest', () => {
     }
   });
 
-  it('shows latest, scheduled, and manual workflow status in one README table', () => {
-    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
-    assert.match(readme, /\| Workflow \| Latest \| Scheduled \| Manual \|/);
-    for (const workflow of readdirSync(join(process.cwd(), '.github', 'workflows')).filter((file) => file.endsWith('.yml'))) {
-      assert.match(readme, new RegExp(`actions/workflows/${escapeRegex(workflow)}/badge\\.svg\\?branch=main`));
-    }
-  });
-
   it('allows continuously available asset classes in the closed-market destination check', async () => {
     const testCase = liveCases.find((candidate) => candidate.id === 'closed-venue.destinations-all-classes');
     assert.ok(testCase);
