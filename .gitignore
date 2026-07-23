@@ -29,6 +29,7 @@ scratchpad/qr-login-scratchpad.pid
 .challenge.js
 scratchpad-challenge.js
 .scratchpad-debug-*/
+.codex-remote-attachments/
 
 # Local Trade Republic captures and downloaded web bundles
 web-reference/*
