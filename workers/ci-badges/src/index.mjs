@@ -206,15 +206,15 @@ function parseRequestPath(pathname) {
   };
 }
 
-export function formatRunLabel(message, run) {
+export function formatRunTitle(message, run) {
   const timestamp = run?.run_started_at ?? run?.created_at;
   if (!timestamp) {
-    return message;
+    return `CI: ${message}`;
   }
 
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
-    return message;
+    return `CI: ${message}`;
   }
 
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -232,7 +232,7 @@ export function formatRunLabel(message, run) {
   const minute = value('minute');
 
   if (!day || !month || hour === undefined || minute === undefined) {
-    return message;
+    return `CI: ${message}`;
   }
 
   return `${message} - ${day}/${month} ${hour}:${minute}`;
@@ -357,13 +357,12 @@ export default {
         }
       }
 
-      const label = formatRunLabel(state.message, run);
       const response = svgResponse(
-        label,
+        state.message,
         state.color,
         failures,
         200,
-        label,
+        formatRunTitle(state.message, run),
       );
       return request.method === 'HEAD'
         ? new Response(null, response)

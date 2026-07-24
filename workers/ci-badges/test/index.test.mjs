@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import worker, { formatRunLabel, renderBadge } from '../src/index.mjs';
+import worker, { formatRunTitle, renderBadge } from '../src/index.mjs';
 
 test('renders a compact status-only SVG', () => {
   const svg = renderBadge('passing', '#4c1');
@@ -12,13 +12,13 @@ test('renders a compact status-only SVG', () => {
   assert.doesNotMatch(svg, /handelsrepublik/i);
 });
 
-test('formats the run start in Berlin time for the badge label', () => {
+test('formats the run start in Berlin time for the badge title', () => {
   assert.equal(
-    formatRunLabel('passing', { run_started_at: '2026-07-24T21:45:00Z' }),
+    formatRunTitle('passing', { run_started_at: '2026-07-24T21:45:00Z' }),
     'passing - 24/7 23:45',
   );
   assert.equal(
-    formatRunLabel('passing', { run_started_at: '2026-01-24T22:45:00Z' }),
+    formatRunTitle('passing', { run_started_at: '2026-01-24T22:45:00Z' }),
     'passing - 24/1 23:45',
   );
 });
@@ -175,7 +175,7 @@ test('redirects each badge link to the run selected for its event', async () => 
   }
 });
 
-test('includes the Berlin run time in a fetched badge label', async () => {
+test('keeps the Berlin run time out of the visible badge label', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({
     workflow_runs: [{
@@ -196,7 +196,8 @@ test('includes the Berlin run time in a fetched badge label', async () => {
 
     assert.match(svg, /<title>passing - 24\/7 23:45<\/title>/);
     assert.match(svg, /aria-label="passing - 24\/7 23:45"/);
-    assert.match(svg, />passing - 24\/7 23:45<\/text>/);
+    assert.match(svg, />passing<\/text>/);
+    assert.doesNotMatch(svg, />passing - 24\/7 23:45<\/text>/);
   } finally {
     globalThis.fetch = originalFetch;
   }
