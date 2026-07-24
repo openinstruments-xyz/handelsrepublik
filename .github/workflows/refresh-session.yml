@@ -40,9 +40,9 @@ jobs:
     if: needs.check_activity.outputs.should_refresh == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: live-tr-session
+    environment: Live Integration Tests
     concurrency:
-      group: live-tr-session-main
+      group: live-integration-tests-main
       queue: max
       cancel-in-progress: false
     steps:
@@ -85,7 +85,7 @@ jobs:
         if: ${{ always() && steps.confirm_idle.outputs.should_refresh == 'true' && steps.session_refresh.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
-        run: gh secret set TR_SESSION_JSON --env live-tr-session --repo "$GITHUB_REPOSITORY" < "$RUNNER_TEMP/trade-republic-session.json"
+        run: gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo "$GITHUB_REPOSITORY" < "$RUNNER_TEMP/trade-republic-session.json"
       - name: remove materialized session
         if: ${{ always() && steps.confirm_idle.outputs.should_refresh == 'true' }}
         run: rm -f "$RUNNER_TEMP/trade-republic-session.json"

@@ -155,7 +155,7 @@ jobs:
             echo "The repository runs the secret-free PR checks automatically. Its trusted post-check workflow will run the read-only"
             echo "live integration against the exact pull-request commit according to the repository's maintainer-approval policy."
             echo "Do not request, read, copy, or expose Trade Republic sessions or other secrets. Do not run live-account tests yourself."
-            echo "Do not weaken GitHub Actions trust boundaries, enable fork workflows, deploy anything, or change any market-order workflow."
+            echo "Do not weaken GitHub Actions trust boundaries, alter repository Actions settings, deploy anything, or change any market-order workflow."
             echo
             echo "Failed workflow: \`$FAILED_WORKFLOW\`; failed run ID: \`$FAILED_RUN_ID\`."
           } > "$prompt"

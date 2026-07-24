@@ -26,7 +26,6 @@ jobs:
       head_repository: ${{ steps.gate.outputs.head_repository }}
       head_sha: ${{ steps.gate.outputs.head_sha }}
       pr_number: ${{ steps.gate.outputs.pr_number }}
-      trusted_internal: ${{ steps.gate.outputs.trusted_internal }}
     steps:
       - id: gate
         name: verify PR identity, exact SHA, and all secret-free checks
@@ -44,7 +43,6 @@ jobs:
 
           pr="$(jq '.[0]' <<< "$matches")"
           pr_number="$(jq -r '.number' <<< "$pr")"
-          author="$(jq -r '.user.login' <<< "$pr")"
           head_repository="$(jq -r '.head.repo.full_name' <<< "$pr")"
           head_sha="$(jq -r '.head.sha' <<< "$pr")"
           base_branch="$(jq -r '.base.ref' <<< "$pr")"
@@ -85,30 +83,6 @@ jobs:
             exit 1
           fi
 
-          trusted_internal=false
-          if [ "$author" = "VIEWVIEWVIEW" ] &&
-             [ "$head_repository" = "$GITHUB_REPOSITORY" ]; then
-            trusted_internal=true
-          else
-            environment="$(
-              gh api "repos/$GITHUB_REPOSITORY/environments/external-pr-live-approval"
-            )"
-            protected_by_owner="$(
-              jq -r \
-                '(.can_admins_bypass == false) and
-                 ([.protection_rules[]? |
-                   select(.type == "required_reviewers") |
-                   .reviewers[]? |
-                   select(.reviewer.login == "VIEWVIEWVIEW")] |
-                   length > 0)' \
-                <<< "$environment"
-            )"
-            if [ "$protected_by_owner" != "true" ]; then
-              echo "::error::External live testing requires VIEWVIEWVIEW as reviewer and administrator bypass disabled."
-              exit 1
-            fi
-          fi
-
           gh api \
             --method POST \
             "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
@@ -119,43 +93,18 @@ jobs:
           echo "head_repository=$head_repository" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
-          echo "trusted_internal=$trusted_internal" >> "$GITHUB_OUTPUT"
-
-  approve-external:
-    name: maintainer approval for external PR
-    needs: authorize
-    if: needs.authorize.outputs.trusted_internal != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    environment:
-      name: external-pr-live-approval
-      url: https://github.com/${{ github.repository }}/pull/${{ needs.authorize.outputs.pr_number }}
-    steps:
-      - name: record approval for the exact PR SHA
-        env:
-          HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
-        run: echo "Maintainer approved live testing for $HEAD_SHA."
 
   live-read-integration:
     name: live read integration
-    needs:
-      - authorize
-      - approve-external
-    if: >-
-      always() &&
-      needs.authorize.result == 'success' &&
-      (needs.authorize.outputs.trusted_internal == 'true' ||
-       needs.approve-external.result == 'success')
+    needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 100
     permissions:
       contents: read
       pull-requests: read
-    environment: live-tr-session
+    environment: Live Integration Tests
     concurrency:
-      group: live-tr-session-main
+      group: live-integration-tests-main
       cancel-in-progress: false
     env:
       TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'
@@ -219,7 +168,6 @@ jobs:
     name: publish live check status
     needs:
       - authorize
-      - approve-external
       - live-read-integration
     if: always() && needs.authorize.result == 'success'
     runs-on: ubuntu-latest
@@ -239,7 +187,7 @@ jobs:
             description="Approved live read integration passed"
           else
             state=failure
-            description="Approval or live read integration failed"
+            description="Live read integration failed"
           fi
 
           gh api \

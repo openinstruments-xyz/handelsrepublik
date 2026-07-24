@@ -47,7 +47,10 @@ describe('GitHub Actions trust boundaries', () => {
       assert.match(workflow.source, /^name: PR-safe /m);
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*secrets\./);
-      assert.doesNotMatch(workflow.source, /^\s+environment:/m);
+      assert.match(
+        workflow.source,
+        /^\s+environment:\r?\n\s+name: Unit Tests\r?\n\s+deployment: false\r?$/m,
+      );
       assert.doesNotMatch(workflow.source, /\$\{\{\s*github\.token\s*\}\}/);
       assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
       assert.match(
@@ -61,7 +64,7 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('keeps market-order workflows manual and separately gated', () => {
+  it('keeps market-order workflows manual and in the shared live environment', () => {
     const marketOrderWorkflows = [
       'execute-market-buy-on-live-account.yml',
       'validate-closed-venue-market-order-rejection.yml',
@@ -81,7 +84,8 @@ describe('GitHub Actions trust boundaries', () => {
         );
       }
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
-      assert.match(workflow.source, /^\s+environment: live-order-tests\r?$/m);
+      assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
+      assert.doesNotMatch(workflow.source, /live-order-tests/);
       assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
       assert.match(workflow.source, /inputs\.confirm_/);
     }
@@ -115,7 +119,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(workflow.source, /do not create a branch or pull request/);
   });
 
-  it('loads live read secrets only after exact-SHA checks and any external approval', () => {
+  it('loads live read secrets only after exact-SHA checks in the protected live environment', () => {
     const workflow = workflows.find((candidate) =>
       candidate.file === 'validate-approved-pr.yml');
     assert.ok(workflow);
@@ -137,15 +141,10 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(workflow.source, /select\(\.head\.sha == \$sha\)/);
     assert.match(workflow.source, /PR-safe typecheck, build, distribution/);
     assert.match(workflow.source, /\[ "\$quality_conclusion" != "success" \]/);
-    assert.match(workflow.source, /\[ "\$author" = "VIEWVIEWVIEW" \]/);
-    assert.match(workflow.source, /\[ "\$head_repository" = "\$GITHUB_REPOSITORY" \]/);
-    assert.match(workflow.source, /name: external-pr-live-approval/);
-    assert.match(workflow.source, /\.can_admins_bypass == false/);
-    assert.match(workflow.source, /select\(\.type == "required_reviewers"\)/);
-    assert.match(workflow.source, /select\(\.reviewer\.login == "VIEWVIEWVIEW"\)/);
-    assert.match(workflow.source, /needs\.approve-external\.result == 'success'/);
+    assert.doesNotMatch(workflow.source, /trusted_internal|approve-external|external-pr-live-approval/);
+    assert.doesNotMatch(workflow.source, /\bauthor=/);
     assert.match(workflow.source, /The pull request changed after authorization/);
-    assert.match(workflow.source, /environment: live-tr-session/);
+    assert.match(workflow.source, /environment: Live Integration Tests/);
     assert.match(workflow.source, /TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'/);
     assert.match(workflow.source, /npm test\r?\n          npm run typecheck\r?\n          npm run build/);
     assert.match(workflow.source, /TR_SESSION_JSON: \$\{\{ secrets\.TR_SESSION_JSON \}\}/);

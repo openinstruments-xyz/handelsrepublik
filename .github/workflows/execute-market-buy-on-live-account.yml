@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-tr-session-main
+  group: live-integration-tests-main
   queue: max
   cancel-in-progress: false
 
@@ -36,7 +36,6 @@ jobs:
       inputs.confirm_live_execution
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment: live-order-tests
     steps:
       - run: echo "Live market buy approved."
 
@@ -50,7 +49,7 @@ jobs:
       inputs.confirm_live_execution
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: live-tr-session
+    environment: Live Integration Tests
     env:
       TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id }}
       TR_INTEGRATION_ORDER_AMOUNT_EUR: ${{ inputs.buy_amount_eur }}
@@ -82,7 +81,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
         run: |
           for attempt in 1 2 3 4 5; do
-            if gh secret set TR_SESSION_JSON --env live-tr-session --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
+            if gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
               exit 0
             fi
             if [ "$attempt" -eq 5 ]; then
