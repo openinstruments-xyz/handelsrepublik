@@ -2,6 +2,7 @@ const OWNER = 'VIEWVIEWVIEW';
 const REPOSITORY = 'handelsrepublik';
 const BRANCH = 'main';
 const API_VERSION = '2026-03-10';
+const BADGE_TIME_ZONE = 'Europe/Berlin';
 
 const WORKFLOWS = Object.freeze({
   quality: 'quality.yml',
@@ -115,7 +116,7 @@ function truncateToWidth(value, maxWidth, fontSize) {
   return `${visible}${ellipsis}`;
 }
 
-export function renderBadge(message, color, failures = []) {
+export function renderBadge(message, color, failures = [], title = `CI: ${message}`) {
   const safeMessage = escapeXml(message);
   const detailTextWidth = MAX_BADGE_WIDTH
     - DETAIL_HORIZONTAL_PADDING * 2
@@ -142,7 +143,7 @@ export function renderBadge(message, color, failures = []) {
   const accessibleFailures = failures.length > 0
     ? `; failed checks: ${failures.join('; ')}`
     : '';
-  const safeAccessibleLabel = escapeXml(`CI: ${message}${accessibleFailures}`);
+  const safeAccessibleLabel = escapeXml(`${title}${accessibleFailures}`);
   const detailRows = failureLines.map((failure, index) => {
     const y = 34 + index * 16;
     return `    <text x="${DETAIL_HORIZONTAL_PADDING}" y="${y}">${DETAIL_PREFIX}${escapeXml(failure)}</text>`;
@@ -171,8 +172,8 @@ ${detailRows}
 </svg>`;
 }
 
-function svgResponse(message, color, failures = [], status = 200) {
-  return new Response(renderBadge(message, color, failures), {
+function svgResponse(message, color, failures = [], status = 200, title) {
+  return new Response(renderBadge(message, color, failures, title), {
     status,
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
@@ -183,8 +184,11 @@ function svgResponse(message, color, failures = [], status = 200) {
   });
 }
 
-function parseBadgePath(pathname) {
-  const match = /^\/([a-z-]+)\/(latest|scheduled|manual)\.svg$/.exec(pathname);
+function parseRequestPath(pathname) {
+  const runLinkMatch = /^\/([a-z-]+)\/(latest|scheduled|manual)\/run$/.exec(pathname);
+  const badgeMatch = /^\/([a-z-]+)\/(latest|scheduled|manual)\.svg$/.exec(pathname);
+  const match = runLinkMatch ?? badgeMatch;
+
   if (!match) {
     return undefined;
   }
@@ -195,7 +199,58 @@ function parseBadgePath(pathname) {
     return undefined;
   }
 
-  return { workflow, event: EVENTS[eventAlias] };
+  return {
+    workflow,
+    event: EVENTS[eventAlias],
+    responseKind: runLinkMatch ? 'run-link' : 'badge',
+  };
+}
+
+export function formatRunTitle(message, run) {
+  const timestamp = run?.run_started_at ?? run?.created_at;
+  if (!timestamp) {
+    return `CI: ${message}`;
+  }
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return `CI: ${message}`;
+  }
+
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: BADGE_TIME_ZONE,
+    day: 'numeric',
+    month: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  const day = Number(value('day'));
+  const month = Number(value('month'));
+  const hour = value('hour');
+  const minute = value('minute');
+
+  if (!day || !month || hour === undefined || minute === undefined) {
+    return `CI: ${message}`;
+  }
+
+  return `${message} - ${day}/${month} ${hour}:${minute}`;
+}
+
+function runLinkResponse(run, requestMethod) {
+  if (!run?.html_url) {
+    return new Response('Run not found', { status: 404 });
+  }
+
+  return new Response(requestMethod === 'HEAD' ? null : 'Redirecting to GitHub Actions run', {
+    status: 302,
+    headers: {
+      location: run.html_url,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    },
+  });
 }
 
 async function loadLatestRun(selection, token) {
@@ -273,17 +328,24 @@ export default {
       });
     }
 
-    const selection = parseBadgePath(new URL(request.url).pathname);
+    const selection = parseRequestPath(new URL(request.url).pathname);
     if (!selection) {
       return new Response('Not found', { status: 404 });
     }
 
     if (!env.GH_TOKEN) {
-      return svgResponse('unknown', COLORS.unknown, [], 503);
+      return selection.responseKind === 'badge'
+        ? svgResponse('unknown', COLORS.unknown, [], 503)
+        : new Response('Service unavailable', { status: 503 });
     }
 
     try {
       const run = await loadLatestRun(selection, env.GH_TOKEN);
+
+      if (selection.responseKind === 'run-link') {
+        return runLinkResponse(run, request.method);
+      }
+
       const state = badgeState(run);
       let failures = [];
 
@@ -295,7 +357,13 @@ export default {
         }
       }
 
-      const response = svgResponse(state.message, state.color, failures);
+      const response = svgResponse(
+        state.message,
+        state.color,
+        failures,
+        200,
+        formatRunTitle(state.message, run),
+      );
       return request.method === 'HEAD'
         ? new Response(null, response)
         : response;
