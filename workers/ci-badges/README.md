@@ -4,8 +4,8 @@ This Cloudflare Worker renders compact status-only SVG badges for the
 allowlisted workflows in the private `VIEWVIEWVIEW/handelsrepublik` repository.
 Passing, running, and unknown badges remain one line tall. A failing badge
 expands downward with up to five failed Actions step names from the matching
-run; additional failures are summarized on a final line. Each badge's SVG
-title includes the run start in Berlin time, such as `passing - 24/7 23:45`.
+run; additional failures are summarized on a final line. Each badge's visible
+label includes the run start in Berlin time, such as `passing - 24/7 23:45`.
 
 The deployed Worker requires a `GH_TOKEN` secret. Use a fine-grained GitHub
 personal access token restricted to this repository with only **Actions:

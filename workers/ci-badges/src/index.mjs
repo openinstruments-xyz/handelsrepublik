@@ -177,7 +177,7 @@ function svgResponse(message, color, failures = [], status = 200, title) {
     status,
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
-      'cache-control': 'no-store',
+      'cache-control': 'no-cache',
       'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       'x-content-type-options': 'nosniff',
     },
@@ -206,15 +206,15 @@ function parseRequestPath(pathname) {
   };
 }
 
-export function formatRunTitle(message, run) {
+export function formatRunLabel(message, run) {
   const timestamp = run?.run_started_at ?? run?.created_at;
   if (!timestamp) {
-    return `CI: ${message}`;
+    return message;
   }
 
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
-    return `CI: ${message}`;
+    return message;
   }
 
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -232,7 +232,7 @@ export function formatRunTitle(message, run) {
   const minute = value('minute');
 
   if (!day || !month || hour === undefined || minute === undefined) {
-    return `CI: ${message}`;
+    return message;
   }
 
   return `${message} - ${day}/${month} ${hour}:${minute}`;
@@ -357,12 +357,13 @@ export default {
         }
       }
 
+      const label = formatRunLabel(state.message, run);
       const response = svgResponse(
-        state.message,
+        label,
         state.color,
         failures,
         200,
-        formatRunTitle(state.message, run),
+        label,
       );
       return request.method === 'HEAD'
         ? new Response(null, response)
