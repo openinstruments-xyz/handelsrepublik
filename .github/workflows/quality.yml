@@ -1,4 +1,6 @@
-name: typecheck, build, distribution
+# This workflow executes untrusted pull-request code. Do not add secrets,
+# environments, deployments, or access to privileged external resources.
+name: PR-safe typecheck, build, distribution
 
 on:
   push:
@@ -15,6 +17,9 @@ concurrency:
 jobs:
   quality:
     name: typecheck, build, and verify committed distribution
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

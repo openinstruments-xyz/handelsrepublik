@@ -42,6 +42,14 @@ describe('live integration case manifest', () => {
       const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
       if (!source.includes('TR_SESSION_JSON:')) continue;
       assert.match(source, /environment: live-tr-session/, `${workflow} must load the shared environment secret`);
+      if (source.includes("TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'")) {
+        assert.doesNotMatch(
+          source,
+          /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION|gh secret set TR_SESSION_JSON/,
+          `${workflow} must not expose session-rotation credentials to PR code`,
+        );
+        continue;
+      }
       assert.match(
         source,
         /gh secret set TR_SESSION_JSON --env live-tr-session --repo /,

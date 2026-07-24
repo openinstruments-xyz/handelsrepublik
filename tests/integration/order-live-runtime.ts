@@ -8,6 +8,7 @@ import {
   type OrderDestination,
   type Subscription,
 } from '../../src/index.js';
+import { shouldRefreshLiveSession } from './session-refresh-policy.js';
 
 const sessionPath = process.env.TR_SESSION_FILE ?? join(process.cwd(), 'demo', '.demo-session.json');
 
@@ -25,7 +26,7 @@ export async function createLiveOrderClient(): Promise<TradeRepublicClient> {
   });
   const session = await client.auth.restoreSession();
   if (!session) throw new Error(`No session could be loaded from ${sessionPath}`);
-  await client.auth.refreshSession();
+  if (shouldRefreshLiveSession()) await client.auth.refreshSession();
   return client;
 }
 

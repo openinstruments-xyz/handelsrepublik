@@ -18,6 +18,7 @@ import {
   resolveSecuritiesAccountNumber,
   type LiveCase,
 } from './live-runtime.js';
+import { shouldRefreshLiveSession } from './session-refresh-policy.js';
 
 const APPLE = 'US0378331005';
 const APPLE_QUERY = 'apple';
@@ -28,9 +29,13 @@ const BITCOIN_EXCHANGE = 'BHS';
 const DEFAULT_WATCHLIST = '00000000-0000-0000-0000-000000000000';
 
 export const liveCases: readonly LiveCase[] = [
-  defineLiveCase('session.restore-refresh', 'read', async ({ client }) => {
+  defineLiveCase('session.restore-refresh', 'read', async ({ client, note }) => {
     assert.ok(client.getSession(), 'expected a restored session');
-    assert.ok(await client.auth.refreshSession(), 'expected a refreshed session');
+    if (shouldRefreshLiveSession()) {
+      assert.ok(await client.auth.refreshSession(), 'expected a refreshed session');
+    } else {
+      await note('session refresh intentionally skipped for immutable PR validation');
+    }
   }),
   defineLiveCase('account.current', 'read', async ({ client }) => assertRecord(await client.account.current(), 'account.current')),
   defineLiveCase('account.session', 'read', async ({ client }) => {

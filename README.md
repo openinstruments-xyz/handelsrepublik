@@ -1504,6 +1504,28 @@ npm run build
 Keep `dist` committed because GitHub consumers install the compiled package
 without running the TypeScript build.
 
+### Pull-request security boundary
+
+Pull requests whose head branch belongs to this repository run the two
+`PR-safe` GitHub Actions workflows. They install the locked dependencies, run
+the unit tests and TypeScript typecheck, build the package locally, and verify
+that the committed `dist` output is current. These jobs receive no repository
+or environment secrets, use only a read-only `GITHUB_TOKEN`, do not persist
+checkout credentials, and do not select a GitHub environment.
+
+Fork pull requests are not supported. GitHub may create workflow runs for their
+`pull_request` events, but both `PR-safe` jobs explicitly skip when the pull
+request head repository differs from this repository. There is no manual
+workflow for checking out or granting secrets to fork code.
+
+Pull-request code is untrusted, including package lifecycle scripts, tests, and
+build scripts. Never add secrets, deployments, write permissions, privileged
+external services, or `pull_request_target` to the `PR-safe` workflows.
+Secret-dependent live checks remain separate. Normal live workflows run only
+from this repository on `main` through a push, schedule, or explicit maintainer
+dispatch. A separate post-check workflow can run one approved non-market live
+profile for an exact trusted Codex PR commit as described below.
+
 The SDK is a modular monolith. `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution dependencies. Declarative
 REST and mapper calls live in `src/operation-specs.ts` and run through
@@ -1603,11 +1625,13 @@ in the shared `live-tr-session` environment.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
-Quality and unit workflows run on every push and pull request. Every live
-workflow except the real market buy runs on pushes to `main`; time-dependent
-jobs stop at their first time gate when the current Berlin window does not fit.
-The real market buy remains manual-only. Every job that uses the rotating Trade
-Republic session runs in the unprotected `live-tr-session` GitHub environment.
+The `PR-safe` quality and unit workflows run on every push and on pull requests
+whose head branch belongs to this repository; their jobs skip fork pull
+requests. Every live workflow except the real market buy runs on pushes to
+`main`; time-dependent jobs stop at their first time gate when the current
+Berlin window does not fit. The real market buy remains manual-only. Every job
+that uses the rotating Trade Republic session runs in the unprotected
+`live-tr-session` GitHub environment.
 Keep that environment free of required reviewers so scheduled validations do
 not wait for approval. GitHub reads environment secrets when the referencing
 job starts, so a queued job receives the session saved by the preceding
@@ -1641,6 +1665,55 @@ The live workflow also expects the repository-level
 `GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` secret. It must contain a token allowed
 to update Actions environment secrets for this repository so the refreshed
 session can be rotated after each run.
+
+### Scheduled failure triage
+
+The **report trusted scheduled failures to Codex** workflow follows failed
+scheduled runs of the six allowlisted non-market live workflows on `main`. It
+does not check out or execute repository code and receives no Trade Republic or
+OpenAI credential. It creates one deduplicated `codex-triage` issue per failing
+workflow, attaches a short redacted failed-step excerpt, and posts an `@codex`
+triage request through the connected maintainer GitHub account.
+
+The issue is only the transport used to invoke the Codex GitHub connector; it
+is not a declaration that the SDK has a defect. Codex must first classify the
+failure as a reproducible repository defect, flaky test, external-service or
+market-data problem, expired session, rate limit, infrastructure problem, or
+unknown. Every non-repository classification must be recorded on the issue and
+must stop without a branch or pull request. Only a plausibly reproducible
+repository defect may produce a minimal `codex/` fix branch and pull request.
+The PR title must end with the single `[live:<profile>]` suffix requested in the
+triage comment. The resulting pull request first runs the secret-free `PR-safe`
+checks.
+
+GitHub-authored bot mentions are not used to start Codex. The final issue
+comment uses the existing
+`GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` repository secret and verifies that it
+authenticates as `VIEWVIEWVIEW`, whose GitHub identity is connected to the
+ChatGPT Codex account. This uses the ChatGPT subscription through the connector;
+there is no `OPENAI_API_KEY` and no `openai/codex-action`.
+
+After the `PR-safe` quality workflow succeeds, the **trusted Codex PR
+non-market live validation** workflow re-reads the pull request through the
+GitHub API. It continues only when the PR is still open, belongs to this
+repository, is authored by `VIEWVIEWVIEW`, uses a `codex/` branch, and its exact
+head SHA equals the already-tested quality-run SHA. It then runs all unit,
+typecheck, build, and distribution checks again before loading
+`TR_SESSION_JSON` and executing only the profile encoded in the title.
+
+This is the explicit trust decision for fully automatic Codex fixes: SDK code
+generated by Codex can access the live Trade Republic session during that final
+profile. The job receives no session-administration token, skips session refresh
+so it cannot rotate the shared credential, persists no checkout credential, and
+removes its ephemeral session file afterward. Open- and closed-market profiles
+fail outside their documented Berlin windows rather than silently passing
+through skipped tests.
+
+Session refresh failures and both market-order workflows are deliberately
+absent from the allowlist. Market-order tests remain separately and explicitly
+triggered. Codex is instructed not to request or run with live-account secrets,
+weaken the Actions trust boundary, support forks, deploy, or modify the
+market-order workflows.
 
 Use `npm run ci:reauth -- --no-watch` to return after dispatching, or
 `npm run ci:reauth -- --help` to see repository, workflow, branch, timeout, and

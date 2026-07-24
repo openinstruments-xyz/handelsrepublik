@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { isClosedBerlinWindow, isOpenBerlinWindow } from './integration/order-live-runtime.js';
+import { shouldRefreshLiveSession } from './integration/session-refresh-policy.js';
 
 describe('live order safety windows', () => {
   it('accepts only the configured closed-market Berlin window', () => {
@@ -16,5 +17,11 @@ describe('live order safety windows', () => {
     assert.equal(isOpenBerlinWindow(new Date('2026-07-22T14:59:00Z')), true);
     assert.equal(isOpenBerlinWindow(new Date('2026-07-22T15:00:00Z')), false);
     assert.equal(isOpenBerlinWindow(new Date('2026-07-25T10:00:00Z')), false);
+  });
+
+  it('can keep a shared CI session immutable during trusted PR validation', () => {
+    assert.equal(shouldRefreshLiveSession({}), true);
+    assert.equal(shouldRefreshLiveSession({ TR_INTEGRATION_SKIP_SESSION_REFRESH: 'false' }), true);
+    assert.equal(shouldRefreshLiveSession({ TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true' }), false);
   });
 });
