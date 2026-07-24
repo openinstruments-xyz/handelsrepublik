@@ -83,6 +83,25 @@ jobs:
             exit 1
           fi
 
+          environment="$(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/environments/Live%20Integration%20Tests"
+          )"
+          protected_by_owner="$(
+            jq -r \
+              '(.can_admins_bypass == false) and
+               ([.protection_rules[]? |
+                 select(.type == "required_reviewers") |
+                 .reviewers[]? |
+                 select(.reviewer.login == "VIEWVIEWVIEW")] |
+                 length > 0)' \
+              <<< "$environment"
+          )"
+          if [ "$protected_by_owner" != "true" ]; then
+            echo "::error::Live Integration Tests requires VIEWVIEWVIEW as reviewer and administrator bypass disabled."
+            exit 1
+          fi
+
           gh api \
             --method POST \
             "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
