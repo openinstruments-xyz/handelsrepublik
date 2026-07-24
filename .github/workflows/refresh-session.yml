@@ -35,4 +35,13 @@ jobs:
           TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
         run: node --import tsx scripts/ci-session.ts materialize "$RUNNER_TEMP/trade-republic-session.json"
       - name: refresh Trade Republic session
+        id: session-refresh
         run: node --import tsx scripts/ci-session.ts refresh "$RUNNER_TEMP/trade-republic-session.json"
+      - name: rotate encrypted GitHub session secret
+        if: ${{ always() && steps.session-refresh.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
+        run: gh secret set TR_SESSION_JSON --env live-tr-session --repo "$GITHUB_REPOSITORY" < "$RUNNER_TEMP/trade-republic-session.json"
+      - name: remove materialized session
+        if: always()
+        run: rm -f "$RUNNER_TEMP/trade-republic-session.json"

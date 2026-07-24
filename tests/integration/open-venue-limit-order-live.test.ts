@@ -47,7 +47,7 @@ describe('open-venue limit-order lifecycle', () => {
       });
       assert.equal(replacement.status, 'succeeded');
       await collector.waitFor(
-        (event) => event.id === submission.orderId && typeof event.cancelledAt === 'number',
+        (event) => event.id === submission.orderId && typeof event.cancelledAt === 'string',
         `cancelled update for replaced order ${submission.orderId}`,
       );
       assert.ok(replacement.submission.orderId, 'replacement must return an order id');
@@ -61,7 +61,7 @@ describe('open-venue limit-order lifecycle', () => {
       if (cancellation.raw !== undefined) validateRawResponse('orders.cancel', cancellation.raw);
       assert.equal(cancellation.status, 'succeeded');
       await collector.waitFor(
-        (event) => event.id === activeOrderId && typeof event.cancelledAt === 'number',
+        (event) => event.id === activeOrderId && typeof event.cancelledAt === 'string',
         `cancelled update for ${activeOrderId}`,
       );
       activeOrderId = undefined;
@@ -99,5 +99,5 @@ async function resolveAccountNumber(client: Awaited<ReturnType<typeof createLive
 }
 
 function hasAnyTimestamp(value: Record<string, unknown>, ...keys: string[]): boolean {
-  return keys.some((key) => typeof value[key] === 'number');
+  return keys.some((key) => typeof value[key] === 'string');
 }

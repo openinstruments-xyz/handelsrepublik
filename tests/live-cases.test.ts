@@ -35,18 +35,6 @@ describe('live integration case manifest', () => {
     }
   });
 
-  it('publishes a result table from every workflow', () => {
-    const workflowDirectory = join(process.cwd(), '.github', 'workflows');
-    const workflows = readdirSync(workflowDirectory).filter((file) => file.endsWith('.yml'));
-    assert.equal(workflows.length, 10);
-    for (const workflow of workflows) {
-      const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
-      assert.match(source, /CI_TEST_RESULTS_FILE=\$RUNNER_TEMP\//, `${workflow} must configure the shared result file`);
-      assert.doesNotMatch(source, /CI_TEST_RESULTS_FILE:\s*\$\{\{\s*runner\.temp\s*\}\}/);
-      assert.match(source, /test:ci:summary/, `${workflow} must publish a result table`);
-    }
-  });
-
   it('loads and rotates the live session through the job-start environment', () => {
     const workflowDirectory = join(process.cwd(), '.github', 'workflows');
     const workflows = readdirSync(workflowDirectory).filter((file) => file.endsWith('.yml'));

@@ -993,16 +993,40 @@ describe('TradeRepublicClient', () => {
   it('subscribes to order updates by securities account number', async () => {
     const sockets: FakeSocket[] = [];
     const client = TradeRepublicClient.create({
+      rawSchemaValidation: 'throw',
       websocketFactory: () => {
-        const socket = new FakeSocket();
+        const socket = new FakeSocket(undefined, (binary) => {
+          const request = decodeMapperProtobufRequest(binary);
+          const payload = encodeMapperProtobufTopicPayload(request.topic, {
+            id: { id: Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]) },
+            secAccNo: '0000000000',
+            instrumentId: 'US0378331005',
+            size: { unscaled: Uint8Array.from([0x7b]), scale: 2 },
+            createdAt: 1_753_447_200_000n,
+            updatedAt: 1_753_447_201_000n,
+            receivedAt: 1_753_447_202_000n,
+            submittedAt: 1_753_447_203_000n,
+            trades: [],
+          });
+          socket.emit('message', encodeMapperProtobufDataEnvelope(request.subscriptionId, payload), true);
+        });
         sockets.push(socket);
         return socket;
       },
     });
 
     const subscription = client.orders.orderUpdates('0000000000');
-    await Promise.resolve();
-    await Promise.resolve();
+    await expect(subscription[Symbol.asyncIterator]().next()).resolves.toEqual({
+      done: false,
+      value: expect.objectContaining({
+        id: '00000000-0000-0000-0000-000000000001',
+        size: '1.23',
+        createdAt: '2025-07-25T12:40:00.000Z',
+        updatedAt: '2025-07-25T12:40:01.000Z',
+        receivedAt: '2025-07-25T12:40:02.000Z',
+        submittedAt: '2025-07-25T12:40:03.000Z',
+      }),
+    });
 
     expect(decodeMapperProtobufRequest(sockets[0]!.binarySent[0]!)).toEqual({
       subscriptionId: 1,

@@ -5,7 +5,6 @@ import {
   decodeMapperProtobufRequest,
   encodeMapperProtobufDataEnvelope,
   encodeMapperProtobufStatusEnvelope,
-  encodeMapperProtobufTopicPayload,
 } from '../src/mapper-protobuf.js';
 import { FakeSocket } from './fake-socket.js';
 
@@ -100,12 +99,12 @@ describe('market abstractions', () => {
       websocketFactory: () => {
         const socket = new FakeSocket(undefined, (binary) => {
           const request = decodeMapperProtobufRequest(binary);
-          const payload = encodeMapperProtobufTopicPayload('L2', {
+          const payload = currentL2Payload({
             instrumentId: 'US1.XETR',
             currency: 'EUR',
-            bid: [{ price: 10, size: 2 }],
-            ask: [{ price: 11, size: 3 }],
-            timestamp: 1_784_294_157_408,
+            bid: { price: 10, size: 2 },
+            ask: { price: 11, size: 3 },
+            timestamp: 1_784_294_157_408n,
           });
           socket.emit('message', encodeMapperProtobufDataEnvelope(request.subscriptionId, payload), true);
         });
@@ -165,4 +164,47 @@ describe('market abstractions', () => {
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+}
+
+function currentL2Payload(value: {
+  instrumentId: string;
+  currency: string;
+  bid: { price: number; size: number };
+  ask: { price: number; size: number };
+  timestamp: bigint;
+}): Uint8Array {
+  // Encode independently from the production descriptor so protobuf wire-type drift stays detectable.
+  return Buffer.concat([
+    protobufBytes(1, Buffer.from(value.instrumentId)),
+    protobufBytes(2, Buffer.from(value.currency)),
+    protobufBytes(3, protobufPriceLevel(value.ask)),
+    protobufBytes(4, protobufPriceLevel(value.bid)),
+    Buffer.from([5 << 3, ...protobufVarint(value.timestamp)]),
+  ]);
+}
+
+function protobufPriceLevel(level: { price: number; size: number }): Buffer {
+  const payload = Buffer.alloc(18);
+  payload[0] = (1 << 3) | 1;
+  payload.writeDoubleLE(level.price, 1);
+  payload[9] = (2 << 3) | 1;
+  payload.writeDoubleLE(level.size, 10);
+  return payload;
+}
+
+function protobufBytes(fieldNumber: number, value: Uint8Array): Buffer {
+  return Buffer.concat([
+    Buffer.from([(fieldNumber << 3) | 2, ...protobufVarint(BigInt(value.length))]),
+    value,
+  ]);
+}
+
+function protobufVarint(value: bigint): number[] {
+  const bytes: number[] = [];
+  let remaining = value;
+  for (; remaining >= 0x80n; remaining >>= 7n) {
+    bytes.push(Number(remaining & 0x7fn) | 0x80);
+  }
+  bytes.push(Number(remaining));
+  return bytes;
 }

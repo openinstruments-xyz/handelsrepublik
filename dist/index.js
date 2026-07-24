@@ -1758,19 +1758,19 @@ var orderTradeSchema = z.strictObject({
   orderUsecase: z.string().optional(),
   expiry: z.string().optional(),
   groupId: z.string().optional(),
-  size: z.number().optional(),
+  size: z.string().optional(),
   amount: jsonRecord.optional(),
   stop: jsonRecord.optional(),
   limit: jsonRecord.optional(),
-  createdAt: z.number().optional(),
-  updatedAt: z.number().optional(),
-  receivedAt: z.number().optional(),
-  submittedAt: z.number().optional(),
-  openedAt: z.number().optional(),
-  executedAt: z.number().optional(),
-  expiredAt: z.number().optional(),
-  cancelledAt: z.number().optional(),
-  rejectedAt: z.number().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+  receivedAt: z.string().optional(),
+  submittedAt: z.string().optional(),
+  openedAt: z.string().optional(),
+  executedAt: z.string().optional(),
+  expiredAt: z.string().optional(),
+  cancelledAt: z.string().optional(),
+  rejectedAt: z.string().optional(),
   trades: z.array(jsonRecord)
 });
 var l2LevelSchema = z.strictObject({ price: z.number(), size: z.number() });
@@ -2948,7 +2948,7 @@ var file = boot({
       field("instrument_id", 1, 11, ".handelsrepublik.mapper.InstrumentId"),
       field("currency", 2, 9)
     ]),
-    message("PriceLevel", [field("price", 1, 2), field("size", 2, 1)]),
+    message("PriceLevel", [field("price", 1, 1), field("size", 2, 1)]),
     message("InstrumentOrderBook", [
       field("instrument_id", 1, 9),
       field("currency", 2, 9),

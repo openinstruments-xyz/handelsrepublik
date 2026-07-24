@@ -110,7 +110,7 @@ const file = boot({
       field('instrument_id', 1, 11, '.handelsrepublik.mapper.InstrumentId'),
       field('currency', 2, 9),
     ]),
-    message('PriceLevel', [field('price', 1, 2), field('size', 2, 1)]),
+    message('PriceLevel', [field('price', 1, 1), field('size', 2, 1)]),
     message('InstrumentOrderBook', [
       field('instrument_id', 1, 9),
       field('currency', 2, 9),
