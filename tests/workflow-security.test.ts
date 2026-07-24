@@ -141,6 +141,15 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(workflow.source, /select\(\.head\.sha == \$sha\)/);
     assert.match(workflow.source, /PR-safe typecheck, build, distribution/);
     assert.match(workflow.source, /\[ "\$quality_conclusion" != "success" \]/);
+    assert.match(workflow.source, /environments\/Live%20Integration%20Tests/);
+    assert.match(workflow.source, /\.can_admins_bypass == false/);
+    assert.match(workflow.source, /select\(\.type == "required_reviewers"\)/);
+    assert.match(workflow.source, /select\(\.reviewer\.login == "VIEWVIEWVIEW"\)/);
+    assert.ok(
+      workflow.source.indexOf('environments/Live%20Integration%20Tests')
+        < workflow.source.indexOf('TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}'),
+      'the environment protection check must precede access to the live session secret',
+    );
     assert.doesNotMatch(workflow.source, /trusted_internal|approve-external|external-pr-live-approval/);
     assert.doesNotMatch(workflow.source, /\bauthor=/);
     assert.match(workflow.source, /The pull request changed after authorization/);
