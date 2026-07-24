@@ -52,15 +52,45 @@ describe('GitHub Actions trust boundaries', () => {
       assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
       assert.match(
         workflow.source,
+        /^  push:\r?\n    branches:\r?\n      - main\r?$/m,
+      );
+      assert.doesNotMatch(
+        workflow.source,
         /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
       );
     }
   });
 
-  it('does not define any fork-PR execution workflow', () => {
+  it('does not define a privileged workflow dedicated to fork code', () => {
     for (const workflow of workflows) {
       assert.doesNotMatch(workflow.file, /fork-pr/i);
       assert.doesNotMatch(workflow.source, /head_repository|expected_head_sha/);
+    }
+  });
+
+  it('keeps market-order workflows manual and separately gated', () => {
+    const marketOrderWorkflows = [
+      'execute-market-buy-on-live-account.yml',
+      'validate-closed-venue-market-order-rejection.yml',
+    ].map((file) => {
+      const workflow = workflows.find((candidate) => candidate.file === file);
+      assert.ok(workflow, `${file} must exist`);
+      return workflow;
+    });
+
+    for (const workflow of marketOrderWorkflows) {
+      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_dispatch'), true);
+      for (const trigger of ['push', 'schedule', 'pull_request', 'pull_request_target']) {
+        assert.equal(
+          hasTopLevelTrigger(workflow.source, trigger),
+          false,
+          `${workflow.file} must only be started explicitly`,
+        );
+      }
+      assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
+      assert.match(workflow.source, /^\s+environment: live-order-tests\r?$/m);
+      assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
+      assert.match(workflow.source, /inputs\.confirm_/);
     }
   });
 
