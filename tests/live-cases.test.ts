@@ -55,6 +55,19 @@ describe('live integration case manifest', () => {
     }
   });
 
+  it('refreshes the shared session every 20 minutes only while no other workflow is active', () => {
+    const source = readFileSync(join(process.cwd(), '.github', 'workflows', 'refresh-session.yml'), 'utf8');
+    assert.match(source, /cron: "\*\/20 \* \* \* \*"/);
+    assert.match(source, /actions: read/);
+    assert.match(source, /actions\/runs\?status=in_progress&per_page=100/);
+    assert.match(source, /select\(\.id != \$GITHUB_RUN_ID\)/);
+    assert.match(source, /needs: check_activity/);
+    assert.match(source, /if: needs\.check_activity\.outputs\.should_refresh == 'true'/);
+    assert.match(source, /group: live-tr-session-main/);
+    assert.match(source, /id: confirm_idle/);
+    assert.match(source, /if: steps\.confirm_idle\.outputs\.should_refresh == 'true'/);
+  });
+
   it('allows continuously available asset classes in the closed-market destination check', async () => {
     const testCase = liveCases.find((candidate) => candidate.id === 'closed-venue.destinations-all-classes');
     assert.ok(testCase);
