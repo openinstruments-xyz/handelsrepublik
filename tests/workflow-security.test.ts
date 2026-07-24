@@ -61,13 +61,6 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('does not define a privileged workflow dedicated to fork code', () => {
-    for (const workflow of workflows) {
-      assert.doesNotMatch(workflow.file, /fork-pr/i);
-      assert.doesNotMatch(workflow.source, /head_repository|expected_head_sha/);
-    }
-  });
-
   it('keeps market-order workflows manual and separately gated', () => {
     const marketOrderWorkflows = [
       'execute-market-buy-on-live-account.yml',
@@ -122,29 +115,46 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(workflow.source, /do not create a branch or pull request/);
   });
 
-  it('loads live secrets only after an exact trusted Codex PR commit passes safe checks', () => {
+  it('loads live read secrets only after exact-SHA checks and any external approval', () => {
     const workflow = workflows.find((candidate) =>
-      candidate.file === 'validate-trusted-codex-pr.yml');
+      candidate.file === 'validate-approved-pr.yml');
     assert.ok(workflow);
 
     assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_run'), true);
-    for (const trigger of ['issues', 'issue_comment', 'pull_request', 'pull_request_target']) {
+    for (const trigger of [
+      'issues',
+      'issue_comment',
+      'pull_request',
+      'pull_request_review',
+      'pull_request_target',
+    ]) {
       assert.equal(hasTopLevelTrigger(workflow.source, trigger), false);
     }
 
-    assert.match(workflow.source, /workflows:\r?\n      - PR-safe typecheck, build, distribution/);
+    assert.match(workflow.source, /workflows:\r?\n      - PR-safe unit tests/);
     assert.match(workflow.source, /github\.event\.workflow_run\.event == 'pull_request'/);
     assert.match(workflow.source, /github\.event\.workflow_run\.conclusion == 'success'/);
-    assert.match(workflow.source, /github\.event\.workflow_run\.actor\.login == 'VIEWVIEWVIEW'/);
-    assert.match(workflow.source, /startsWith\(github\.event\.workflow_run\.head_branch, 'codex\/'\)/);
-    assert.match(workflow.source, /\[ "\$head_repo" != "\$GITHUB_REPOSITORY" \]/);
-    assert.match(workflow.source, /\[ "\$head_sha" != "\$EXPECTED_HEAD_SHA" \]/);
+    assert.match(workflow.source, /select\(\.head\.sha == \$sha\)/);
+    assert.match(workflow.source, /PR-safe typecheck, build, distribution/);
+    assert.match(workflow.source, /\[ "\$quality_conclusion" != "success" \]/);
+    assert.match(workflow.source, /\[ "\$author" = "VIEWVIEWVIEW" \]/);
+    assert.match(workflow.source, /\[ "\$head_repository" = "\$GITHUB_REPOSITORY" \]/);
+    assert.match(workflow.source, /name: external-pr-live-approval/);
+    assert.match(workflow.source, /\.can_admins_bypass == false/);
+    assert.match(workflow.source, /select\(\.type == "required_reviewers"\)/);
+    assert.match(workflow.source, /select\(\.reviewer\.login == "VIEWVIEWVIEW"\)/);
+    assert.match(workflow.source, /needs\.approve-external\.result == 'success'/);
+    assert.match(workflow.source, /The pull request changed after authorization/);
     assert.match(workflow.source, /environment: live-tr-session/);
     assert.match(workflow.source, /TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'/);
     assert.match(workflow.source, /npm test\r?\n          npm run typecheck\r?\n          npm run build/);
     assert.match(workflow.source, /TR_SESSION_JSON: \$\{\{ secrets\.TR_SESSION_JSON \}\}/);
+    assert.match(workflow.source, /run: npm run test:integration:read/);
     assert.doesNotMatch(workflow.source, /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
-    assert.doesNotMatch(workflow.source, /test:integration:(?:orders|closed-market-order)/);
+    assert.doesNotMatch(
+      workflow.source,
+      /test:integration:(?:mutations|orders|closed-market-order|closed-limit-order|open-limit-order)/,
+    );
     assert.doesNotMatch(workflow.source, /EUR 1 market buy/);
   });
 });

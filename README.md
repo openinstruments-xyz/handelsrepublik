@@ -1506,38 +1506,49 @@ without running the TypeScript build.
 
 ### Pull-request security boundary
 
-Every pull request, including a pull request from a fork, can run the two
-`PR-safe` GitHub Actions workflows after any required maintainer approval.
-They install the locked dependencies, run the unit tests and TypeScript
-typecheck, build the package locally, and verify that the committed `dist`
-output is current. These jobs receive no repository or environment secrets,
-use only a read-only `GITHUB_TOKEN`, do not persist checkout credentials, and
-do not select a GitHub environment.
+Every pull request, including a pull request from a fork, runs the two
+`PR-safe` GitHub Actions workflows. They install the locked dependencies, run
+the unit tests and TypeScript typecheck, build the package locally, and verify
+that the committed `dist` output is current. These jobs receive no repository
+or environment secrets, use only a read-only `GITHUB_TOKEN`, do not persist
+checkout credentials, and do not select a GitHub environment.
 
-For public-fork contributions, configure **Settings > Actions > General >
-Approval for running fork pull request workflows from contributors** to
-**Require approval for all external contributors**. A maintainer must inspect
-the change, especially workflow and package-script changes, before selecting
-**Approve workflows to run** in the pull request. The approval releases only
-the two secret-free `PR-safe` jobs; it never grants fork code access to
-repository or environment secrets.
+GitHub may still require a one-time **Approve workflows to run** action for a
+new public-fork contributor according to **Settings > Actions > General >
+Approval for running fork pull request workflows from contributors**. That
+GitHub anti-abuse approval releases only the secret-free `PR-safe` jobs and
+never grants the fork access to repository or environment secrets. Choose the
+least restrictive policy appropriate for the repository if these checks should
+start automatically for established contributors.
 
 Pull-request code is untrusted, including package lifecycle scripts, tests, and
 build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to the `PR-safe` workflows.
-Secret-dependent live checks remain separate. Normal live workflows run only
-from this repository on `main` through a push, schedule, or explicit maintainer
-dispatch. A separate post-check workflow can run one approved non-market live
-profile for an exact trusted Codex PR commit as described below.
 
-Contributors may configure their own fork with their own test credentials and
-run its live workflows there. Those credentials and results belong to the fork
-and are never trusted or imported by this repository. Upstream live workflows
-do not execute fork pull-request code. After an accepted contribution is
-merged, the push to upstream `main` runs the safe checks again and starts the
-repository's normal live workflows with the upstream secrets. Market-order
-workflows remain separately gated and never start as part of pull-request
-approval.
+After both `PR-safe` workflows pass for an exact commit, the trusted
+default-branch post-check runs the read-only live integration automatically for
+a same-repository pull request authored by `VIEWVIEWVIEW`. Every other author,
+including a fork contributor, first reaches the protected
+`external-pr-live-approval` environment. A maintainer must inspect the exact
+commit and select **Review deployments > Approve and deploy** before the
+post-check checks out that commit or loads `TR_SESSION_JSON`. A new commit
+creates new safe checks and a new approval; the old approval cannot authorize
+the changed SHA.
+
+Before accepting external contributions, create
+`external-pr-live-approval` under **Settings > Environments**, add
+`VIEWVIEWVIEW` as a required reviewer, and disable administrator bypass. The
+workflow fails closed when that required-reviewer rule is absent. GitHub makes
+required environment reviewers available on current Free, Pro, and Team plans
+only for public repositories, so this rule cannot yet be enabled while this
+repository remains private.
+
+Contributors may also configure their own fork with their own test credentials
+and run its live workflows there. Those credentials and results belong to the
+fork and are never trusted or imported by this repository. Upstream uses only
+its own session after the explicit approval above. Market-order and order
+mutation workflows remain separately gated and never start as part of this
+pull-request approval.
 
 The SDK is a modular monolith. `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution dependencies. Declarative
