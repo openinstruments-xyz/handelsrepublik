@@ -154,10 +154,10 @@ describe('GitHub Actions trust boundaries', () => {
     assert.doesNotMatch(workflow.source, /\bauthor=/);
     assert.match(workflow.source, /The pull request changed after authorization/);
     assert.match(workflow.source, /environment: Live Integration Tests/);
-    assert.match(workflow.source, /TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'/);
     assert.match(workflow.source, /npm test\r?\n          npm run typecheck\r?\n          npm run build/);
     assert.match(workflow.source, /TR_SESSION_JSON: \$\{\{ secrets\.TR_SESSION_JSON \}\}/);
     assert.match(workflow.source, /run: npm run test:integration:read/);
+    assert.doesNotMatch(workflow.source, /ci-session\.ts refresh/);
     assert.doesNotMatch(workflow.source, /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.doesNotMatch(
       workflow.source,

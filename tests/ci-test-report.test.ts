@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
+  appendCiResult,
   parseNodeTestSummary,
+  readCiResults,
   renderCiSummary,
   type CiTestResult,
 } from '../scripts/ci-test-report.js';
@@ -44,5 +49,23 @@ describe('CI test reporting', () => {
   it('marks an empty report as a failed setup', () => {
     const summary = renderCiSummary('Empty', []);
     assert.match(summary, /No test results recorded \| ❌ Failed/);
+  });
+  it('serializes concurrent result appends', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'handelsrepublik-ci-results-'));
+    const path = join(directory, 'results.ndjson');
+    try {
+      await Promise.all(Array.from({ length: 32 }, (_, index) => appendCiResult({
+        id: `case-${index}`,
+        name: `case ${index}`,
+        status: 'passed',
+        durationMs: index,
+        note: 'recorded concurrently',
+      }, path)));
+      const results = await readCiResults(path);
+      assert.equal(results.length, 32);
+      assert.equal(new Set(results.map((result) => result.id)).size, 32);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

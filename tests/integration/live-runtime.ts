@@ -9,7 +9,6 @@ import {
   type Subscription,
 } from '../../src/index.js';
 import { appendCiResult } from '../../scripts/ci-test-report.js';
-import { shouldRefreshLiveSession } from './session-refresh-policy.js';
 
 export type LiveSuite = 'read' | 'closed-venue' | 'open-venue' | 'mutations';
 
@@ -38,7 +37,6 @@ export async function runLiveCase(testCase: LiveCase): Promise<void> {
   });
   const session = await client.auth.restoreSession();
   if (!session) throw new Error(`No Trade Republic session could be restored from ${sessionPath}.`);
-  if (shouldRefreshLiveSession()) await client.auth.refreshSession();
   const notes: string[] = [];
   const note = async (message: string): Promise<void> => {
     notes.push(message);

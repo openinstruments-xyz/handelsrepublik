@@ -17,9 +17,8 @@ describe('live integration case manifest', () => {
     assert.deepEqual([...suites].sort(), ['closed-venue', 'mutations', 'open-venue', 'read']);
   });
 
-  it('exposes every live check as a named workflow step', () => {
+  it('exposes every venue and mutation check as a named workflow step', () => {
     const workflowBySuite = {
-      read: 'general-read-only-validation.yml',
       'closed-venue': 'validate-order-destinations-during-closed-market-hours.yml',
       'open-venue': 'validate-venue-during-opening-times.yml',
       mutations: 'validate-reversible-account-mutations.yml',
@@ -35,6 +34,27 @@ describe('live integration case manifest', () => {
     }
   });
 
+  it('runs all read checks through the bounded-concurrent Node test suite', () => {
+    const workflow = readFileSync(
+      join(process.cwd(), '.github', 'workflows', 'general-read-only-validation.yml'),
+      'utf8',
+    );
+    const testSource = readFileSync(
+      join(process.cwd(), 'tests', 'integration', 'read-live.test.ts'),
+      'utf8',
+    );
+    const readCaseIds = liveCases
+      .filter((testCase) => testCase.suite === 'read')
+      .map((testCase) => testCase.id);
+
+    assert.ok(readCaseIds.includes('session.restore'));
+    assert.ok(!readCaseIds.includes('session.restore-refresh'));
+    assert.match(workflow, /run: npm run test:integration:read/);
+    assert.match(testSource, /const READ_LIVE_CONCURRENCY = 4/);
+    assert.match(testSource, /describe\('read-only live validations', \{ concurrency: READ_LIVE_CONCURRENCY \}/);
+    assert.match(testSource, /liveCases\.filter\(\(testCase\) => testCase\.suite === 'read'\)/);
+  });
+
   it('loads and rotates the live session through the job-start environment', () => {
     const workflowDirectory = join(process.cwd(), '.github', 'workflows');
     const workflows = readdirSync(workflowDirectory).filter((file) => file.endsWith('.yml'));
@@ -46,10 +66,10 @@ describe('live integration case manifest', () => {
         /environment: Live Integration Tests/,
         `${workflow} must load the shared environment secret`,
       );
-      if (source.includes("TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'")) {
+      if (!source.includes('gh secret set TR_SESSION_JSON')) {
         assert.doesNotMatch(
           source,
-          /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION|gh secret set TR_SESSION_JSON/,
+          /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION|ci-session\.ts refresh/,
           `${workflow} must not expose session-rotation credentials to PR code`,
         );
         continue;
@@ -59,12 +79,26 @@ describe('live integration case manifest', () => {
         /gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo /,
         `${workflow} must rotate the shared environment secret`,
       );
+      assert.match(
+        source,
+        /ci-session\.ts refresh/,
+        `${workflow} must refresh the shared session before rotating it`,
+      );
       assert.doesNotMatch(
         source,
         /gh secret set TR_SESSION_JSON --repo /,
         `${workflow} must not rotate the queue-time repository secret`,
       );
     }
+  });
+
+  it('keeps the live-case runtime restore-only', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'tests', 'integration', 'live-runtime.ts'),
+      'utf8',
+    );
+    assert.match(source, /client\.auth\.restoreSession\(\)/);
+    assert.doesNotMatch(source, /refreshSession|saveSession|clearSession/);
   });
 
   it('refreshes the shared session every 20 minutes only while no other workflow is active', () => {

@@ -15,6 +15,7 @@ export interface CiTestResult {
 }
 
 const defaultResultsPath = join(tmpdir(), 'handelsrepublik-ci-test-results.ndjson');
+let appendQueue: Promise<void> = Promise.resolve();
 
 export function resultsPath(environment: NodeJS.ProcessEnv = process.env): string {
   return environment.CI_TEST_RESULTS_FILE || defaultResultsPath;
@@ -81,8 +82,12 @@ export async function readCiResults(path = resultsPath()): Promise<CiTestResult[
 }
 
 export async function appendCiResult(result: CiTestResult, path = resultsPath()): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(result)}\n`, 'utf8');
+  const append = appendQueue.then(async () => {
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, `${JSON.stringify(result)}\n`, 'utf8');
+  });
+  appendQueue = append.catch(() => undefined);
+  await append;
 }
 
 export async function writeCiSummary(
