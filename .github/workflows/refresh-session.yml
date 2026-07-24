@@ -1,0 +1,38 @@
+name: refresh Trade Republic session
+
+on:
+  schedule:
+    - cron: "17 */2 * * *"
+      timezone: Europe/Berlin
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-tr-session-refresh-main
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  refresh-session:
+    name: refresh and verify the live session
+    if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: live-tr-session
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: materialize encrypted test session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: node --import tsx scripts/ci-session.ts materialize "$RUNNER_TEMP/trade-republic-session.json"
+      - name: refresh Trade Republic session
+        run: node --import tsx scripts/ci-session.ts refresh "$RUNNER_TEMP/trade-republic-session.json"
