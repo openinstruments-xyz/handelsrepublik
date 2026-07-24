@@ -1,11 +1,6 @@
 name: EUR 1 market buy, exchangeClosed response
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: "45 1 * * *"
-      timezone: Europe/Berlin
   workflow_dispatch:
     inputs:
       confirm_order_request:
@@ -23,13 +18,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  time-gate:
-    name: require 23:00–05:00 Europe/Berlin
+  authorize:
+    name: approve closed-venue market-order probe
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
-      (github.event_name != 'workflow_dispatch' ||
-        (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_request))
+      github.actor == 'VIEWVIEWVIEW' &&
+      inputs.confirm_order_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: live-order-tests
+    steps:
+      - run: echo "Closed-venue market-order probe approved."
+
+  time-gate:
+    name: require 23:00–05:00 Europe/Berlin
+    needs: authorize
     runs-on: ubuntu-latest
     outputs:
       eligible: ${{ steps.clock.outputs.eligible }}
