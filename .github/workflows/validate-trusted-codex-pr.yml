@@ -1,0 +1,155 @@
+name: trusted Codex PR non-market live validation
+
+on:
+  workflow_run:
+    workflows:
+      - PR-safe typecheck, build, distribution
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  authorize:
+    name: authorize exact Codex PR commit
+    if: >-
+      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'VIEWVIEWVIEW' &&
+      startsWith(github.event.workflow_run.head_branch, 'codex/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      head_sha: ${{ steps.gate.outputs.head_sha }}
+      live_profile: ${{ steps.gate.outputs.live_profile }}
+    steps:
+      - id: gate
+        name: verify repository, author, branch, SHA, and live profile
+        env:
+          EXPECTED_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::The successful quality run is not associated with a pull request."
+            exit 1
+          fi
+
+          pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          author="$(jq -r '.user.login' <<< "$pr")"
+          head_repo="$(jq -r '.head.repo.full_name' <<< "$pr")"
+          head_branch="$(jq -r '.head.ref' <<< "$pr")"
+          head_sha="$(jq -r '.head.sha' <<< "$pr")"
+          state="$(jq -r '.state' <<< "$pr")"
+          title="$(jq -r '.title' <<< "$pr")"
+
+          if [ "$author" != "VIEWVIEWVIEW" ] ||
+             [ "$head_repo" != "$GITHUB_REPOSITORY" ] ||
+             [ "$head_branch" != "$EXPECTED_HEAD_BRANCH" ] ||
+             [ "$head_sha" != "$EXPECTED_HEAD_SHA" ] ||
+             [ "$state" != "open" ]; then
+            echo "::error::The pull request no longer matches the trusted Codex workflow run."
+            exit 1
+          fi
+
+          case "$title" in
+            *"[live:read]") live_profile="read" ;;
+            *"[live:closed-venue]") live_profile="closed-venue" ;;
+            *"[live:open-venue]") live_profile="open-venue" ;;
+            *"[live:mutations]") live_profile="mutations" ;;
+            *"[live:closed-limit-order]") live_profile="closed-limit-order" ;;
+            *"[live:open-limit-order]") live_profile="open-limit-order" ;;
+            *)
+              echo "::error::The PR title has no approved non-market live profile suffix."
+              exit 1
+              ;;
+          esac
+
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "live_profile=$live_profile" >> "$GITHUB_OUTPUT"
+
+  live:
+    name: validate approved non-market live profile
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    environment: live-tr-session
+    concurrency:
+      group: live-tr-session-main
+      queue: max
+      cancel-in-progress: false
+    env:
+      TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.authorize.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: run secret-free checks before loading the live session
+        run: |
+          npm test
+          npm run typecheck
+          npm run build
+          git diff --exit-code -- dist
+      - name: enforce the live profile time window
+        env:
+          LIVE_PROFILE: ${{ needs.authorize.outputs.live_profile }}
+          TZ: Europe/Berlin
+        run: |
+          weekday="$(date +%u)"
+          minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
+
+          case "$LIVE_PROFILE" in
+            open-venue|open-limit-order)
+              if (( weekday > 5 || minutes < 570 || minutes >= 1020 )); then
+                echo "::error::$LIVE_PROFILE requires weekdays 09:30-17:00 Europe/Berlin. Re-run this job inside that window."
+                exit 1
+              fi
+              ;;
+            closed-venue|closed-limit-order)
+              if (( minutes < 1380 && minutes >= 300 )); then
+                echo "::error::$LIVE_PROFILE requires 23:00-05:00 Europe/Berlin. Re-run this job inside that window."
+                exit 1
+              fi
+              ;;
+            read|mutations) ;;
+            *)
+              echo "::error::Unapproved live profile."
+              exit 1
+              ;;
+          esac
+      - name: configure ephemeral session path
+        run: echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+      - name: materialize the shared encrypted session without rotating it
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: node --import tsx scripts/ci-session.ts materialize "$TR_SESSION_FILE"
+      - name: run the approved non-market live profile
+        env:
+          LIVE_PROFILE: ${{ needs.authorize.outputs.live_profile }}
+        run: |
+          case "$LIVE_PROFILE" in
+            read) npm run test:integration:read ;;
+            closed-venue) npm run test:integration:closed-venue ;;
+            open-venue) npm run test:integration:open-venue ;;
+            mutations) npm run test:integration:mutations ;;
+            closed-limit-order) npm run test:integration:closed-limit-order ;;
+            open-limit-order) npm run test:integration:open-limit-order ;;
+            *)
+              echo "::error::Unapproved live profile."
+              exit 1
+              ;;
+          esac
+      - name: remove the ephemeral session
+        if: always()
+        run: rm -f -- "$TR_SESSION_FILE"
