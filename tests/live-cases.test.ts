@@ -41,7 +41,11 @@ describe('live integration case manifest', () => {
     for (const workflow of workflows) {
       const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
       if (!source.includes('TR_SESSION_JSON:')) continue;
-      assert.match(source, /environment: live-tr-session/, `${workflow} must load the shared environment secret`);
+      assert.match(
+        source,
+        /environment: Live Integration Tests/,
+        `${workflow} must load the shared environment secret`,
+      );
       if (source.includes("TR_INTEGRATION_SKIP_SESSION_REFRESH: 'true'")) {
         assert.doesNotMatch(
           source,
@@ -52,7 +56,7 @@ describe('live integration case manifest', () => {
       }
       assert.match(
         source,
-        /gh secret set TR_SESSION_JSON --env live-tr-session --repo /,
+        /gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo /,
         `${workflow} must rotate the shared environment secret`,
       );
       assert.doesNotMatch(
@@ -71,7 +75,7 @@ describe('live integration case manifest', () => {
     assert.match(source, /select\(\.id != \$GITHUB_RUN_ID\)/);
     assert.match(source, /needs: check_activity/);
     assert.match(source, /if: needs\.check_activity\.outputs\.should_refresh == 'true'/);
-    assert.match(source, /group: live-tr-session-main/);
+    assert.match(source, /group: live-integration-tests-main/);
     assert.match(source, /id: confirm_idle/);
     assert.match(source, /if: steps\.confirm_idle\.outputs\.should_refresh == 'true'/);
   });

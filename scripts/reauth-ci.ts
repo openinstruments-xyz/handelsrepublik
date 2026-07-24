@@ -39,7 +39,7 @@ interface Options {
   debug: boolean;
 }
 
-const sessionEnvironment = 'live-tr-session';
+const sessionEnvironment = 'Live Integration Tests';
 const options = parseOptions(process.argv.slice(2));
 
 await run();
@@ -139,7 +139,7 @@ async function remoteWorkflowUsesEnvironment(repo: string): Promise<boolean> {
     'Accept: application/vnd.github.raw+json',
   ], undefined, true);
   return source.includes(`environment: ${sessionEnvironment}`)
-    && source.includes(`gh secret set TR_SESSION_JSON --env ${sessionEnvironment}`);
+    && source.includes(`gh secret set TR_SESSION_JSON --env "${sessionEnvironment}"`);
 }
 
 async function loginWithRotatingQr(client: TradeRepublicClient): Promise<Session> {

@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-tr-session-main
+  group: live-integration-tests-main
   queue: max
   cancel-in-progress: false
 
@@ -64,7 +64,7 @@ jobs:
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: live-tr-session
+    environment: Live Integration Tests
     steps:
       - uses: actions/checkout@v6
         with:
@@ -92,7 +92,7 @@ jobs:
         if: ${{ always() && steps.live-ready.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
-        run: gh secret set TR_SESSION_JSON --env live-tr-session --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
+        run: gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
       - name: remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"

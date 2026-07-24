@@ -11,7 +11,7 @@
 | [Open-market venue data](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml)<br><details><summary><sub>quotes, executable prices, subscriptions, ticker, tape, L2 books</sub></summary><sub>Runs on weekdays during the Berlin market window and first requires an explicitly open Apple destination. It reads the normal quote, buy and sell price-for-order responses, market-data subscriptions and L2 entitlements, then waits for live ticker, last-trade tape, and L2 order-book events. It validates live market data but does not place an order.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/venue/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/venue/scheduled.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/venue/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-venue-during-opening-times.yml) |
 | [Reversible account mutations](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml)<br><details><summary><sub>temporary price alert and watchlist item</sub></summary><sub>Checks the SDK's low-risk account changes using disposable data. It creates a EUR 1 Apple price alert, verifies it appears, and deletes it. It also adds an instrument that is not already present to the default watchlist, verifies the addition, and removes it. Cleanup runs even when an assertion fails.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/mutations/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/mutations/scheduled.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/mutations/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-reversible-account-mutations.yml) |
 | [Closed-venue limit rejection](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml)<br><details><summary><sub>closed venue must reject a deeply priced limit order</sub></summary><sub>Runs only in the Berlin overnight window and confirms that LSX reports closed. It then tries to submit a one-share Apple limit buy at EUR 1 and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. If the venue unexpectedly accepts the order, the test immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml) |
-| [Closed-venue market rejection](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml)<br><details><summary><sub>closed venue must reject a market order</sub></summary><sub>Runs only after an explicit owner dispatch, confirmation, the separate <code>live-order-tests</code> environment gate, and the Berlin overnight time gate. It confirms that LSX reports closed, then tries to submit an amount-based EUR 1 Apple market buy and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. If the venue unexpectedly accepts the order, the test immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml) |
+| [Closed-venue market rejection](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml)<br><details><summary><sub>closed venue must reject a market order</sub></summary><sub>Runs only after an explicit owner dispatch, confirmation, the shared <code>Live Integration Tests</code> environment approval, and the Berlin overnight time gate. It confirms that LSX reports closed, then tries to submit an amount-based EUR 1 Apple market buy and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. If the venue unexpectedly accepts the order, the test immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml) |
 | [Open-venue limit lifecycle](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml)<br><details><summary><sub>submit, observe, replace, cancel, and clean up a limit order</sub></summary><sub>Runs on weekdays during the Berlin market window, selects NVIDIA, Apple, or Microsoft on an explicitly open destination, and requires a bid of at least EUR 10. It opens the order-update stream, submits one share at a deliberately non-marketable EUR 1 limit, verifies the created/open update, replaces the order at EUR 0.50, verifies the cancellation and replacement updates, then cancels the replacement and verifies its cancellation. Cleanup is retried in all cases, although any real order carries some execution risk.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml) |
 | [Manual live market buy](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)<br><details><summary><sub>confirmed real purchase of a custom instrument</sub></summary><sub>Runs only when the repository owner manually supplies an ISIN, a gross budget of at most EUR 5, and explicit confirmation. It selects an open market-order venue, reads the current ask, calculates how many whole units fit within the budget, submits the real market buy, and waits for execution. The purchased position is intentionally left in the account; there is no automatic sell, and the broker's expected EUR 1 order fee is additional.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/buy/latest.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/buy/manual.svg?v=3)](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml) |
 
@@ -1506,49 +1506,32 @@ without running the TypeScript build.
 
 ### Pull-request security boundary
 
-Every pull request, including a pull request from a fork, runs the two
-`PR-safe` GitHub Actions workflows. They install the locked dependencies, run
+Every pull request runs the two `PR-safe` GitHub Actions workflows. They install
+the locked dependencies, run
 the unit tests and TypeScript typecheck, build the package locally, and verify
 that the committed `dist` output is current. These jobs receive no repository
-or environment secrets, use only a read-only `GITHUB_TOKEN`, do not persist
-checkout credentials, and do not select a GitHub environment.
+or environment secrets, use only a read-only `GITHUB_TOKEN`, and do not persist
+checkout credentials. Both jobs use the `Unit Tests` GitHub environment with
+deployment records disabled. Keep that environment free of secrets, protection
+rules, and privileged external access.
 
-GitHub may still require a one-time **Approve workflows to run** action for a
-new public-fork contributor according to **Settings > Actions > General >
-Approval for running fork pull request workflows from contributors**. That
-GitHub anti-abuse approval releases only the secret-free `PR-safe` jobs and
-never grants the fork access to repository or environment secrets. Choose the
-least restrictive policy appropriate for the repository if these checks should
-start automatically for established contributors.
+The workflows themselves contain no author, contributor, or approval condition
+for these checks. GitHub's standard repository behavior may still pause an
+unknown contributor's first workflow run before a runner starts; that behavior
+is outside these workflows.
 
 Pull-request code is untrusted, including package lifecycle scripts, tests, and
 build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to the `PR-safe` workflows.
 
 After both `PR-safe` workflows pass for an exact commit, the trusted
-default-branch post-check runs the read-only live integration automatically for
-a same-repository pull request authored by `VIEWVIEWVIEW`. Every other author,
-including a fork contributor, first reaches the protected
-`external-pr-live-approval` environment. A maintainer must inspect the exact
-commit and select **Review deployments > Approve and deploy** before the
-post-check checks out that commit or loads `TR_SESSION_JSON`. A new commit
-creates new safe checks and a new approval; the old approval cannot authorize
-the changed SHA.
-
-Before accepting external contributions, create
-`external-pr-live-approval` under **Settings > Environments**, add
-`VIEWVIEWVIEW` as a required reviewer, and disable administrator bypass. The
-workflow fails closed when that required-reviewer rule is absent. GitHub makes
-required environment reviewers available on current Free, Pro, and Team plans
-only for public repositories, so this rule cannot yet be enabled while this
-repository remains private.
-
-Contributors may also configure their own fork with their own test credentials
-and run its live workflows there. Those credentials and results belong to the
-fork and are never trusted or imported by this repository. Upstream uses only
-its own session after the explicit approval above. Market-order and order
-mutation workflows remain separately gated and never start as part of this
-pull-request approval.
+default-branch post-check reaches the protected `Live Integration Tests`
+environment. A maintainer must inspect the exact commit and select **Review
+deployments > Approve and deploy** before the post-check checks out that commit
+or loads `TR_SESSION_JSON`. A new commit creates new safe checks and a new
+approval; the old approval cannot authorize the changed SHA. There is no
+author- or contributor-specific bypass. Market-order workflows never start as
+part of this pull-request approval.
 
 The SDK is a modular monolith. `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution dependencies. Declarative
@@ -1581,7 +1564,7 @@ The live workflow matrix is:
 | Open-market venue validation | push to `main`, manual, 11:00 weekdays | weekdays 09:30–17:00 Berlin, then an explicitly open destination | Order destinations and home destination; buy/sell `priceForOrder` quotes; normal quotation; market subscriptions and L2 entitlements; ticker, last-trade/tape and L2 stream payloads. `priceForOrder` is the venue-specific executable reference-price response used when preparing an order; this workflow reads it but creates no order. |
 | Reversible account mutations | push to `main`, manual, 01:00 and 11:00 daily | none | Create/list/delete a disposable EUR 1 Apple price alert; add/verify/remove one candidate instrument in the built-in default watchlist. Cleanup runs in `finally`. Custom watchlist creation, rename, clone and deletion are not supported by the observed backend and are not part of the SDK. |
 | Closed-venue limit rejection | push to `main`, manual, 01:30 daily | 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit one Apple share with a EUR 1 limit and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
-| Closed-venue market rejection | manual only | explicit owner confirmation and the `live-order-tests` environment gate; 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit an amount-based EUR 1 Apple market buy and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
+| Closed-venue market rejection | manual only | explicit owner confirmation and the `Live Integration Tests` environment gate; 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit an amount-based EUR 1 Apple market buy and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
 | Open-venue limit lifecycle | push to `main`, manual, 11:30 weekdays | weekdays 09:30–17:00 Berlin in workflow and test; destination must report open and bid at least EUR 10 | Select NVIDIA, Apple or Microsoft automatically; open the order-update stream; submit one share at EUR 1; require a created/open update; replace it with EUR 0.50; require old-order cancellation and new-order creation updates; cancel the replacement; require its cancellation update; retry cleanup in `finally`. |
 | Market buy on live account | manual only | explicit owner confirmation; automatic open market-order venue | Buy a custom ISIN with a user-entered gross budget of at most EUR 5, wait for execution and leave the position in the account. No automatic sell. |
 
@@ -1600,7 +1583,7 @@ types and do not judge whether changing market values are plausible.
 Every independent server check is a named Actions step. Later steps still run
 after an earlier failure, while the workflow remains red. This
 makes schema drift attributable without hiding additional failures.
-All live workflows share the `live-tr-session-main` concurrency group with a
+All live workflows share the `live-integration-tests-main` concurrency group with a
 maximal queue. GitHub therefore keeps each triggered workflow visible as its
 own run while executing session-consuming workflows one at a time instead of
 canceling additional pending runs.
@@ -1643,34 +1626,39 @@ gross purchase budget at EUR 5; the expected EUR 1 fee is additional. It waits
 for the buy to execute.
 It does not automatically sell the purchased quantity, which remains in the
 account.
-Configure required reviewers on the `live-order-tests` GitHub environment before
-using either market-order workflow. Approval happens in a dedicated job; the
-order itself runs afterward in the shared `live-tr-session` environment.
-Without a required-reviewer protection rule, the environment does not pause for
-a second GitHub UI approval.
+Both market-order workflows are started manually, retain an explicit
+confirmation input and safety checks, and then wait for approval in the shared
+`Live Integration Tests` environment before the order-related code runs.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
-The `PR-safe` quality and unit workflows run for every pull request, including
-approved fork pull requests, and once more on pushes to `main`. Restricting
+The `PR-safe` quality and unit workflows run for every pull request and once
+more on pushes to `main`. Restricting
 their push trigger to `main` avoids duplicate push and pull-request runs for
 ordinary branches. Non-market live workflows run on pushes to `main`;
 time-dependent jobs stop at their first time gate when the current Berlin
-window does not fit. Both market-order workflows remain manual-only and use the
-separate `live-order-tests` gate. Every job that uses the rotating Trade
-Republic session runs in the unprotected `live-tr-session` GitHub environment.
-Keep that environment free of required reviewers so scheduled validations do
-not wait for approval. GitHub reads environment secrets when the referencing
-job starts, so a queued job receives the session saved by the preceding
-serialized workflow instead of the stale value that existed when it was
-queued.
+window does not fit. Both market-order workflows remain manual-only. Every job
+that uses the rotating Trade Republic session runs in the protected `Live Integration Tests` GitHub
+environment. Configure `VIEWVIEWVIEW` as its required reviewer and disable
+administrator bypass. This intentionally makes scheduled and push-triggered
+live jobs wait for the same explicit approval. GitHub reads environment secrets
+when the referencing job starts, so a queued job receives the session saved by
+the preceding serialized workflow instead of the stale value that existed when
+it was queued.
 
 The reauthentication command creates the shared environment automatically when
 it is missing. To create it separately:
 
 ```powershell
-gh api --method PUT repos/VIEWVIEWVIEW/handelsrepublik/environments/live-tr-session
+gh api --method PUT "repos/VIEWVIEWVIEW/handelsrepublik/environments/Unit%20Tests"
+gh api --method PUT "repos/VIEWVIEWVIEW/handelsrepublik/environments/Live%20Integration%20Tests"
 ```
+
+Keep `Unit Tests` empty. Store `TR_SESSION_JSON` in `Live Integration Tests`;
+successful live runs rotate that environment secret in place. The
+repository-level `TR_SESSION_JSON` may remain temporarily as a migration
+fallback, but remove it after the new environment has completed and rotated one
+successful live run.
 
 When the GitHub Actions session can no longer be refreshed, renew it from a
 maintainer machine:
@@ -1683,10 +1671,10 @@ The command verifies the local GitHub CLI login, opens a browser briefly to
 collect the matching Trade Republic web context and WAF token, renders a QR code in the
 terminal, and waits for approval in the Trade Republic app. Short-lived QR
 challenges are replaced automatically until approval or the overall timeout. It
-then updates the `TR_SESSION_JSON` secret in the `live-tr-session` environment, dispatches
+then updates the `TR_SESSION_JSON` secret in the `Live Integration Tests` environment, dispatches
 `general-read-only-validation.yml` on `main`, and watches the new workflow run. The new
 session is held in memory and is not written to the repository. Use
-the default command; it creates and targets `live-tr-session` automatically.
+the default command; it creates and targets `Live Integration Tests` automatically.
 
 The live workflow also expects the repository-level
 `GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` secret. It must contain a token allowed
@@ -1739,7 +1727,7 @@ through skipped tests.
 Session refresh failures and both market-order workflows are deliberately
 absent from the allowlist. Market-order tests remain separately and explicitly
 triggered. Codex is instructed not to request or run with live-account secrets,
-weaken the Actions trust boundary, grant fork code secrets, deploy, or modify
+weaken the Actions trust boundary, grant untrusted PR code secrets, deploy, or modify
 the market-order workflows.
 
 Use `npm run ci:reauth -- --no-watch` to return after dispatching, or

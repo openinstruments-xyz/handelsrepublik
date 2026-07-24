@@ -1,5 +1,5 @@
-# This workflow executes untrusted pull-request code. Do not add secrets,
-# environments, deployments, or access to privileged external resources.
+# This workflow executes untrusted pull-request code. Its environment must
+# remain secret-free and must not access privileged external resources.
 name: PR-safe unit tests
 
 on:
@@ -7,7 +7,6 @@ on:
     branches:
       - main
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,6 +20,9 @@ jobs:
     name: unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment:
+      name: Unit Tests
+      deployment: false
     steps:
       - uses: actions/checkout@v6
         with:
