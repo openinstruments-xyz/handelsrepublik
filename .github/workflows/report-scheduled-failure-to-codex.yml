@@ -137,31 +137,6 @@ jobs:
             exit 1
           fi
 
-          case "$FAILED_WORKFLOW" in
-            "sessions, account, instrument discovery/details, derivative catalog, candles, orders, portfolio, timeline, documents, taxes, payments")
-              live_profile="read"
-              ;;
-            "cross-asset order destinations, exchange schedule, instrument status, closed-market quotations")
-              live_profile="closed-venue"
-              ;;
-            "quotations, price-for-order, market subscriptions, last trades/tape, ticker, L2 books, order destinations")
-              live_profile="open-venue"
-              ;;
-            "watchlists, price alerts")
-              live_profile="mutations"
-              ;;
-            "EUR 1 limit buy, exchangeClosed response")
-              live_profile="closed-limit-order"
-              ;;
-            "order updates, EUR 1 submit, EUR 0.50 replace, cancel, cleanup")
-              live_profile="open-limit-order"
-              ;;
-            *)
-              echo "::error::The failed workflow has no approved non-market live profile."
-              exit 1
-              ;;
-          esac
-
           prompt="$RUNNER_TEMP/codex-triage-request.md"
           {
             echo "@codex Triage this trusted scheduled test failure before deciding whether any code change is appropriate."
@@ -177,8 +152,8 @@ jobs:
             echo
             echo "Only for a plausible repository defect: reproduce it with secret-free local checks, implement the smallest SDK fix,"
             echo "run unit tests, typecheck, and build, then create a pull request from a \`codex/\` branch that references this issue."
-            echo "End that pull request's title with \`[live:$live_profile]\` so the trusted post-check workflow can validate the exact"
-            echo "non-market live suite against the pull request commit. Do not use any other \`[live:...]\` marker."
+            echo "The repository runs the secret-free PR checks automatically. Its trusted post-check workflow will run the read-only"
+            echo "live integration against the exact pull-request commit according to the repository's maintainer-approval policy."
             echo "Do not request, read, copy, or expose Trade Republic sessions or other secrets. Do not run live-account tests yourself."
             echo "Do not weaken GitHub Actions trust boundaries, enable fork workflows, deploy anything, or change any market-order workflow."
             echo
