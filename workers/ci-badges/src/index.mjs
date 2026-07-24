@@ -171,14 +171,12 @@ ${detailRows}
 </svg>`;
 }
 
-function svgResponse(message, color, failures = [], status = 200, cacheable = true) {
+function svgResponse(message, color, failures = [], status = 200) {
   return new Response(renderBadge(message, color, failures), {
     status,
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
-      'cache-control': cacheable
-        ? 'public, max-age=60, s-maxage=180, stale-while-revalidate=300'
-        : 'no-store',
+      'cache-control': 'no-store',
       'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       'x-content-type-options': 'nosniff',
     },
@@ -267,7 +265,7 @@ async function loadFailedChecks(runId, token) {
 }
 
 export default {
-  async fetch(request, env, context) {
+  async fetch(request, env) {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('Method not allowed', {
         status: 405,
@@ -281,15 +279,7 @@ export default {
     }
 
     if (!env.GH_TOKEN) {
-      return svgResponse('unknown', COLORS.unknown, [], 503, false);
-    }
-
-    const cache = caches.default;
-    const cached = await cache.match(request);
-    if (cached) {
-      return request.method === 'HEAD'
-        ? new Response(null, cached)
-        : cached;
+      return svgResponse('unknown', COLORS.unknown, [], 503);
     }
 
     try {
@@ -306,12 +296,11 @@ export default {
       }
 
       const response = svgResponse(state.message, state.color, failures);
-      context.waitUntil(cache.put(request, response.clone()));
       return request.method === 'HEAD'
         ? new Response(null, response)
         : response;
     } catch {
-      return svgResponse('unknown', COLORS.unknown, [], 502, false);
+      return svgResponse('unknown', COLORS.unknown, [], 502);
     }
   },
 };

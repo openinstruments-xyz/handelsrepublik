@@ -84,7 +84,6 @@ test('returns an SVG without exposing configuration errors', async () => {
 
 test('loads failed steps only for a failing run', async () => {
   const originalFetch = globalThis.fetch;
-  const originalCaches = globalThis.caches;
   const requestedUrls = [];
 
   globalThis.fetch = async (url) => {
@@ -107,15 +106,6 @@ test('loads failed steps only for a failing run', async () => {
       }],
     });
   };
-  globalThis.caches = {
-    default: {
-      async match() {
-        return undefined;
-      },
-      async put() {},
-    },
-  };
-
   try {
     const response = await worker.fetch(
       new Request('https://example.com/reads/scheduled.svg'),
@@ -125,12 +115,12 @@ test('loads failed steps only for a failing run', async () => {
     const svg = await response.text();
 
     assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(requestedUrls.length, 2);
     assert.match(requestedUrls[1], /\/actions\/runs\/123\/jobs/);
     assert.match(svg, /× validate cash response/);
     assert.doesNotMatch(svg, /publish test result table/);
   } finally {
     globalThis.fetch = originalFetch;
-    globalThis.caches = originalCaches;
   }
 });
