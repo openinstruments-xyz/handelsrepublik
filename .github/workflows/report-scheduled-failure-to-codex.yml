@@ -3,12 +3,12 @@ name: report trusted scheduled failures to Codex
 on:
   workflow_run:
     workflows:
-      - sessions, account, instrument discovery/details, derivative catalog, candles, orders, portfolio, timeline, documents, taxes, payments
-      - cross-asset order destinations, exchange schedule, instrument status, closed-market quotations
-      - quotations, price-for-order, market subscriptions, last trades/tape, ticker, L2 books, order destinations
-      - watchlists, price alerts
-      - EUR 1 limit buy, exchangeClosed response
-      - order updates, EUR 1 submit, EUR 0.50 replace, cancel, cleanup
+      - "Live: account and market-data reads"
+      - "Live: trading availability when markets are closed"
+      - "Live: quotes, OHLC, L2, streaming {quotes, L2, tape}"
+      - "Live: mutating alerts and default watchlist"
+      - "Live: limit order rejected while market is closed"
+      - "Live: submit, replace, and cancel a limit order"
     types: [completed]
 
 permissions:

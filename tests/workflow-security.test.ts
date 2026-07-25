@@ -24,6 +24,20 @@ function hasTopLevelTrigger(source: string, trigger: string): boolean {
 }
 
 describe('GitHub Actions trust boundaries', () => {
+  it('queues every shared live workflow without cancelling an active session user', () => {
+    const sharedLiveWorkflows = workflows.filter((workflow) =>
+      workflow.source.includes('group: live-integration-tests-main'));
+
+    assert.ok(sharedLiveWorkflows.length > 0);
+    for (const workflow of sharedLiveWorkflows) {
+      assert.match(
+        workflow.source,
+        /group: live-integration-tests-main\r?\n\s+queue: max\r?\n\s+cancel-in-progress: false/,
+        `${workflow.file} must preserve both running and pending shared-session work`,
+      );
+    }
+  });
+
   it('never uses pull_request_target', () => {
     for (const workflow of workflows) {
       assert.equal(
@@ -44,7 +58,7 @@ describe('GitHub Actions trust boundaries', () => {
     );
 
     for (const workflow of pullRequestWorkflows) {
-      assert.match(workflow.source, /^name: PR-safe /m);
+      assert.match(workflow.source, /^name: (?:Package checks|Unit tests)$/m);
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*secrets\./);
       assert.match(
@@ -135,11 +149,11 @@ describe('GitHub Actions trust boundaries', () => {
       assert.equal(hasTopLevelTrigger(workflow.source, trigger), false);
     }
 
-    assert.match(workflow.source, /workflows:\r?\n      - PR-safe unit tests/);
+    assert.match(workflow.source, /workflows:\r?\n      - Unit tests/);
     assert.match(workflow.source, /github\.event\.workflow_run\.event == 'pull_request'/);
     assert.match(workflow.source, /github\.event\.workflow_run\.conclusion == 'success'/);
     assert.match(workflow.source, /select\(\.head\.sha == \$sha\)/);
-    assert.match(workflow.source, /PR-safe typecheck, build, distribution/);
+    assert.match(workflow.source, /Package checks/);
     assert.match(workflow.source, /\[ "\$quality_conclusion" != "success" \]/);
     assert.match(workflow.source, /environments\/Live%20Integration%20Tests/);
     assert.match(workflow.source, /\.can_admins_bypass == false/);

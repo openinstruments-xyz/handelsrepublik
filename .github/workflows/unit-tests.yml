@@ -1,6 +1,6 @@
 # This workflow executes untrusted pull-request code. Its environment must
 # remain secret-free and must not access privileged external resources.
-name: PR-safe unit tests
+name: Unit tests
 
 on:
   push:

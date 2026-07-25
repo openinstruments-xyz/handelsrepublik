@@ -1,6 +1,6 @@
 # This workflow executes untrusted pull-request code. Its environment must
 # remain secret-free and must not access privileged external resources.
-name: PR-safe typecheck, build, distribution
+name: Package checks
 
 on:
   push:
@@ -45,4 +45,4 @@ jobs:
         run: npm run test:ci:record -- quality.distribution "Committed distribution" -- git diff --exit-code -- dist
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Package quality results"
+        run: npm run test:ci:summary -- "Package check results"

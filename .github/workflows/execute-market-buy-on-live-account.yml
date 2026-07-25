@@ -1,4 +1,4 @@
-name: manual custom ISIN, maximum EUR 5, automatic venue selection
+name: "Manual: buy up to €5 of an instrument"
 
 on:
   workflow_dispatch:
@@ -27,21 +27,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  authorize:
-    name: approve live market buy
-    if: >-
-      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
-      github.ref == 'refs/heads/main' &&
-      github.actor == 'VIEWVIEWVIEW' &&
-      inputs.confirm_live_execution
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo "Live market buy approved."
-
   orders:
-    name: execute market buy on live account
-    needs: authorize
+    name: buy up to €5 of an instrument
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&

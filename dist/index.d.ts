@@ -1132,7 +1132,6 @@ declare class TradeRepublicClient {
     private deviceInfo;
     private readonly http;
     private readonly endpoints;
-    private readonly resources;
     private readonly operations;
     private readonly runtime;
     private readonly validateRaw;
@@ -1246,7 +1245,6 @@ declare class PortfolioApi {
     private resolveSecuritiesAccountNumber;
 }
 declare class MarketApi {
-    private readonly runtime;
     private readonly resources;
     constructor(runtime: ClientRuntime);
     subscriptions(): Promise<MarketSubscription[]>;

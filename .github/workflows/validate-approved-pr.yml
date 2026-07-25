@@ -3,7 +3,7 @@ name: approved PR live read integration
 on:
   workflow_run:
     workflows:
-      - PR-safe unit tests
+      - Unit tests
     types: [completed]
 
 permissions: {}
@@ -64,7 +64,7 @@ jobs:
             quality_conclusion="$(
               jq -r \
                 '[.workflow_runs[] |
-                  select(.name == "PR-safe typecheck, build, distribution")][0].conclusion // ""' \
+                  select(.name == "Package checks")][0].conclusion // ""' \
                 <<< "$runs"
             )"
 
@@ -72,7 +72,7 @@ jobs:
               break
             fi
             if [[ "$quality_conclusion" =~ ^(failure|cancelled|timed_out|action_required|startup_failure)$ ]]; then
-              echo "::error::The PR-safe typecheck/build workflow concluded $quality_conclusion."
+              echo "::error::The package checks workflow concluded $quality_conclusion."
               exit 1
             fi
             sleep 20
@@ -124,6 +124,7 @@ jobs:
     environment: Live Integration Tests
     concurrency:
       group: live-integration-tests-main
+      queue: max
       cancel-in-progress: false
     steps:
       - name: revalidate the approved SHA before checkout

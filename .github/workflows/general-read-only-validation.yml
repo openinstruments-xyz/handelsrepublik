@@ -1,4 +1,4 @@
-name: sessions, account, instrument discovery/details, derivative catalog, candles, orders, portfolio, timeline, documents, taxes, payments
+name: "Live: account and market-data reads"
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   live-read-only:
-    name: run general read-only live validations
+    name: read live account and market data
     if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -45,7 +45,7 @@ jobs:
       - name: mark live session ready
         id: live-ready
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
-      - name: run general read-only live validations concurrently
+      - name: read live account and market data concurrently
         if: ${{ !cancelled() && steps.live-ready.outcome == 'success' }}
         run: npm run test:integration:read
       - name: rotate encrypted GitHub session secret
