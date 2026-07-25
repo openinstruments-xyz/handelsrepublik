@@ -23,7 +23,6 @@
     "demo:repl": "npm run build && node ./demo/repl.mjs",
     "demo:tui": "npm run build && node ./demo/tui.mjs",
     "demo:quickstart": "npm run build && node ./demo/quickdemo.mjs",
-    "demo:extended-quickstart": "npm run build && node ./demo/quickdemo.mjs",
     "demo:redis": "npm run build && node ./demo/redis-multi-account.mjs",
     "demo:scratchpad": "node --import tsx ./demo/scratchpad.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
@@ -87,8 +86,11 @@
     "pngjs": "^7.0.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
-    "tsup": "^8.3.5",
-    "tsx": "^4.21.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.1",
     "typescript": "~5.9.3"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }
