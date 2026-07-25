@@ -1520,14 +1520,8 @@ Pull-request code is untrusted, including package lifecycle scripts, tests, and
 build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to the `PR-safe` workflows.
 
-After both `PR-safe` workflows pass for an exact commit, the trusted
-default-branch post-check reaches the protected `Live Integration Tests`
-environment. A maintainer must inspect the exact commit and select **Review
-deployments > Approve and deploy** before the post-check checks out that commit
-or loads `TR_SESSION_JSON`. A new commit creates new safe checks and a new
-approval; the old approval cannot authorize the changed SHA. There is no
-author- or contributor-specific bypass. Market-order workflows never start as
-part of this pull-request approval.
+Live integration workflows do not run against pull-request code. They run
+separately from trusted default-branch, scheduled, or manual triggers.
 
 The SDK is a modular monolith. `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution dependencies. Declarative
