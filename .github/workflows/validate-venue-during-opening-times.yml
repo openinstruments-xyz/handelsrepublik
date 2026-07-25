@@ -1,4 +1,4 @@
-name: "Live: quotes, OHLC, L2, streaming {quotes, L2, tape}"
+name: "Live: quotes, L2, streaming {quotes, L2, tape}"
 
 on:
   push:
@@ -50,7 +50,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   open-market-data:
-    name: check quotes, OHLC, L2, and streaming market data
+    name: check quotes, L2, and streaming market data
     needs: time-gate
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
@@ -122,4 +122,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Quotes, OHLC, L2, and streaming market data"
+        run: npm run test:ci:summary -- "Quotes, L2, and streaming market data"
