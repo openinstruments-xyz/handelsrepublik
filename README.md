@@ -204,10 +204,11 @@ try {
 
 The following example assumes `tr` is authenticated and still open. It searches
 for Apple, fetches its normalized instrument details, and previews a market order
-for one share. Pass `true` only after separately confirming the displayed order
-preview; doing so submits a real order.
+for one share. Set `confirmLiveOrder` to `true` only after separately confirming
+the displayed order preview; doing so submits a real order.
 
 ```ts
+const confirmLiveOrder = false;
 const APPLE_ISIN = 'US0378331005';
 const searchResults = await tr.assets.search('AAPL', {
   type: 'stock',
@@ -280,23 +281,21 @@ console.log('Order preview:', {
 
 if (!confirmLiveOrder) {
   console.log('Preview only — no order was submitted.');
-  return { info, preview };
-}
-
-// This submits a real order.
-const result = await tr.orders.submit(preview.order);
-
-if (result.status === 'outcomeUnknown') {
-  console.error(
-    'Order outcome is unknown. Do not submit it again automatically.',
-    result,
-  );
 } else {
-  console.log('Order result:', result);
+  // This submits a real order.
+  const result = await tr.orders.submit(preview.order);
+
+  if (result.status === 'outcomeUnknown') {
+    console.error(
+      'Order outcome is unknown. Do not submit it again automatically.',
+      result,
+    );
+  } else {
+    console.log('Order result:', result);
+  }
+
+  console.log({ info, preview, result });
 }
-
-console.log({ info, preview, result })
-
 ```
 
 ## WAF token collection
