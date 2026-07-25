@@ -1,4 +1,4 @@
-name: manual custom ISIN, maximum EUR 5, automatic venue selection
+name: "Manual: buy up to €5 of an instrument"
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   orders:
-    name: execute market buy on live account
+    name: buy up to €5 of an instrument
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&

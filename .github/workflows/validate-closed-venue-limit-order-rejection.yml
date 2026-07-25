@@ -1,4 +1,4 @@
-name: EUR 1 limit buy, exchangeClosed response
+name: "Live: limit order rejected while market is closed"
 
 on:
   push:
@@ -59,7 +59,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   closed-limit-order:
-    name: submit EUR 1 limit buy and require exchangeClosed
+    name: require a closed market to reject a limit order
     needs: time-gate
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
@@ -98,4 +98,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Closed-venue limit-order results"
+        run: npm run test:ci:summary -- "Limit order rejected while market is closed"

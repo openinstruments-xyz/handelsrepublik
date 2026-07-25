@@ -1,4 +1,4 @@
-name: EUR 1 market buy, exchangeClosed response
+name: "Live: market order rejected while market is closed"
 
 on:
   workflow_dispatch:
@@ -54,7 +54,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   closed-market-order:
-    name: submit EUR 1 market buy and require exchangeClosed
+    name: require a closed market to reject a market order
     needs: time-gate
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
@@ -93,4 +93,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Closed-venue market-order results"
+        run: npm run test:ci:summary -- "Market order rejected while market is closed"

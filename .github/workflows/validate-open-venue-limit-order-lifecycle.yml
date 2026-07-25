@@ -1,4 +1,4 @@
-name: order updates, EUR 1 submit, EUR 0.50 replace, cancel, cleanup
+name: "Live: submit, replace, and cancel a limit order"
 
 on:
   push:
@@ -60,7 +60,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   open-limit-order:
-    name: stream, submit, replace, cancel, and clean up limit orders
+    name: submit, replace, and cancel a limit order
     needs: time-gate
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
@@ -86,9 +86,9 @@ jobs:
       - name: refresh Trade Republic session
         id: live-ready
         run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
-      - name: validate order-update stream and complete limit-order lifecycle
+      - name: submit, replace, and cancel a limit order
         continue-on-error: true
-        run: npm run test:ci:record -- orders.open-limit-lifecycle "Open-venue limit-order lifecycle" -- npm run test:integration:open-limit-order
+        run: npm run test:ci:record -- orders.open-limit-lifecycle "Submit, replace, and cancel a limit order" -- npm run test:integration:open-limit-order
       - name: rotate encrypted GitHub session secret
         if: ${{ always() && steps.live-ready.outcome == 'success' }}
         env:
@@ -99,4 +99,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Open-venue limit-order results"
+        run: npm run test:ci:summary -- "Submit, replace, and cancel a limit order"

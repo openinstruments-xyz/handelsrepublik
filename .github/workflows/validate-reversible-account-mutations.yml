@@ -1,4 +1,4 @@
-name: watchlists, price alerts
+name: "Live: mutating alerts and default watchlist"
 
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   reversible-mutations:
-    name: mutate and restore disposable account data
+    name: mutate alerts and the default watchlist
     if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -61,4 +61,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Reversible account mutation results"
+        run: npm run test:ci:summary -- "Alert and default watchlist mutation results"

@@ -1,4 +1,4 @@
-name: cross-asset order destinations, exchange schedule, instrument status, closed-market quotations
+name: "Live: trading availability when markets are closed"
 
 on:
   push:
@@ -49,7 +49,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   closed-market-data:
-    name: validate closed-market venue data
+    name: check trading availability when markets are closed
     needs: time-gate
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
@@ -101,4 +101,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Closed-market venue results"
+        run: npm run test:ci:summary -- "Trading availability while markets are closed"
