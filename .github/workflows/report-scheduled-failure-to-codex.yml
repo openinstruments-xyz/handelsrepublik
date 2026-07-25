@@ -5,7 +5,7 @@ on:
     workflows:
       - "Live: account and market-data reads"
       - "Live: trading availability when markets are closed"
-      - "Live: quotes, OHLC, L2, streaming {quotes, L2, tape}"
+      - "Live: quotes, L2, streaming {quotes, L2, tape}"
       - "Live: mutating alerts and default watchlist"
       - "Live: limit order rejected while market is closed"
       - "Live: submit, replace, and cancel a limit order"
