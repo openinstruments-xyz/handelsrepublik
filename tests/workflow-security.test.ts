@@ -24,6 +24,20 @@ function hasTopLevelTrigger(source: string, trigger: string): boolean {
 }
 
 describe('GitHub Actions trust boundaries', () => {
+  it('queues every shared live workflow without cancelling an active session user', () => {
+    const sharedLiveWorkflows = workflows.filter((workflow) =>
+      workflow.source.includes('group: live-integration-tests-main'));
+
+    assert.ok(sharedLiveWorkflows.length > 0);
+    for (const workflow of sharedLiveWorkflows) {
+      assert.match(
+        workflow.source,
+        /group: live-integration-tests-main\r?\n\s+queue: max\r?\n\s+cancel-in-progress: false/,
+        `${workflow.file} must preserve both running and pending shared-session work`,
+      );
+    }
+  });
+
   it('never uses pull_request_target', () => {
     for (const workflow of workflows) {
       assert.equal(

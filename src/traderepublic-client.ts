@@ -184,7 +184,6 @@ export class TradeRepublicClient {
   private deviceInfo: TradeRepublicDeviceInfo;
   private readonly http: HttpClient;
   private readonly endpoints: EndpointResolver;
-  private readonly resources: ResourceClient;
   private readonly operations: OperationClient;
   private readonly runtime: ClientRuntime;
   private readonly validateRaw: RawSchemaValidator;
@@ -234,7 +233,6 @@ export class TradeRepublicClient {
     });
     this.operations = this.runtime.operations;
     this.account = new AccountApi(this.operations);
-    this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
     this.orders = new OrdersApi(this.runtime);
@@ -1306,7 +1304,7 @@ function createRawSchemaValidator(
 export class MarketApi {
   private readonly resources: ResourceClient;
 
-  constructor(private readonly runtime: ClientRuntime) {
+  constructor(runtime: ClientRuntime) {
     this.resources = runtime.resources;
   }
 

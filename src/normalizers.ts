@@ -825,10 +825,6 @@ function normalizeTimestamp(value: string | number | undefined): string | undefi
   return value;
 }
 
-function objectPayload(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
 function moneyAmount(value: unknown): number | undefined {
   const record = asRecord(value);
   return optionalNumber(record.amount, record.value, record.float, record.decimal);

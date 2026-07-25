@@ -3918,7 +3918,6 @@ var TradeRepublicClient = class _TradeRepublicClient {
   deviceInfo;
   http;
   endpoints;
-  resources;
   operations;
   runtime;
   validateRaw;
@@ -3964,7 +3963,6 @@ var TradeRepublicClient = class _TradeRepublicClient {
     });
     this.operations = this.runtime.operations;
     this.account = new AccountApi(this.operations);
-    this.resources = this.runtime.resources;
     this.assets = new AssetsApi(this.raw, this.validateRaw);
     this.derivatives = new DerivativesApi(this.raw, this.validateRaw);
     this.orders = new OrdersApi(this.runtime);
@@ -4878,12 +4876,10 @@ function createRawSchemaValidator(mode = true, onFailure) {
   return validateRawResponse;
 }
 var MarketApi = class {
+  resources;
   constructor(runtime) {
-    this.runtime = runtime;
     this.resources = runtime.resources;
   }
-  runtime;
-  resources;
   subscriptions() {
     return this.resources.query(marketSubscriptionsSpec, void 0);
   }

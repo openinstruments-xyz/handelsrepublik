@@ -124,6 +124,7 @@ jobs:
     environment: Live Integration Tests
     concurrency:
       group: live-integration-tests-main
+      queue: max
       cancel-in-progress: false
     steps:
       - name: revalidate the approved SHA before checkout

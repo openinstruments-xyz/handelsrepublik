@@ -18,21 +18,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  authorize:
-    name: approve closed-venue market-order probe
+  time-gate:
+    name: require 23:00–05:00 Europe/Berlin
     if: >-
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'VIEWVIEWVIEW' &&
       inputs.confirm_order_request
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo "Closed-venue market-order probe approved."
-
-  time-gate:
-    name: require 23:00–05:00 Europe/Berlin
-    needs: authorize
     runs-on: ubuntu-latest
     outputs:
       eligible: ${{ steps.clock.outputs.eligible }}
