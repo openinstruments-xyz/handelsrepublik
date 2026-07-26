@@ -323,7 +323,7 @@ logical browser/client environment.
 
 ### SDK-managed browser
 
-With no options, the SDK dynamically loads the optional `playwright` package,
+With no options provided, the SDK dynamically loads the optional `playwright` package,
 launches Playwright Chromium visibly, creates a temporary browser context,
 collects the WAF token, and closes both the temporary context and browser on
 success or failure:
