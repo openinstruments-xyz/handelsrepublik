@@ -48,6 +48,16 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
+  it('does not bind workflow execution to a mutable repository name', () => {
+    for (const workflow of workflows) {
+      assert.doesNotMatch(
+        workflow.source,
+        /github\.repository\s*==/,
+        `${workflow.file} must rely on event, branch, actor, and confirmation guards instead`,
+      );
+    }
+  });
+
   it('keeps every pull-request workflow secret-free and read-only', () => {
     const pullRequestWorkflows = workflows.filter((workflow) =>
       hasTopLevelTrigger(workflow.source, 'pull_request'));

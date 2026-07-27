@@ -21,7 +21,6 @@ jobs:
   time-gate:
     name: require 23:00–05:00 Europe/Berlin
     if: >-
-      github.repository == 'openinstruments-xyz/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'VIEWVIEWVIEW' &&
       inputs.confirm_order_request
