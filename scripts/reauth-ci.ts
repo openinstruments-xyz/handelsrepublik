@@ -276,7 +276,7 @@ function parseOptions(args: string[]): Options {
       assert.ok(Number.isFinite(minutes) && minutes > 0, '--timeout-minutes must be a positive number.');
       options.timeoutMs = minutes * 60_000;
     } else if (argument === '--help' || argument === '-h') {
-      console.log(`Usage: npm run ci:reauth -- [options]
+      console.log(`Usage: npm run ci:reauth -- -- [options]
 
 Options:
   --repo OWNER/REPO       GitHub repository (defaults to the current repo)

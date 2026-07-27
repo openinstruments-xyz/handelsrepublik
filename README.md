@@ -1706,8 +1706,8 @@ triggered. Codex is instructed not to request or run with live-account secrets,
 weaken the Actions trust boundary, grant untrusted PR code secrets, deploy, or modify
 the market-order workflows.
 
-Use `npm run ci:reauth -- --no-watch` to return after dispatching, or
-`npm run ci:reauth -- --help` to see repository, workflow, branch, timeout, and
+Use `npm run ci:reauth -- -- --no-watch` to return after dispatching, or
+`npm run ci:reauth -- -- --help` to see repository, workflow, branch, timeout, and
 diagnostic overrides. During the initial migration, the command detects that
 the remote workflow is not ready, seeds the repository secret, and returns
 without dispatching the incompatible workflow.
