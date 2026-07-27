@@ -20,9 +20,6 @@ jobs:
     name: typecheck, build, and verify committed distribution
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: Unit Tests
-      deployment: false
     steps:
       - uses: actions/checkout@v6
         with:

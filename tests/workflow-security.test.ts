@@ -61,10 +61,7 @@ describe('GitHub Actions trust boundaries', () => {
       assert.match(workflow.source, /^name: (?:Package checks|Unit tests)$/m);
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*secrets\./);
-      assert.match(
-        workflow.source,
-        /^\s+environment:\r?\n\s+name: Unit Tests\r?\n\s+deployment: false\r?$/m,
-      );
+      assert.doesNotMatch(workflow.source, /^\s+environment:/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*github\.token\s*\}\}/);
       assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
       assert.match(

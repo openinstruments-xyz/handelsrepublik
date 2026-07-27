@@ -1506,21 +1506,24 @@ the locked dependencies, run
 the unit tests and TypeScript typecheck, build the package locally, and verify
 that the committed `dist` output is current. These jobs receive no repository
 or environment secrets, use only a read-only `GITHUB_TOKEN`, and do not persist
-checkout credentials. Both jobs use the `Unit Tests` GitHub environment with
-deployment records disabled. Keep that environment free of secrets, protection
-rules, and privileged external access.
+checkout credentials. Neither job selects a GitHub environment, so environment
+reviewers cannot hold these safe checks for approval.
 
 The workflows themselves contain no author, contributor, or approval condition
-for these checks. GitHub's standard repository behavior may still pause an
-unknown contributor's first workflow run before a runner starts; that behavior
-is outside these workflows.
+for these checks. If GitHub shows its repository-level **Approve and run
+workflows** gate for a pull request, that single approval releases both
+`pull_request` workflows. Same-repository pull requests may start immediately
+according to the repository policy. Keep write tokens and secrets disabled for
+pull-request workflows; package checks and unit tests run with a read-only token
+and no repository or environment secrets.
 
 Pull-request code is untrusted, including package lifecycle scripts, tests, and
 build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to the `PR-safe` workflows.
 
-Live integration workflows do not run against pull-request code. They run
-separately from trusted default-branch, scheduled, or manual triggers.
+Live integration workflows do not run pull-request code or receive approval
+through the pull-request gate. They run separately from trusted default-branch,
+scheduled, or manual triggers.
 
 The SDK is a modular monolith. `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution dependencies. Declarative
@@ -1617,8 +1620,8 @@ for the buy to execute.
 It does not automatically sell the purchased quantity, which remains in the
 account.
 Both market-order workflows are started manually, retain an explicit
-confirmation input and safety checks, and then wait for approval in the shared
-`Live Integration Tests` environment before the order-related code runs.
+confirmation input and safety checks, and use the shared `Live Integration Tests`
+environment only to load their secrets.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
@@ -1628,23 +1631,21 @@ their push trigger to `main` avoids duplicate push and pull-request runs for
 ordinary branches. Non-market live workflows run on pushes to `main`;
 time-dependent jobs stop at their first time gate when the current Berlin
 window does not fit. Both market-order workflows remain manual-only. Every job
-that uses the rotating Trade Republic session runs in the protected `Live Integration Tests` GitHub
-environment. Configure `VIEWVIEWVIEW` as its required reviewer and disable
-administrator bypass. This intentionally makes scheduled and push-triggered
-live jobs wait for the same explicit approval. GitHub reads environment secrets
-when the referencing job starts, so a queued job receives the session saved by
-the preceding serialized workflow instead of the stale value that existed when
-it was queued.
+that uses the rotating Trade Republic session runs in the `Live Integration Tests`
+GitHub environment. Keep that environment free of required reviewers so
+scheduled and default-branch live workflows start without deployment approval.
+GitHub reads environment secrets when the referencing job starts, so queued jobs
+receive the session saved by the preceding serialized workflow instead of a
+stale value.
 
 The reauthentication command creates the shared environment automatically when
 it is missing. To create it separately:
 
 ```powershell
-gh api --method PUT "repos/VIEWVIEWVIEW/handelsrepublik/environments/Unit%20Tests"
 gh api --method PUT "repos/VIEWVIEWVIEW/handelsrepublik/environments/Live%20Integration%20Tests"
 ```
 
-Keep `Unit Tests` empty. Store `TR_SESSION_JSON` in `Live Integration Tests`;
+Store `TR_SESSION_JSON` in `Live Integration Tests`;
 successful live runs rotate that environment secret in place. The
 repository-level `TR_SESSION_JSON` may remain temporarily as a migration
 fallback, but remove it after the new environment has completed and rotated one
