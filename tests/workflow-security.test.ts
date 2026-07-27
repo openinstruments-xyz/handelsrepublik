@@ -75,7 +75,7 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('keeps market-order workflows manual and in the shared live environment', () => {
+  it('keeps market-order workflows manual and serialized with other live jobs', () => {
     const marketOrderWorkflows = [
       'execute-market-buy-on-live-account.yml',
       'validate-closed-venue-market-order-rejection.yml',
@@ -95,7 +95,8 @@ describe('GitHub Actions trust boundaries', () => {
         );
       }
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
-      assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
+      assert.doesNotMatch(workflow.source, /^\s+environment:/m);
+      assert.match(workflow.source, /^\s+group: live-integration-tests-main\r?$/m);
       assert.doesNotMatch(workflow.source, /live-order-tests/);
       assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
       assert.match(workflow.source, /inputs\.confirm_/);

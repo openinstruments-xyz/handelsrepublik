@@ -55,16 +55,16 @@ describe('live integration case manifest', () => {
     assert.match(testSource, /liveCases\.filter\(\(testCase\) => testCase\.suite === 'read'\)/);
   });
 
-  it('loads and rotates the live session through the job-start environment', () => {
+  it('loads and rotates the live session through repository secrets', () => {
     const workflowDirectory = join(process.cwd(), '.github', 'workflows');
     const workflows = readdirSync(workflowDirectory).filter((file) => file.endsWith('.yml'));
     for (const workflow of workflows) {
       const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
       if (!source.includes('TR_SESSION_JSON:')) continue;
-      assert.match(
+      assert.doesNotMatch(
         source,
         /environment: Live Integration Tests/,
-        `${workflow} must load the shared environment secret`,
+        `${workflow} must not depend on unavailable private-repository environments`,
       );
       if (!source.includes('gh secret set TR_SESSION_JSON')) {
         assert.doesNotMatch(
@@ -76,8 +76,8 @@ describe('live integration case manifest', () => {
       }
       assert.match(
         source,
-        /gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo /,
-        `${workflow} must rotate the shared environment secret`,
+        /gh secret set TR_SESSION_JSON --repo /,
+        `${workflow} must rotate the shared repository secret`,
       );
       assert.match(
         source,
@@ -86,10 +86,17 @@ describe('live integration case manifest', () => {
       );
       assert.doesNotMatch(
         source,
-        /gh secret set TR_SESSION_JSON --repo /,
-        `${workflow} must not rotate the queue-time repository secret`,
+        /gh secret set TR_SESSION_JSON --env /,
+        `${workflow} must not rotate an unavailable environment secret`,
       );
     }
+
+    const reauthSource = readFileSync(
+      join(process.cwd(), 'scripts', 'reauth-ci.ts'),
+      'utf8',
+    );
+    assert.doesNotMatch(reauthSource, /ensureEnvironment|sessionEnvironment|--env/);
+    assert.match(reauthSource, /'secret',\s*'set',\s*options\.secret,\s*'--repo',\s*repo/s);
   });
 
   it('keeps the live-case runtime restore-only', () => {

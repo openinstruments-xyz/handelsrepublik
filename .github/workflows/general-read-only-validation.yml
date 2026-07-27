@@ -22,7 +22,6 @@ jobs:
     if: github.repository == 'openinstruments-xyz/handelsrepublik' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    environment: Live Integration Tests
     steps:
       - uses: actions/checkout@v6
         with:
@@ -52,7 +51,7 @@ jobs:
         if: ${{ always() && steps.live-ready.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
-        run: gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
+        run: gh secret set TR_SESSION_JSON --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"
       - name: remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"
