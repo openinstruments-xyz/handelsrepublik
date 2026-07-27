@@ -48,6 +48,16 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
+  it('does not bind workflow execution to a mutable repository name', () => {
+    for (const workflow of workflows) {
+      assert.doesNotMatch(
+        workflow.source,
+        /github\.repository\s*==/,
+        `${workflow.file} must rely on event, branch, actor, and confirmation guards instead`,
+      );
+    }
+  });
+
   it('keeps every pull-request workflow secret-free and read-only', () => {
     const pullRequestWorkflows = workflows.filter((workflow) =>
       hasTopLevelTrigger(workflow.source, 'pull_request'));
@@ -75,7 +85,7 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('keeps market-order workflows manual and in the shared live environment', () => {
+  it('keeps market-order workflows manual and serialized with other live jobs', () => {
     const marketOrderWorkflows = [
       'execute-market-buy-on-live-account.yml',
       'validate-closed-venue-market-order-rejection.yml',
@@ -95,7 +105,8 @@ describe('GitHub Actions trust boundaries', () => {
         );
       }
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
-      assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
+      assert.doesNotMatch(workflow.source, /^\s+environment:/m);
+      assert.match(workflow.source, /^\s+group: live-integration-tests-main\r?$/m);
       assert.doesNotMatch(workflow.source, /live-order-tests/);
       assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
       assert.match(workflow.source, /inputs\.confirm_/);

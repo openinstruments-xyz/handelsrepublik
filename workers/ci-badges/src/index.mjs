@@ -1,4 +1,4 @@
-const OWNER = 'VIEWVIEWVIEW';
+const OWNER = 'openinstruments-xyz';
 const REPOSITORY = 'handelsrepublik';
 const BRANCH = 'main';
 const API_VERSION = '2026-03-10';

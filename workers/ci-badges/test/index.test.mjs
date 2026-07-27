@@ -152,7 +152,7 @@ test('redirects each badge link to the run selected for its event', async () => 
         return Response.json({
           workflow_runs: [{
             id: runId,
-            html_url: `https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/runs/${runId}`,
+            html_url: `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
           }],
         });
       };
@@ -166,7 +166,7 @@ test('redirects each badge link to the run selected for its event', async () => 
       assert.equal(response.status, 302);
       assert.equal(
         response.headers.get('location'),
-        `https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/runs/${runId}`,
+        `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
       );
       assert.equal(response.headers.get('cache-control'), 'no-store');
     }

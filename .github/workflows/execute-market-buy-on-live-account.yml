@@ -30,13 +30,11 @@ jobs:
   orders:
     name: buy up to €5 of an instrument
     if: >-
-      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'VIEWVIEWVIEW' &&
       inputs.confirm_live_execution
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: Live Integration Tests
     env:
       TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id }}
       TR_INTEGRATION_ORDER_AMOUNT_EUR: ${{ inputs.buy_amount_eur }}
@@ -68,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
         run: |
           for attempt in 1 2 3 4 5; do
-            if gh secret set TR_SESSION_JSON --env "Live Integration Tests" --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
+            if gh secret set TR_SESSION_JSON --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
               exit 0
             fi
             if [ "$attempt" -eq 5 ]; then
