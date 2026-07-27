@@ -1501,29 +1501,30 @@ without running the TypeScript build.
 
 ### Pull-request security boundary
 
-Every pull request runs the two `PR-safe` GitHub Actions workflows. They install
-the locked dependencies, run
-the unit tests and TypeScript typecheck, build the package locally, and verify
-that the committed `dist` output is current. These jobs receive no repository
-or environment secrets, use only a read-only `GITHUB_TOKEN`, and do not persist
-checkout credentials. Neither job selects a GitHub environment, so environment
-reviewers cannot hold these safe checks for approval.
+Every pull request queues all nine test workflows behind GitHub's
+repository-level workflow approval for public forks. The two `PR-safe`
+workflows install the locked dependencies, run the unit tests and TypeScript
+typecheck, build the package locally, and verify that the committed `dist`
+output is current. These jobs receive no repository or environment secrets, use
+only a read-only `GITHUB_TOKEN`, and do not persist checkout credentials.
 
 The workflows themselves contain no author, contributor, or approval condition
-for these checks. If GitHub shows its repository-level **Approve and run
-workflows** gate for a pull request, that single approval releases both
-`pull_request` workflows. Same-repository pull requests may start immediately
-according to the repository policy. Keep write tokens and secrets disabled for
-pull-request workflows; package checks and unit tests run with a read-only token
-and no repository or environment secrets.
+for these checks. If GitHub shows its repository-level **Approve workflows to
+run** gate for a pull request, that single approval releases all nine
+`pull_request` workflow runs. Package checks and unit tests then execute with a
+read-only token and no repository or environment secrets.
 
 Pull-request code is untrusted, including package lifecycle scripts, tests, and
 build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to the `PR-safe` workflows.
 
-Live integration workflows do not run pull-request code or receive approval
-through the pull-request gate. They run separately from trusted default-branch,
-scheduled, or manual triggers.
+The seven live integration workflows participate in the pull-request gate so
+maintainers can see the complete test inventory before approving. Their
+secret-bearing jobs explicitly reject the `pull_request` event and therefore
+finish as skipped after approval. GitHub does not expose repository or
+environment secrets to public-fork PR code, even after workflow approval. Live
+execution remains limited to trusted default-branch, scheduled, or manual
+triggers.
 
 The SDK is a modular monolith. `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution dependencies. Declarative
@@ -1551,13 +1552,13 @@ The live workflow matrix is:
 
 | Workflow | Triggers | Gate | Exact checks |
 | --- | --- | --- | --- |
-| Live: account and market-data reads | push to `main`, manual, 01:00 and 11:00 daily | none | One sequential session refresh, then up to four concurrent read validations: session restore; account, session, settings, personal details, relationships, cards and app-usage consents; search, details and pagination for every asset class; derivative search/list/details; all/open/closed/executed, mutual-fund and private-market order reads; order preparation, preview and fees without submission; portfolio, cash, mark-to-market, positions, savings plans, private markets and chart; every candle matrix below; market subscriptions; timeline, price-alert, news and instrument-class reads; account-specific valuations, available size, execution order-book/tape snapshots when an executed trade ID exists, daily PnL and aggregate history; exchanges, default watchlist, screeners, preferences, documents, taxes, payment methods and IBAN shape. |
-| Live: trading availability when markets are closed | push to `main`, manual, 01:00 daily | 23:00–05:00 Berlin, then live venue state | Order destinations for stock, ETF, fund, mutual fund, private fund, derivative, crypto, bond and synthetic assets; LSX exchange schedule, instrument status and quotation. Crypto is validated as returned and may remain open around the clock. |
-| Live: quotes, L2, streaming {quotes, L2, tape} | push to `main`, manual, 11:00 weekdays | weekdays 09:30–17:00 Berlin, then an explicitly open destination | Order destinations and home destination; buy/sell `priceForOrder` quotes; normal quotation; market subscriptions and L2 entitlements; ticker, last-trade/tape and L2 stream payloads. `priceForOrder` is the venue-specific executable reference-price response used when preparing an order; this workflow reads it but creates no order. |
-| Live: mutating alerts and default watchlist | push to `main`, manual, 01:00 and 11:00 daily | none | Create/list/delete a disposable EUR 1 Apple price alert; add/verify/remove one candidate instrument in the built-in default watchlist. Cleanup runs in `finally`. Custom watchlist creation, rename, clone and deletion are not supported by the observed backend and are not part of the SDK. |
-| Live: limit order rejected while market is closed | push to `main`, manual, 01:30 daily | 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit one Apple share with a EUR 1 limit and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
-| Live: market order rejected while market is closed | manual only | explicit owner confirmation and the `Live Integration Tests` environment gate; 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit an amount-based EUR 1 Apple market buy and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
-| Live: submit, replace, and cancel a limit order | push to `main`, manual, 11:30 weekdays | weekdays 09:30–17:00 Berlin in workflow and test; destination must report open and bid at least EUR 10 | Select NVIDIA, Apple or Microsoft automatically; open the order-update stream; submit one share at EUR 1; require a created/open update; replace it with EUR 0.50; require old-order cancellation and new-order creation updates; cancel the replacement; require its cancellation update; retry cleanup in `finally`. |
+| Live: account and market-data reads | PR approval (skip), push to `main`, manual, 01:00 and 11:00 daily | none | One sequential session refresh, then up to four concurrent read validations: session restore; account, session, settings, personal details, relationships, cards and app-usage consents; search, details and pagination for every asset class; derivative search/list/details; all/open/closed/executed, mutual-fund and private-market order reads; order preparation, preview and fees without submission; portfolio, cash, mark-to-market, positions, savings plans, private markets and chart; every candle matrix below; market subscriptions; timeline, price-alert, news and instrument-class reads; account-specific valuations, available size, execution order-book/tape snapshots when an executed trade ID exists, daily PnL and aggregate history; exchanges, default watchlist, screeners, preferences, documents, taxes, payment methods and IBAN shape. |
+| Live: trading availability when markets are closed | PR approval (skip), push to `main`, manual, 01:00 daily | 23:00–05:00 Berlin, then live venue state | Order destinations for stock, ETF, fund, mutual fund, private fund, derivative, crypto, bond and synthetic assets; LSX exchange schedule, instrument status and quotation. Crypto is validated as returned and may remain open around the clock. |
+| Live: quotes, L2, streaming {quotes, L2, tape} | PR approval (skip), push to `main`, manual, 11:00 weekdays | weekdays 09:30–17:00 Berlin, then an explicitly open destination | Order destinations and home destination; buy/sell `priceForOrder` quotes; normal quotation; market subscriptions and L2 entitlements; ticker, last-trade/tape and L2 stream payloads. `priceForOrder` is the venue-specific executable reference-price response used when preparing an order; this workflow reads it but creates no order. |
+| Live: mutating alerts and default watchlist | PR approval (skip), push to `main`, manual, 01:00 and 11:00 daily | none | Create/list/delete a disposable EUR 1 Apple price alert; add/verify/remove one candidate instrument in the built-in default watchlist. Cleanup runs in `finally`. Custom watchlist creation, rename, clone and deletion are not supported by the observed backend and are not part of the SDK. |
+| Live: limit order rejected while market is closed | PR approval (skip), push to `main`, manual, 01:30 daily | 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit one Apple share with a EUR 1 limit and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
+| Live: market order rejected while market is closed | PR approval (skip), manual | explicit owner confirmation and the `Live Integration Tests` environment gate; 23:00–05:00 Berlin in workflow and test; LSX must report `open: false` | Submit an amount-based EUR 1 Apple market buy and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
+| Live: submit, replace, and cancel a limit order | PR approval (skip), push to `main`, manual, 11:30 weekdays | weekdays 09:30–17:00 Berlin in workflow and test; destination must report open and bid at least EUR 10 | Select NVIDIA, Apple or Microsoft automatically; open the order-update stream; submit one share at EUR 1; require a created/open update; replace it with EUR 0.50; require old-order cancellation and new-order creation updates; cancel the replacement; require its cancellation update; retry cleanup in `finally`. |
 | Manual: buy up to €5 of an instrument | manual only | explicit owner confirmation; automatic open market-order venue | Buy a custom ISIN with a user-entered gross budget of at most EUR 5, wait for execution and leave the position in the account. No automatic sell. |
 
 The AAPL standard candle matrix requires `1m`, `3m`, `5m`, `10m`, `15m`,
@@ -1619,18 +1620,21 @@ gross purchase budget at EUR 5; the expected EUR 1 fee is additional. It waits
 for the buy to execute.
 It does not automatically sell the purchased quantity, which remains in the
 account.
-Both market-order workflows are started manually, retain an explicit
-confirmation input and safety checks, and use the shared `Live Integration Tests`
-environment only to load their secrets.
+Both market-order workflows retain an explicit confirmation input and safety
+checks for live execution and use the shared `Live Integration Tests`
+environment only to load their secrets. The rejection workflow also appears in
+the PR approval inventory, but its live job is skipped for pull requests. The
+real market-buy workflow remains manual-only.
 Savings-plan, money-movement, document-acceptance, and account-security
 mutations are never exercised.
 
 The `PR-safe` quality and unit workflows run for every pull request and once
-more on pushes to `main`. Restricting
+more on pushes to `main`. The seven live-test workflows also queue for
+pull-request approval, then skip their secret-bearing jobs. Restricting
 their push trigger to `main` avoids duplicate push and pull-request runs for
-ordinary branches. Non-market live workflows run on pushes to `main`;
+ordinary branches. Live workflows execute on pushes to `main`;
 time-dependent jobs stop at their first time gate when the current Berlin
-window does not fit. Both market-order workflows remain manual-only. Every job
+window does not fit. The real market-buy workflow remains manual-only. Every job
 that uses the rotating Trade Republic session runs in the `Live Integration Tests`
 GitHub environment. Keep that environment free of required reviewers so
 scheduled and default-branch live workflows start without deployment approval.

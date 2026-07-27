@@ -1,6 +1,8 @@
 name: "Live: market order rejected while market is closed"
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       confirm_order_request:
@@ -21,6 +23,7 @@ jobs:
   time-gate:
     name: require 23:00–05:00 Europe/Berlin
     if: >-
+      github.event_name != 'pull_request' &&
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'VIEWVIEWVIEW' &&

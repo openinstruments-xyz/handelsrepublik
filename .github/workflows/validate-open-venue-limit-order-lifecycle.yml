@@ -3,6 +3,8 @@ name: "Live: submit, replace, and cancel a limit order"
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "30 11 * * 1-5"
       timezone: Europe/Berlin
@@ -26,6 +28,7 @@ jobs:
   time-gate:
     name: require weekdays 09:30–17:00 Europe/Berlin
     if: >-
+      github.event_name != 'pull_request' &&
       github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name != 'workflow_dispatch' ||

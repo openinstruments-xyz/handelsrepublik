@@ -24,6 +24,17 @@ function hasTopLevelTrigger(source: string, trigger: string): boolean {
 }
 
 describe('GitHub Actions trust boundaries', () => {
+  const prSafeWorkflowFiles = ['quality.yml', 'unit-tests.yml'];
+  const approvalGatedLiveWorkflowFiles = [
+    'general-read-only-validation.yml',
+    'validate-closed-venue-limit-order-rejection.yml',
+    'validate-closed-venue-market-order-rejection.yml',
+    'validate-open-venue-limit-order-lifecycle.yml',
+    'validate-order-destinations-during-closed-market-hours.yml',
+    'validate-reversible-account-mutations.yml',
+    'validate-venue-during-opening-times.yml',
+  ];
+
   it('queues every shared live workflow without cancelling an active session user', () => {
     const sharedLiveWorkflows = workflows.filter((workflow) =>
       workflow.source.includes('group: live-integration-tests-main'));
@@ -48,14 +59,19 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('keeps every pull-request workflow secret-free and read-only', () => {
+  it('queues every test workflow behind repository-level pull-request approval', () => {
     const pullRequestWorkflows = workflows.filter((workflow) =>
       hasTopLevelTrigger(workflow.source, 'pull_request'));
 
     assert.deepEqual(
       pullRequestWorkflows.map((workflow) => workflow.file).sort(),
-      ['quality.yml', 'unit-tests.yml'],
+      [...prSafeWorkflowFiles, ...approvalGatedLiveWorkflowFiles].sort(),
     );
+  });
+
+  it('keeps PR-safe workflows secret-free and read-only', () => {
+    const pullRequestWorkflows = workflows.filter((workflow) =>
+      prSafeWorkflowFiles.includes(workflow.file));
 
     for (const workflow of pullRequestWorkflows) {
       assert.match(workflow.source, /^name: (?:Package checks|Unit tests)$/m);
@@ -75,31 +91,36 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('keeps market-order workflows manual and in the shared live environment', () => {
-    const marketOrderWorkflows = [
-      'execute-market-buy-on-live-account.yml',
-      'validate-closed-venue-market-order-rejection.yml',
-    ].map((file) => {
+  it('queues live workflows for approval without exposing their secret jobs to PR code', () => {
+    for (const file of approvalGatedLiveWorkflowFiles) {
       const workflow = workflows.find((candidate) => candidate.file === file);
       assert.ok(workflow, `${file} must exist`);
-      return workflow;
-    });
-
-    for (const workflow of marketOrderWorkflows) {
-      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_dispatch'), true);
-      for (const trigger of ['push', 'schedule', 'pull_request', 'pull_request_target']) {
-        assert.equal(
-          hasTopLevelTrigger(workflow.source, trigger),
-          false,
-          `${workflow.file} must only be started explicitly`,
-        );
-      }
+      assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), true);
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
+      assert.match(workflow.source, /github\.event_name != 'pull_request'/);
+      assert.match(workflow.source, /github\.ref == 'refs\/heads\/main'/);
       assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
-      assert.doesNotMatch(workflow.source, /live-order-tests/);
-      assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
-      assert.match(workflow.source, /inputs\.confirm_/);
     }
+  });
+
+  it('keeps the real market-buy workflow manual and owner-confirmed', () => {
+    const workflow = workflows.find((candidate) =>
+      candidate.file === 'execute-market-buy-on-live-account.yml');
+    assert.ok(workflow);
+
+    assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_dispatch'), true);
+    for (const trigger of ['push', 'schedule', 'pull_request', 'pull_request_target']) {
+      assert.equal(
+        hasTopLevelTrigger(workflow.source, trigger),
+        false,
+        `${workflow.file} must only be started explicitly`,
+      );
+    }
+    assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
+    assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
+    assert.doesNotMatch(workflow.source, /live-order-tests/);
+    assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
+    assert.match(workflow.source, /inputs\.confirm_/);
   });
 
   it('invokes the connected Codex account only for trusted scheduled failures', () => {

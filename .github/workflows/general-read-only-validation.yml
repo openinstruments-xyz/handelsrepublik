@@ -3,6 +3,8 @@ name: "Live: account and market-data reads"
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "0 1,11 * * *"
       timezone: Europe/Berlin
@@ -19,7 +21,7 @@ concurrency:
 jobs:
   live-read-only:
     name: read live account and market data
-    if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: Live Integration Tests
