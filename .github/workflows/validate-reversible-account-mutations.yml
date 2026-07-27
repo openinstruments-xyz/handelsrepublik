@@ -19,7 +19,7 @@ concurrency:
 jobs:
   reversible-mutations:
     name: mutate alerts and the default watchlist
-    if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
+    if: github.repository == 'openinstruments-xyz/handelsrepublik' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: Live Integration Tests

@@ -1,7 +1,8 @@
 # CI badge Worker
 
 This Cloudflare Worker renders compact status-only SVG badges for the
-allowlisted workflows in the private `VIEWVIEWVIEW/handelsrepublik` repository.
+allowlisted workflows in the private `openinstruments-xyz/handelsrepublik`
+repository.
 Passing, running, and unknown badges remain one line tall. A failing badge
 expands downward with up to five failed Actions step names from the matching
 run; additional failures are summarized on a final line. Each badge's SVG

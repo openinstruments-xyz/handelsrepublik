@@ -26,7 +26,7 @@ jobs:
   time-gate:
     name: require weekdays 09:30–17:00 Europe/Berlin
     if: >-
-      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
+      github.repository == 'openinstruments-xyz/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name != 'workflow_dispatch' ||
         (github.actor == 'VIEWVIEWVIEW' && inputs.confirm_order_request))

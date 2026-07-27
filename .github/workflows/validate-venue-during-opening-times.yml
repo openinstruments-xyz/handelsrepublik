@@ -19,7 +19,7 @@ concurrency:
 jobs:
   time-gate:
     name: require weekdays 09:30–17:00 Europe/Berlin
-    if: github.repository == 'VIEWVIEWVIEW/handelsrepublik' && github.ref == 'refs/heads/main'
+    if: github.repository == 'openinstruments-xyz/handelsrepublik' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       eligible: ${{ steps.clock.outputs.eligible }}

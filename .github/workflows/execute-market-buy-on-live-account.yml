@@ -30,7 +30,7 @@ jobs:
   orders:
     name: buy up to €5 of an instrument
     if: >-
-      github.repository == 'VIEWVIEWVIEW/handelsrepublik' &&
+      github.repository == 'openinstruments-xyz/handelsrepublik' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'VIEWVIEWVIEW' &&
       inputs.confirm_live_execution
