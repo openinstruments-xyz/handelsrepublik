@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   time-gate:
-    name: require 23:00–05:00 Europe/Berlin
+    name: require 23:00–06:40 Europe/Berlin
     if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
@@ -31,15 +31,15 @@ jobs:
           TZ: Europe/Berlin
         run: |
           minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
-          if (( minutes >= 1380 || minutes < 300 )); then
+          if (( minutes >= 1380 || minutes < 400 )); then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
             result="✅ Passed"
-            note="Inside 23:00–05:00 Europe/Berlin; live tests will run."
+            note="Inside 23:00–06:40 Europe/Berlin; live tests will run."
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping outside 23:00–05:00 Europe/Berlin."
+            echo "Skipping outside 23:00–06:40 Europe/Berlin."
             result="⏭️ Skipped"
-            note="Outside 23:00–05:00 Europe/Berlin."
+            note="Outside 23:00–06:40 Europe/Berlin."
           fi
           {
             echo "## Closed-market time gate"

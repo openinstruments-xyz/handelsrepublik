@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   time-gate:
-    name: require weekdays 09:30–17:00 Europe/Berlin
+    name: require weekdays 07:00–22:40 Europe/Berlin
     if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
@@ -32,15 +32,15 @@ jobs:
         run: |
           weekday=$(date +%u)
           minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
-          if (( weekday <= 5 && minutes >= 570 && minutes < 1020 )); then
+          if (( weekday <= 5 && minutes >= 420 && minutes < 1360 )); then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
             result="✅ Passed"
-            note="Inside weekdays 09:30–17:00 Europe/Berlin; live tests will run."
+            note="Inside weekdays 07:00–22:40 Europe/Berlin; live tests will run."
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping outside weekdays 09:30–17:00 Europe/Berlin."
+            echo "Skipping outside weekdays 07:00–22:40 Europe/Berlin."
             result="⏭️ Skipped"
-            note="Outside weekdays 09:30–17:00 Europe/Berlin."
+            note="Outside weekdays 07:00–22:40 Europe/Berlin."
           fi
           {
             echo "## Open-market time gate"

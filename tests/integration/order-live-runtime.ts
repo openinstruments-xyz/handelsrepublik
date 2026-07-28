@@ -46,12 +46,12 @@ export function supports(destination: OrderDestination, mode: 'limit' | 'market'
 
 export function isClosedBerlinWindow(now = new Date()): boolean {
   const { minutes } = berlinClock(now);
-  return minutes >= 23 * 60 || minutes < 5 * 60;
+  return minutes >= 23 * 60 || minutes < 6 * 60 + 40;
 }
 
 export function isOpenBerlinWindow(now = new Date()): boolean {
   const { weekday, minutes } = berlinClock(now);
-  return weekday >= 1 && weekday <= 5 && minutes >= 9 * 60 + 30 && minutes < 17 * 60;
+  return weekday >= 1 && weekday <= 5 && minutes >= 7 * 60 && minutes < 22 * 60 + 40;
 }
 
 export function createOrderUpdateCollector(subscription: Subscription<unknown>) {
