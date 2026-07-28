@@ -1,0 +1,82 @@
+name: "Manual: sell whole units of an instrument"
+
+on:
+  workflow_dispatch:
+    inputs:
+      instrument_id:
+        description: 'ISIN to sell. Use the same ISIN as the preceding manual market buy.'
+        required: true
+        type: string
+      sell_size:
+        description: 'Exact positive whole-unit quantity to sell. This workflow never infers or sells an entire position.'
+        required: true
+        type: string
+        default: '1'
+      confirm_live_execution:
+        description: 'I understand this executes a real market sell of exactly the entered quantity.'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-integration-tests-main
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  orders:
+    name: sell whole units of an instrument
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'VIEWVIEWVIEW' &&
+      inputs.confirm_live_execution
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TR_INTEGRATION_ORDER_ISIN: ${{ inputs.instrument_id }}
+      TR_INTEGRATION_SELL_SIZE: ${{ inputs.sell_size }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: npm ci
+      - name: Configure ephemeral session path
+        run: |
+          echo "TR_SESSION_FILE=$RUNNER_TEMP/trade-republic-session.json" >> "$GITHUB_ENV"
+          echo "CI_TEST_RESULTS_FILE=$RUNNER_TEMP/handelsrepublik-test-results.ndjson" >> "$GITHUB_ENV"
+      - name: Materialize encrypted test session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: node --import tsx scripts/ci-session.ts materialize "$TR_SESSION_FILE"
+      - name: Refresh Trade Republic session
+        run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
+      - name: Execute and verify market sell on live account
+        continue-on-error: true
+        run: npm run test:ci:record -- orders.market-sell "Execute and verify market sell" -- npm run test:integration:sell
+      - name: Rotate encrypted GitHub session secret
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh secret set TR_SESSION_JSON --repo "$GITHUB_REPOSITORY" < "$TR_SESSION_FILE"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+      - name: Remove materialized session
+        if: always()
+        run: rm -f "$TR_SESSION_FILE"
+      - name: Publish test result table
+        if: always()
+        run: npm run test:ci:summary -- "Live market sell results"
