@@ -98,6 +98,10 @@ describe('live integration case manifest', () => {
       'utf8',
     );
     assert.doesNotMatch(reauthSource, /ensureEnvironment|sessionEnvironment|--env/);
+    assert.match(
+      reauthSource,
+      /const DEFAULT_REPOSITORY = 'openinstruments-xyz\/handelsrepublik';/,
+    );
     assert.match(reauthSource, /'secret',\s*'set',\s*options\.secret,\s*'--repo',\s*repo/s);
   });
 
