@@ -118,6 +118,7 @@ describe('GitHub Actions trust boundaries', () => {
 
     const mergeGate = workflows.find((workflow) => workflow.file === 'merge-gate.yml');
     assert.ok(mergeGate);
+    assert.match(mergeGate.source, /^    name: Merge gate \/ merge gate\r?$/m);
 
     for (const workflow of liveWorkflows) {
       assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), false);
