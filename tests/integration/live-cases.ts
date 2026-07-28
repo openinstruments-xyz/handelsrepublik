@@ -22,7 +22,7 @@ import {
 const APPLE = 'US0378331005';
 const APPLE_QUERY = 'apple';
 const DEFAULT_EXCHANGE = process.env.TR_INTEGRATION_EXCHANGE ?? 'LSX';
-const XETRA = 'XETR';
+const TIB = 'TIB';
 const BITCOIN = 'XF000BTC0017';
 const BITCOIN_EXCHANGE = 'BHS';
 const DEFAULT_WATCHLIST = '00000000-0000-0000-0000-000000000000';
@@ -256,7 +256,7 @@ export const liveCases: readonly LiveCase[] = [
     assertRecord(await client.trading.priceForOrder({ isin: APPLE, exchangeId: destination.id, side: 'sell' }), 'priceForOrder sell');
   }),
   defineLiveCase('open-venue.subscriptions', 'open-venue', async ({ client }) => assertArray(await client.market.subscriptions(), 'market.subscriptions')),
-  defineLiveCase('open-venue.entitlements', 'open-venue', async ({ client }) => assertRecord(await client.market.entitlements('L2', { exchangeIds: [XETRA, DEFAULT_EXCHANGE] }), 'market.entitlements')),
+  defineLiveCase('open-venue.entitlements', 'open-venue', async ({ client }) => assertRecord(await client.market.entitlements('L2', { exchangeIds: [TIB, DEFAULT_EXCHANGE] }), 'market.entitlements')),
   defineLiveCase('open-venue.ticker', 'open-venue', async ({ client }) => {
     assertRecord(await nextStreamValue(client.market.liveFeed(APPLE, { exchangeId: DEFAULT_EXCHANGE }), 'AAPL ticker'), 'ticker event');
   }),
@@ -265,7 +265,7 @@ export const liveCases: readonly LiveCase[] = [
   }),
   defineLiveCase('open-venue.l2-books', 'open-venue', async ({ client }) => {
     assertArray(await client.market.availableL2Books(APPLE), 'availableL2Books');
-    const book = await nextStreamValue(client.market.l2OrderBook(APPLE, XETRA), 'AAPL L2');
+    const book = await nextStreamValue(client.market.l2OrderBook(APPLE, TIB), 'AAPL L2');
     assert.ok(book.bids.length + book.asks.length > 0, 'expected at least one L2 level');
   }),
   defineLiveCase('mutations.price-alert', 'mutations', async ({ client }) => {
