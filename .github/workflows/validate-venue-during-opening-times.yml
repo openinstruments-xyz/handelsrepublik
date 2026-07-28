@@ -3,6 +3,8 @@ name: "Live: quotes, L2, streaming {quotes, L2, tape}"
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "0 11 * * 1-5"
       timezone: Europe/Berlin
@@ -19,7 +21,7 @@ concurrency:
 jobs:
   time-gate:
     name: require weekdays 09:30–17:00 Europe/Berlin
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       eligible: ${{ steps.clock.outputs.eligible }}
@@ -55,6 +57,7 @@ jobs:
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    environment: Live Integration Tests
     steps:
       - uses: actions/checkout@v6
         with:
