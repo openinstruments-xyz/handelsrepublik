@@ -68,6 +68,7 @@ describe('GitHub Actions trust boundaries', () => {
     );
 
     const mergeGate = pullRequestWorkflows[0];
+    assert.ok(mergeGate);
     assert.match(mergeGate.source, /^permissions:\r?\n  contents: read\r?$/m);
     assert.equal(hasTopLevelTrigger(mergeGate.source, 'merge_group'), true);
     assert.doesNotMatch(mergeGate.source, /pull_request_target/);
