@@ -61,11 +61,13 @@ describe('live integration case manifest', () => {
     for (const workflow of workflows) {
       const source = readFileSync(join(workflowDirectory, workflow), 'utf8');
       if (!source.includes('TR_SESSION_JSON:')) continue;
-      assert.doesNotMatch(
-        source,
-        /environment: Live Integration Tests/,
-        `${workflow} must not depend on unavailable private-repository environments`,
-      );
+      if (source.includes('  pull_request:')) {
+        assert.match(
+          source,
+          /environment: Live Integration Tests/,
+          `${workflow} must require live-environment approval before a PR can access session secrets`,
+        );
+      }
       if (!source.includes('gh secret set TR_SESSION_JSON')) {
         assert.doesNotMatch(
           source,

@@ -58,16 +58,18 @@ describe('GitHub Actions trust boundaries', () => {
     }
   });
 
-  it('keeps every pull-request workflow secret-free and read-only', () => {
+  it('keeps untrusted pull-request checks secret-free and read-only', () => {
     const pullRequestWorkflows = workflows.filter((workflow) =>
       hasTopLevelTrigger(workflow.source, 'pull_request'));
+    const untrustedPullRequestWorkflows = pullRequestWorkflows.filter((workflow) =>
+      ['quality.yml', 'unit-tests.yml'].includes(workflow.file));
 
     assert.deepEqual(
-      pullRequestWorkflows.map((workflow) => workflow.file).sort(),
+      untrustedPullRequestWorkflows.map((workflow) => workflow.file).sort(),
       ['quality.yml', 'unit-tests.yml'],
     );
 
-    for (const workflow of pullRequestWorkflows) {
+    for (const workflow of untrustedPullRequestWorkflows) {
       assert.match(workflow.source, /^name: (?:Package checks|Unit tests)$/m);
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*secrets\./);
@@ -82,6 +84,28 @@ describe('GitHub Actions trust boundaries', () => {
         workflow.source,
         /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
       );
+    }
+  });
+
+  it('queues live pull-request tests only behind the protected live environment', () => {
+    const livePullRequestWorkflows = workflows.filter((workflow) =>
+      hasTopLevelTrigger(workflow.source, 'pull_request') && workflow.source.startsWith('name: "Live:'));
+
+    assert.deepEqual(
+      livePullRequestWorkflows.map((workflow) => workflow.file).sort(),
+      [
+        'general-read-only-validation.yml',
+        'validate-closed-venue-limit-order-rejection.yml',
+        'validate-open-venue-limit-order-lifecycle.yml',
+        'validate-order-destinations-during-closed-market-hours.yml',
+        'validate-reversible-account-mutations.yml',
+        'validate-venue-during-opening-times.yml',
+      ],
+    );
+
+    for (const workflow of livePullRequestWorkflows) {
+      assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
+      assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
     }
   });
 
