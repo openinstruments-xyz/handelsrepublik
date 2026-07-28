@@ -12,7 +12,7 @@ import {
 
 describe('open-venue limit-order lifecycle', () => {
   it('streams, submits, replaces, and cancels a deeply non-marketable order', { timeout: 240_000 }, async (t) => withLiveDiagnostics('open-venue limit-order lifecycle', async () => {
-    if (!isOpenBerlinWindow()) return t.skip('runs only on weekdays from 09:30 until before 17:00 Europe/Berlin');
+    if (!isOpenBerlinWindow()) return t.skip('runs only on weekdays from 07:00 until before 22:40 Europe/Berlin');
     const client = await createLiveOrderClient();
     let activeOrderId: string | undefined;
     let collector: ReturnType<typeof createOrderUpdateCollector> | undefined;

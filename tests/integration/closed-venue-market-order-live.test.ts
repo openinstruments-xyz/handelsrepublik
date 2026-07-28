@@ -13,7 +13,7 @@ const exchangeId = process.env.TR_INTEGRATION_ORDER_EXCHANGE?.trim() || 'LSX';
 
 describe('closed-venue market-order rejection', () => {
   it('rejects a EUR 1 market buy with exchangeClosed', { timeout: 120_000 }, async (t) => withLiveDiagnostics('closed-venue market-order rejection', async () => {
-    if (!isClosedBerlinWindow()) return t.skip('runs only from 23:00 until before 05:00 Europe/Berlin');
+    if (!isClosedBerlinWindow()) return t.skip('runs only from 23:00 until before 06:40 Europe/Berlin');
     const client = await createLiveOrderClient();
     let unexpectedOrderId: string | undefined;
     try {
