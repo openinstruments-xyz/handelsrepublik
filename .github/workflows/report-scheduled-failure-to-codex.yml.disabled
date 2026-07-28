@@ -1,3 +1,6 @@
+# Disabled: keep this workflow out of GitHub Actions until Codex triage is
+# explicitly re-enabled. Rename this file back to .yml to restore the workflow.
+
 name: report trusted scheduled failures to Codex
 
 on:
