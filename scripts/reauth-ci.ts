@@ -29,7 +29,7 @@ const { PNG } = require('pngjs') as {
 };
 
 interface Options {
-  repo?: string;
+  repo: string;
   secret: string;
   workflow: string;
   ref: string;
@@ -39,13 +39,14 @@ interface Options {
   debug: boolean;
 }
 
+const DEFAULT_REPOSITORY = 'openinstruments-xyz/handelsrepublik';
 const options = parseOptions(process.argv.slice(2));
 
 await run();
 
 async function run(): Promise<void> {
   await gh(['auth', 'status']);
-  const repo = options.repo ?? await detectRepository();
+  const repo = options.repo;
   console.log(`GitHub repository: ${repo}`);
   const remoteWorkflowReady = await remoteWorkflowUsesRepositorySecret(repo);
 
@@ -184,19 +185,6 @@ function renderQr(payload: string): string {
   return output;
 }
 
-async function detectRepository(): Promise<string> {
-  const output = await gh([
-    'repo',
-    'view',
-    '--json',
-    'nameWithOwner',
-    '--jq',
-    '.nameWithOwner',
-  ], undefined, true);
-  assert.ok(output, 'Could not determine the GitHub repository.');
-  return output;
-}
-
 async function findDispatchedRun(
   repo: string,
   dispatchedAt: Date,
@@ -254,6 +242,7 @@ function gh(args: string[], input?: string, capture = false): Promise<string> {
 
 function parseOptions(args: string[]): Options {
   const options: Options = {
+    repo: DEFAULT_REPOSITORY,
     secret: 'TR_SESSION_JSON',
     workflow: 'general-read-only-validation.yml',
     ref: 'main',
@@ -279,7 +268,7 @@ function parseOptions(args: string[]): Options {
       console.log(`Usage: npm run ci:reauth -- -- [options]
 
 Options:
-  --repo OWNER/REPO       GitHub repository (defaults to the current repo)
+  --repo OWNER/REPO       GitHub repository (default: ${DEFAULT_REPOSITORY})
   --secret NAME           Repository secret (default: TR_SESSION_JSON)
   --workflow FILE         Workflow file/name (default: general-read-only-validation.yml)
   --ref BRANCH            Branch to dispatch (default: main)

@@ -118,6 +118,7 @@ describe('GitHub Actions trust boundaries', () => {
 
     const mergeGate = workflows.find((workflow) => workflow.file === 'merge-gate.yml');
     assert.ok(mergeGate);
+    assert.match(mergeGate.source, /^    name: Merge gate \/ merge gate\r?$/m);
 
     for (const workflow of liveWorkflows) {
       assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), false);
@@ -187,32 +188,17 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(closedMarketOrder.source, /inputs\.confirm_order_request/);
   });
 
-  it('invokes the connected Codex account only for trusted scheduled failures', () => {
-    const workflow = workflows.find((candidate) =>
+  it('keeps the Codex scheduled-failure triage workflow disabled', () => {
+    const activeWorkflow = workflows.find((candidate) =>
       candidate.file === 'report-scheduled-failure-to-codex.yml');
-    assert.ok(workflow);
+    assert.equal(activeWorkflow, undefined);
 
-    assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_run'), true);
-    for (const trigger of ['issues', 'issue_comment', 'pull_request', 'pull_request_target']) {
-      assert.equal(hasTopLevelTrigger(workflow.source, trigger), false);
-    }
-
-    assert.match(workflow.source, /github\.event\.workflow_run\.conclusion == 'failure'/);
-    assert.match(workflow.source, /github\.event\.workflow_run\.event == 'schedule'/);
-    assert.match(
-      workflow.source,
-      /github\.event\.workflow_run\.head_branch == github\.event\.repository\.default_branch/,
+    const disabledWorkflow = readFileSync(
+      join(workflowDirectory, 'report-scheduled-failure-to-codex.yml.disabled'),
+      'utf8',
     );
-    assert.match(workflow.source, /^permissions:\r?\n  actions: read\r?\n  contents: read\r?\n  issues: write\r?$/m);
-    assert.doesNotMatch(workflow.source, /actions\/checkout/);
-    assert.doesNotMatch(workflow.source, /OPENAI_API_KEY|openai\/codex-action/);
-    assert.doesNotMatch(workflow.source, /TR_SESSION_JSON/);
-    assert.doesNotMatch(workflow.source, /EUR 1 market buy|test:integration:(?:orders|closed-market-order)/);
-    assert.doesNotMatch(workflow.source, /refresh Trade Republic session/);
-    assert.match(workflow.source, /@codex Triage this trusted scheduled test failure/);
-    assert.match(workflow.source, /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
-    assert.match(workflow.source, /flaky test, external service or market-data problem/);
-    assert.match(workflow.source, /do not create a branch or pull request/);
+    assert.match(disabledWorkflow, /github\.event\.workflow_run\.conclusion == 'failure'/);
+    assert.match(disabledWorkflow, /@codex Triage this trusted scheduled test failure/);
   });
 
 });

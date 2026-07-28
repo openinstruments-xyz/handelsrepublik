@@ -70,7 +70,7 @@ jobs:
     secrets: inherit
 
   merge-gate:
-    name: merge gate
+    name: Merge gate / merge gate
     if: ${{ always() }}
     needs:
       - unit

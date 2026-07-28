@@ -1647,7 +1647,8 @@ The command verifies the local GitHub CLI login, opens a browser briefly to
 collect the matching Trade Republic web context and WAF token, renders a QR code in the
 terminal, and waits for approval in the Trade Republic app. Short-lived QR
 challenges are replaced automatically until approval or the overall timeout. It
-then updates the repository-level `TR_SESSION_JSON` secret, dispatches
+then updates the repository-level `TR_SESSION_JSON` secret in
+`openinstruments-xyz/handelsrepublik` by default, dispatches
 `general-read-only-validation.yml` on `main`, and watches the new workflow run. The new
 session is held in memory and is not written to the repository.
 
