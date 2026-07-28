@@ -35,6 +35,7 @@
     "test:integration:open-venue": "node --import tsx tests/integration/run-live-suite.ts open-venue",
     "test:integration:mutations": "node --import tsx tests/integration/run-live-suite.ts mutations",
     "test:integration:orders": "node --import tsx --test tests/integration/orders-live.test.ts",
+    "test:integration:sell": "node --import tsx --test tests/integration/sell-live.test.ts",
     "test:integration:closed-limit-order": "node --import tsx --test tests/integration/closed-venue-limit-order-live.test.ts",
     "test:integration:closed-market-order": "node --import tsx --test tests/integration/closed-venue-market-order-live.test.ts",
     "test:integration:open-limit-order": "node --import tsx --test tests/integration/open-venue-limit-order-live.test.ts",

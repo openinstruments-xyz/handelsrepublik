@@ -141,9 +141,13 @@ describe('GitHub Actions trust boundaries', () => {
       mergeGate.source,
       /execute-market-buy-on-live-account\.yml/,
     );
+    assert.doesNotMatch(
+      mergeGate.source,
+      /execute-market-sell-on-live-account\.yml/,
+    );
   });
 
-  it('keeps the real market buy manual while scheduling closed-market rejection coverage', () => {
+  it('keeps real market orders manual while scheduling closed-market rejection coverage', () => {
     const manualBuy = workflows.find((workflow) =>
       workflow.file === 'execute-market-buy-on-live-account.yml');
     assert.ok(manualBuy);
@@ -168,6 +172,32 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(manualBuy.source, /^\s+group: live-integration-tests-main\r?$/m);
     assert.match(manualBuy.source, /github\.actor == 'VIEWVIEWVIEW'/);
     assert.match(manualBuy.source, /inputs\.confirm_live_execution/);
+
+    const manualSell = workflows.find((workflow) =>
+      workflow.file === 'execute-market-sell-on-live-account.yml');
+    assert.ok(manualSell);
+
+    assert.equal(hasTopLevelTrigger(manualSell.source, 'workflow_dispatch'), true);
+    for (const trigger of [
+      'push',
+      'schedule',
+      'pull_request',
+      'pull_request_target',
+      'workflow_call',
+      'merge_group',
+    ]) {
+      assert.equal(
+        hasTopLevelTrigger(manualSell.source, trigger),
+        false,
+        `${manualSell.file} must only be started explicitly`,
+      );
+    }
+    assert.match(manualSell.source, /^permissions:\r?\n  contents: read\r?$/m);
+    assert.doesNotMatch(manualSell.source, /^\s+environment:/m);
+    assert.match(manualSell.source, /^\s+group: live-integration-tests-main\r?$/m);
+    assert.match(manualSell.source, /github\.actor == 'VIEWVIEWVIEW'/);
+    assert.match(manualSell.source, /inputs\.confirm_live_execution/);
+    assert.match(manualSell.source, /TR_INTEGRATION_SELL_SIZE/);
 
     const closedMarketOrder = workflows.find((workflow) =>
       workflow.file === 'validate-closed-venue-market-order-rejection.yml');
