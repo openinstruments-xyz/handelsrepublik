@@ -231,4 +231,23 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(disabledWorkflow, /@codex Triage this trusted scheduled test failure/);
   });
 
+  it('deploys the CI badge worker only from main with scoped Cloudflare credentials', () => {
+    const deployBadges = workflows.find((workflow) =>
+      workflow.file === 'deploy-ci-badge-worker.yml');
+    assert.ok(deployBadges);
+
+    assert.equal(hasTopLevelTrigger(deployBadges.source, 'push'), true);
+    assert.equal(hasTopLevelTrigger(deployBadges.source, 'workflow_dispatch'), true);
+    assert.equal(hasTopLevelTrigger(deployBadges.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(deployBadges.source, 'pull_request_target'), false);
+    assert.match(deployBadges.source, /^permissions:\r?\n  contents: read\r?$/m);
+    assert.match(deployBadges.source, /branches:\r?\n\s+- main/);
+    assert.match(deployBadges.source, /github\.ref == 'refs\/heads\/main'/);
+    assert.match(deployBadges.source, /^\s+persist-credentials: false\r?$/m);
+    assert.match(deployBadges.source, /cloudflare\/wrangler-action@v3/);
+    assert.match(deployBadges.source, /secrets\.CLOUDFLARE_API_TOKEN/);
+    assert.match(deployBadges.source, /secrets\.CLOUDFLARE_ACCOUNT_ID/);
+    assert.match(deployBadges.source, /--keep-vars/);
+  });
+
 });
