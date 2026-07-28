@@ -34,8 +34,13 @@ That endpoint redirects to the exact latest run for the selected category.
 `workflow_dispatch` run.
 
 The fixed workflow aliases are `quality`, `unit`, `reads`, `destinations`,
-`venue`, `mutations`, `limit-rejection`, `market-rejection`, `lifecycle`, and
-`buy`.
+`venue`, `mutations`, `limit-rejection`, `market-rejection`, `lifecycle`,
+`buy`, and `sell`.
+
+Changes under `workers/ci-badges/` deploy automatically after merging to
+`main`. Configure the repository secrets `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` with access limited to this Worker before the first
+deployment.
 
 For example:
 
