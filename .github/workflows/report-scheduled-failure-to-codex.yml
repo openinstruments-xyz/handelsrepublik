@@ -8,6 +8,7 @@ on:
       - "Live: quotes, L2, streaming {quotes, L2, tape}"
       - "Live: mutating alerts and default watchlist"
       - "Live: limit order rejected while market is closed"
+      - "Live: market order rejected while market is closed"
       - "Live: submit, replace, and cancel a limit order"
     types: [completed]
 
