@@ -61,41 +61,54 @@ describe('GitHub Actions trust boundaries', () => {
   it('keeps untrusted pull-request checks secret-free and read-only', () => {
     const pullRequestWorkflows = workflows.filter((workflow) =>
       hasTopLevelTrigger(workflow.source, 'pull_request'));
-    const untrustedPullRequestWorkflows = pullRequestWorkflows.filter((workflow) =>
-      ['quality.yml', 'unit-tests.yml'].includes(workflow.file));
 
     assert.deepEqual(
-      untrustedPullRequestWorkflows.map((workflow) => workflow.file).sort(),
-      ['quality.yml', 'unit-tests.yml'],
+      pullRequestWorkflows.map((workflow) => workflow.file),
+      ['merge-gate.yml'],
     );
 
-    for (const workflow of untrustedPullRequestWorkflows) {
+    const mergeGate = pullRequestWorkflows[0];
+    assert.ok(mergeGate);
+    assert.match(mergeGate.source, /^permissions:\r?\n  contents: read\r?$/m);
+    assert.equal(hasTopLevelTrigger(mergeGate.source, 'merge_group'), true);
+    assert.doesNotMatch(mergeGate.source, /pull_request_target/);
+
+    const untrustedChecks = ['quality.yml', 'unit-tests.yml'].map((file) => {
+      const workflow = workflows.find((candidate) => candidate.file === file);
+      assert.ok(workflow, `${file} must exist`);
+      return workflow;
+    });
+
+    for (const workflow of untrustedChecks) {
       assert.match(workflow.source, /^name: (?:Package checks|Unit tests)$/m);
+      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_call'), true);
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*secrets\./);
       assert.doesNotMatch(workflow.source, /^\s+environment:/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*github\.token\s*\}\}/);
       assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
-      assert.match(
-        workflow.source,
-        /^  push:\r?\n    branches:\r?\n      - main\r?$/m,
-      );
       assert.doesNotMatch(
         workflow.source,
         /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/,
       );
     }
+
+    assert.match(
+      mergeGate.source,
+      /if: github\.event_name == 'merge_group'\r?\n\s+needs: \[unit, quality\]\r?\n\s+uses: \.\/\.github\/workflows\/general-read-only-validation\.yml\r?\n\s+secrets: inherit/,
+    );
   });
 
-  it('queues live pull-request tests only behind the protected live environment', () => {
-    const livePullRequestWorkflows = workflows.filter((workflow) =>
-      hasTopLevelTrigger(workflow.source, 'pull_request') && workflow.source.startsWith('name: "Live:'));
+  it('runs live pull-request code only from a merge candidate', () => {
+    const liveWorkflows = workflows.filter((workflow) =>
+      workflow.source.startsWith('name: "Live:'));
 
     assert.deepEqual(
-      livePullRequestWorkflows.map((workflow) => workflow.file).sort(),
+      liveWorkflows.map((workflow) => workflow.file).sort(),
       [
         'general-read-only-validation.yml',
         'validate-closed-venue-limit-order-rejection.yml',
+        'validate-closed-venue-market-order-rejection.yml',
         'validate-open-venue-limit-order-lifecycle.yml',
         'validate-order-destinations-during-closed-market-hours.yml',
         'validate-reversible-account-mutations.yml',
@@ -103,38 +116,75 @@ describe('GitHub Actions trust boundaries', () => {
       ],
     );
 
-    for (const workflow of livePullRequestWorkflows) {
+    const mergeGate = workflows.find((workflow) => workflow.file === 'merge-gate.yml');
+    assert.ok(mergeGate);
+
+    for (const workflow of liveWorkflows) {
+      assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), false);
+      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_call'), true);
       assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
       assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
+      assert.match(workflow.source, /github\.event_name == 'merge_group'/);
+      assert.match(
+        mergeGate.source,
+        new RegExp(
+          `if: github\\.event_name == 'merge_group'\\r?\\n` +
+          `\\s+needs: \\[unit, quality\\]\\r?\\n` +
+          `\\s+uses: \\.\\/\\.github\\/workflows\\/${workflow.file.replaceAll('.', '\\.')}\\r?\\n` +
+          `\\s+secrets: inherit`,
+        ),
+      );
     }
+
+    assert.doesNotMatch(
+      mergeGate.source,
+      /execute-market-buy-on-live-account\.yml/,
+    );
   });
 
-  it('keeps market-order workflows manual and serialized with other live jobs', () => {
-    const marketOrderWorkflows = [
-      'execute-market-buy-on-live-account.yml',
-      'validate-closed-venue-market-order-rejection.yml',
-    ].map((file) => {
-      const workflow = workflows.find((candidate) => candidate.file === file);
-      assert.ok(workflow, `${file} must exist`);
-      return workflow;
-    });
+  it('keeps the real market buy manual while scheduling closed-market rejection coverage', () => {
+    const manualBuy = workflows.find((workflow) =>
+      workflow.file === 'execute-market-buy-on-live-account.yml');
+    assert.ok(manualBuy);
 
-    for (const workflow of marketOrderWorkflows) {
-      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_dispatch'), true);
-      for (const trigger of ['push', 'schedule', 'pull_request', 'pull_request_target']) {
-        assert.equal(
-          hasTopLevelTrigger(workflow.source, trigger),
-          false,
-          `${workflow.file} must only be started explicitly`,
-        );
-      }
-      assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
-      assert.doesNotMatch(workflow.source, /^\s+environment:/m);
-      assert.match(workflow.source, /^\s+group: live-integration-tests-main\r?$/m);
-      assert.doesNotMatch(workflow.source, /live-order-tests/);
-      assert.match(workflow.source, /github\.actor == 'VIEWVIEWVIEW'/);
-      assert.match(workflow.source, /inputs\.confirm_/);
+    assert.equal(hasTopLevelTrigger(manualBuy.source, 'workflow_dispatch'), true);
+    for (const trigger of [
+      'push',
+      'schedule',
+      'pull_request',
+      'pull_request_target',
+      'workflow_call',
+      'merge_group',
+    ]) {
+      assert.equal(
+        hasTopLevelTrigger(manualBuy.source, trigger),
+        false,
+        `${manualBuy.file} must only be started explicitly`,
+      );
     }
+    assert.match(manualBuy.source, /^permissions:\r?\n  contents: read\r?$/m);
+    assert.doesNotMatch(manualBuy.source, /^\s+environment:/m);
+    assert.match(manualBuy.source, /^\s+group: live-integration-tests-main\r?$/m);
+    assert.match(manualBuy.source, /github\.actor == 'VIEWVIEWVIEW'/);
+    assert.match(manualBuy.source, /inputs\.confirm_live_execution/);
+
+    const closedMarketOrder = workflows.find((workflow) =>
+      workflow.file === 'validate-closed-venue-market-order-rejection.yml');
+    assert.ok(closedMarketOrder);
+
+    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'workflow_dispatch'), true);
+    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'workflow_call'), true);
+    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'schedule'), true);
+    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'push'), false);
+    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'pull_request'), false);
+    assert.match(
+      closedMarketOrder.source,
+      /cron: "0 2 \* \* \*"\r?\n\s+timezone: Europe\/Berlin/,
+    );
+    assert.match(closedMarketOrder.source, /^\s+environment: Live Integration Tests\r?$/m);
+    assert.match(closedMarketOrder.source, /^\s+group: live-integration-tests-main\r?$/m);
+    assert.match(closedMarketOrder.source, /github\.actor == 'VIEWVIEWVIEW'/);
+    assert.match(closedMarketOrder.source, /inputs\.confirm_order_request/);
   });
 
   it('invokes the connected Codex account only for trusted scheduled failures', () => {

@@ -1,6 +1,9 @@
 name: "Live: market order rejected while market is closed"
 
 on:
+  schedule:
+    - cron: "0 2 * * *"
+      timezone: Europe/Berlin
   workflow_dispatch:
     inputs:
       confirm_order_request:
@@ -8,6 +11,7 @@ on:
         required: true
         type: boolean
         default: false
+  workflow_call:
 
 permissions:
   contents: read
@@ -21,9 +25,12 @@ jobs:
   time-gate:
     name: require 23:00–05:00 Europe/Berlin
     if: >-
-      github.ref == 'refs/heads/main' &&
-      github.actor == 'VIEWVIEWVIEW' &&
-      inputs.confirm_order_request
+      github.event_name == 'merge_group' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.actor == 'VIEWVIEWVIEW' &&
+        inputs.confirm_order_request)
     runs-on: ubuntu-latest
     outputs:
       eligible: ${{ steps.clock.outputs.eligible }}
@@ -58,6 +65,7 @@ jobs:
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: Live Integration Tests
     steps:
       - uses: actions/checkout@v6
         with:

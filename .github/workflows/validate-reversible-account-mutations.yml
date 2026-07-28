@@ -3,12 +3,11 @@ name: "Live: mutating alerts and default watchlist"
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "0 1,11 * * *"
       timezone: Europe/Berlin
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -21,7 +20,7 @@ concurrency:
 jobs:
   reversible-mutations:
     name: mutate alerts and the default watchlist
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: Live Integration Tests

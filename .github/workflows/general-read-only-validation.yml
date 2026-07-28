@@ -3,12 +3,11 @@ name: "Live: account and market-data reads"
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "0 1,11 * * *"
       timezone: Europe/Berlin
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -21,7 +20,7 @@ concurrency:
 jobs:
   live-read-only:
     name: read live account and market data
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'merge_group' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: Live Integration Tests
