@@ -1471,41 +1471,6 @@ npm run demo:repl
 npm run demo:tui
 ```
 
-For a read-only, long-running market-data soak test using the existing demo
-authentication files, run:
-
-```bash
-npm run demo:market-stress
-```
-
-It restores `demo/.demo-session.json` plus the optional
-`demo/.demo-config.json`, selects 500 stock instruments, and keeps quote
-(`tickerV3`), trade tape, and L2 streams open on TIB for each instrument. The
-catalogue does not include per-stock venue lists, so individual rejected TIB
-streams are reported by the demo rather than silently filtered out.
-It deliberately uses one `TradeRepublicClient` with the shared mapper mode, so
-all 1,500 default streams are multiplexed through one mapper socket. Connection
-losses, schema drift, and individual stream failures are written to stderr with
-a terminal bell. Every five seconds, status lines show newly processed and
-cumulative quote, trade, and L2 event counts, along with connection and memory
-counts. Stop cleanly with `Ctrl+C`.
-
-Every market-data event, status, connection lifecycle event, error, and final
-summary is also appended as JSON Lines to `demo/market-data-stress.ndjson`.
-Set `TR_STRESS_LOG_FILE` to write it elsewhere. The file contains market data,
-not authentication values, but will grow quickly during a large run and is
-ignored by Git. If the mapper handshake still reports HTTP 401 after the
-startup refresh, run `demo:tui` so it can validate or replace the saved login,
-or run `demo:repl` and call `loginQr()` before restarting the soak test.
-
-`TR_SESSION_FILE` and `TR_CONFIG_FILE` can point at alternate local auth files.
-The stock count may be increased with `TR_STRESS_STOCKS` but cannot be reduced
-below 500; `TR_STRESS_DURATION_MS` is useful for a bounded run. The demo does
-not place orders. Like the TUI, it refreshes the saved session once before
-opening subscriptions and saves the rotated session; set
-`TR_STRESS_REFRESH_SESSION=false` only when an unchanged saved session is
-required.
-
 The demos store local authentication state under `demo/`. Do not commit the
 session or configuration files they create. The separate `demo:scratchpad`
 script is maintainer-specific and currently submits a real order; do not run it
@@ -1676,9 +1641,6 @@ The private repository belongs to a GitHub Free organization, so its live jobs
 use the repository-level `TR_SESSION_JSON` secret rather than an environment
 secret. Successful live runs refresh and rotate that repository secret in
 place. The shared concurrency group serializes workflows that use the session.
-To avoid continually retrying a broken session, the scheduled refresh workflow
-pauses after six consecutive failed scheduled runs. A manual dispatch remains
-available after the session has been renewed.
 
 When the GitHub Actions session can no longer be refreshed, renew it from a
 maintainer machine:

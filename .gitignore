@@ -12,7 +12,6 @@ node_modules/
 demo/.demo-session.json
 demo/.demo-config.json
 demo/*.log
-demo/*.ndjson
 demo/*.pid
 
 # Legacy scratchpad local state
