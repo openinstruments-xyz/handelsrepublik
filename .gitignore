@@ -13,6 +13,7 @@ demo/.demo-session.json
 demo/.demo-config.json
 demo/*.log
 demo/*.pid
+demo/market-data-stress.ndjson
 
 # Legacy scratchpad local state
 scratchpad/.chrome-profile/

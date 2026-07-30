@@ -219,9 +219,7 @@ const searchResults = await tr.assets.search('AAPL', {
 });
 
 // Avoid accidentally buying a similarly named search result.
-const apple = searchResults.find(
-  ({ id, isin }) => id === APPLE_ISIN || isin === APPLE_ISIN,
-);
+const apple = searchResults.find(({ isin }) => isin === APPLE_ISIN);
 
 if (!apple) {
   throw new Error('Apple (AAPL) was not found.');
