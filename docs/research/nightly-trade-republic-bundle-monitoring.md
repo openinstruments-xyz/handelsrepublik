@@ -13,12 +13,9 @@ should not merge Codex's changes automatically.
 
 ## What already exists here
 
-- [`scripts/download-web-bundle.mjs`](../../scripts/download-web-bundle.mjs)
-  downloads the authenticated web entrypoint, recursively discovers same-origin
-  application assets, and expands JavaScript and CSS with esbuild.
-- [`web-reference/README.md`](../../web-reference/README.md) documents the local
-  bundle snapshot. Raw downloads, expanded files, the manifest, and session
-  material are intentionally ignored rather than committed.
+- [`vendor/trade-republic-web-bundle-archive`](../../vendor/trade-republic-web-bundle-archive)
+  is the versioned source of web-bundle snapshots. Its collector recursively
+  discovers same-origin application assets and preserves the raw files.
 - [`.github/workflows/report-scheduled-failure-to-codex.yml`](../../.github/workflows/report-scheduled-failure-to-codex.yml)
   already implements a strong precedent: after an allowlisted scheduled live
   workflow fails, it collects a redacted excerpt, deduplicates a GitHub issue,
