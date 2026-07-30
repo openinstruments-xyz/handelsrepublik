@@ -1,5 +1,7 @@
 # handelsrepublik
 
+# Don't use, it's still in heavy development and will contain bugs. 
+
 **Workflow status**
 
 | Workflow | Latest | Scheduled | Manual |

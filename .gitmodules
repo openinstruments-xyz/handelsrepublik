@@ -1,0 +1,4 @@
+[submodule "vendor/trade-republic-web-bundle-archive"]
+	path = vendor/trade-republic-web-bundle-archive
+	url = https://github.com/openinstruments-xyz/trade-republic-web-bundle-archive.git
+	branch = main
