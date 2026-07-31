@@ -13,7 +13,7 @@ should not merge Codex's changes automatically.
 
 ## What already exists here
 
-- [`vendor/trade-republic-web-bundle-archive`](../../vendor/trade-republic-web-bundle-archive)
+- [`trade-republic-web-bundle-archive`](../../trade-republic-web-bundle-archive)
   is the versioned source of web-bundle snapshots. Its collector recursively
   discovers same-origin application assets and preserves the raw files.
 - [`.github/workflows/report-scheduled-failure-to-codex.yml`](../../.github/workflows/report-scheduled-failure-to-codex.yml)
