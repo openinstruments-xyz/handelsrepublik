@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { TradeRepublicClient } from '../src/index.js';
@@ -17,11 +17,9 @@ describe('live integration case manifest', () => {
     assert.deepEqual([...suites].sort(), ['closed-venue', 'mutations', 'open-venue', 'read']);
   });
 
-  it('exposes every venue and mutation check as a named workflow step', () => {
+  it('keeps closed-market checks in their time-gated workflow', () => {
     const workflowBySuite = {
       'closed-venue': 'validate-order-destinations-during-closed-market-hours.yml',
-      'open-venue': 'validate-venue-during-opening-times.yml',
-      mutations: 'validate-reversible-account-mutations.yml',
     } as const;
     for (const [suite, workflow] of Object.entries(workflowBySuite)) {
       const source = readFileSync(join(process.cwd(), '.github', 'workflows', workflow), 'utf8');
@@ -34,7 +32,7 @@ describe('live integration case manifest', () => {
     }
   });
 
-  it('runs all read checks through the bounded-concurrent Node test suite', () => {
+  it('runs compatible live blocks concurrently behind one session refresh', () => {
     const workflow = readFileSync(
       join(process.cwd(), '.github', 'workflows', 'general-read-only-validation.yml'),
       'utf8',
@@ -49,10 +47,23 @@ describe('live integration case manifest', () => {
 
     assert.ok(readCaseIds.includes('session.restore'));
     assert.ok(!readCaseIds.includes('session.restore-refresh'));
-    assert.match(workflow, /run: npm run test:integration:read/);
+    assert.match(workflow, /run: npm run test:integration:consolidated/);
+    assert.equal(workflow.match(/ci-session\.ts refresh/g)?.length, 1);
+    assert.equal(
+      existsSync(join(process.cwd(), '.github', 'workflows', 'validate-reversible-account-mutations.yml')),
+      false,
+    );
+    assert.equal(
+      existsSync(join(process.cwd(), '.github', 'workflows', 'validate-venue-during-opening-times.yml')),
+      false,
+    );
     assert.match(testSource, /const READ_LIVE_CONCURRENCY = 4/);
     assert.match(testSource, /describe\('read-only live validations', \{ concurrency: READ_LIVE_CONCURRENCY \}/);
     assert.match(testSource, /liveCases\.filter\(\(testCase\) => testCase\.suite === 'read'\)/);
+  });
+
+  it('does not call the auth session endpoint again inside the read suite', () => {
+    assert.ok(!liveCases.some((candidate) => candidate.id === 'account.session'));
   });
 
   it('loads and rotates the live session through repository secrets', () => {
