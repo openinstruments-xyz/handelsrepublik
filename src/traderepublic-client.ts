@@ -32,6 +32,7 @@ import {
   normalizeAssetDetail,
   normalizeCash,
   normalizeDerivative,
+  normalizeIbanInfo,
   normalizeInstrumentNewsItem,
   normalizeOrder,
   normalizeOrderDestination,
@@ -72,6 +73,7 @@ import type {
   DailyPnlResult,
   ExecutionOrderBookSnapshot,
   ExecutionTapeSnapshot,
+  IbanInfo,
   InstrumentNewsItem,
   L2OrderBook,
   L2OrderBookOptions,
@@ -1336,12 +1338,20 @@ export class MarketApi {
     return this.resources.stream(liveFeedSpec, options);
   }
 
+  liveFeed(assetId: string, options: Omit<LiveFeedOptions, 'assetId'> = {}): Subscription<LiveFeedEvent> {
+    return this.subscribeLiveFeed({ ...options, assetId });
+  }
+
   availableL2Books(assetId: string): Promise<L2Venue[]> {
     return this.resources.query(availableL2BooksSpec, { assetId });
   }
 
   subscribeL2OrderBook(options: L2OrderBookOptions): Subscription<L2OrderBook> {
     return this.resources.protobufStream(l2OrderBookSpec, options);
+  }
+
+  l2OrderBook(assetId: string, exchangeId: string, options: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'> = {}): Subscription<L2OrderBook> {
+    return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
   }
 
   private async resolveCandleSource(options: CandleDownloadOptions): Promise<'standard' | 'light' | 'bond'> {
@@ -1626,7 +1636,7 @@ export class WebApi {
   private readonly http: HttpClient;
   private readonly raw: RawApi;
 
-  constructor(runtime: ClientRuntime) {
+  constructor(private readonly runtime: ClientRuntime) {
     this.http = runtime.http;
     this.raw = runtime.raw;
   }
@@ -1653,5 +1663,198 @@ export class WebApi {
 
   subscribe(payload: Record<string, unknown>, options: RawSubscriptionOptions = {}): Subscription<unknown> {
     return toSubscription(this.raw.subscribeResource(payload, options));
+  }
+
+  timeline(after?: string): Promise<unknown> {
+    return this.query({ type: 'timelineActivityLog', ...(after ? { after } : {}) });
+  }
+
+  timelineActions(): Promise<unknown> {
+    return this.query({ type: 'timelineActionsV2' });
+  }
+
+  timelineDetail(id: string, kind: 'timeline' | 'order' | 'savingsPlan' = 'timeline'): Promise<unknown> {
+    const key = kind === 'order' ? 'orderId' : kind === 'savingsPlan' ? 'savingsPlanId' : 'id';
+    return this.query({ type: 'timelineDetailV2', [key]: id });
+  }
+
+  priceAlarms(): Promise<unknown> {
+    return this.query({ type: 'priceAlarms' });
+  }
+
+  priceAlarmNotifications(): Promise<unknown> {
+    return this.query({ type: 'priceAlarmNotifications' });
+  }
+
+  savingsPlans(secAccNo?: string): Promise<unknown> {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: 'savingsPlans', secAccNo: accountNumber }));
+  }
+
+  portfolioChart(secAccNo: string, range = '1y', options: { currency?: string; instrumentCategories?: string } = {}): Promise<unknown> {
+    return this.request('GET', '/api-gateway/portfolio-chart/v2/chart', {
+      query: { secAccNo, range, ...options },
+    });
+  }
+
+  news(isin: string): Promise<unknown> {
+    return this.query({ type: 'neonNews', isin });
+  }
+
+  etfDetails(id: string): Promise<unknown> {
+    return this.query({ type: 'etfDetails', id });
+  }
+
+  etfComposition(id: string, after?: string): Promise<unknown> {
+    return this.query({ type: 'etfComposition', id, after });
+  }
+
+  mutualFundDetails(id: string): Promise<unknown> {
+    return this.query({ type: 'mutualFundDetails', id });
+  }
+
+  mutualFundComposition(id: string, after?: string): Promise<unknown> {
+    return this.query({ type: 'mutualFundComposition', id, after });
+  }
+
+  cryptoDetails(id: string): Promise<unknown> {
+    return this.query({ type: 'cryptoDetails', id });
+  }
+
+  yieldToMaturity(id: string): Promise<unknown> {
+    return this.query({ type: 'yieldToMaturity', id });
+  }
+
+  bondValuation(instrumentId: string, secAccNo?: string): Promise<unknown> {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: 'bondValuationV2', instrumentId, secAccNo: accountNumber }));
+  }
+
+  fixedSavingsValuation(instrumentId: string, secAccNo?: string): Promise<unknown> {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: 'fixedSavingsValuation', instrumentId, secAccNo: accountNumber }));
+  }
+
+  privateMarketsPositions(secAccNo?: string): Promise<unknown> {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: 'privateMarketsPositions', secAccNo: accountNumber }));
+  }
+
+  tape(isin: string, exchangeId: string, unit = 'EUR'): Subscription<unknown> {
+    const mapperUnit = unit === 'PKT' ? 'PTS' : unit === 'PRZ' ? 'PCT' : unit;
+    return this.subscribe({ type: 'tape', isin, exchangeId, unit: mapperUnit });
+  }
+
+  tradeAggregateHistory(isin: string, exchangeId: string, resolution: number, from: number, until?: number): Promise<unknown> {
+    return this.query({ type: 'tradeAggregateHistory', isin, exchangeId, resolution, from, until });
+  }
+
+  priceForOrder(options: { isin: string; exchangeId: string; side: string; unit?: string }): Promise<unknown> {
+    return this.query({ type: 'priceForOrderV2', unit: 'EUR', ...options });
+  }
+
+  availableSize(instrumentId: string, secAccNo?: string): Promise<unknown> {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: 'availableSize', parameters: { instrumentId }, secAccNo: accountNumber }));
+  }
+
+  taxWrapperAccountUtilization(secAccNo: string): Promise<unknown> {
+    return this.query({ type: 'taxWrapperAccountUtilization', secAccNo });
+  }
+
+  userPreferences(): Promise<unknown> {
+    return this.request('GET', '/api-gateway/pro-trading/api/v1/user-preferences');
+  }
+
+  exchangeDetails(): Promise<unknown> {
+    return this.request('GET', '/api-gateway/instrument-universe/api/v1/exchanges-details', { query: { includeMaintenanceWindow: false } });
+  }
+
+  exchangeSchedule(exchange: string): Promise<unknown> {
+    return this.request('GET', `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`);
+  }
+
+  instrumentStatus(isin: string, exchange: string): Promise<unknown> {
+    return this.request('GET', `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`);
+  }
+
+  orderDestinations(isin: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<unknown> {
+    return this.request('GET', `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, { query });
+  }
+
+  orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot> {
+    return this.request('GET', `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/order-book-snapshot`);
+  }
+
+  tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot> {
+    return this.request('GET', `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/tape-snapshot`);
+  }
+
+  dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]> {
+    return this.request('POST', '/web-trading-gateway/api/customer/v1/pnl/daily', { body: { items } });
+  }
+
+  documents(): Promise<unknown> {
+    return this.request('GET', '/api/v1/documents/all');
+  }
+
+  personalDetails(): Promise<unknown> {
+    return this.request('GET', '/api/v1/customer/personal-details');
+  }
+
+  relationships(): Promise<unknown> {
+    return this.request('GET', '/api/v1/customer/relationships/detailed');
+  }
+
+  cardsHome(): Promise<unknown> {
+    return this.request('GET', '/api/v1/card/cards/home');
+  }
+
+  accountSettings(): Promise<unknown> {
+    return this.request('GET', '/api/v2/auth/account');
+  }
+
+  appUsageConsents(): Promise<unknown> {
+    return this.request('GET', '/api/v1/customer/app-usage-data-consents');
+  }
+
+  paymentMethods(): Promise<unknown> {
+    return this.request('GET', '/api/v2/payment/methods');
+  }
+
+  async iban(): Promise<IbanInfo> {
+    return normalizeIbanInfo(await this.rawIban());
+  }
+
+  rawIban(): Promise<unknown> {
+    return this.request('GET', '/api/v1/customer/relationships/detailed');
+  }
+
+  taxInformation(): Promise<unknown> {
+    return this.request('GET', '/api/v1/taxes/information');
+  }
+
+  exemptionOrder(): Promise<unknown> {
+    return this.request('GET', '/api/v1/taxes/exemptionorders');
+  }
+
+  taxResidencies(): Promise<unknown> {
+    return this.request('GET', '/api/v1/auth/account/change/taxresidencies');
+  }
+
+  taxResidencyCountries(): Promise<unknown> {
+    return this.request('GET', '/api/v1/country/taxresidency');
+  }
+
+  watchlists(): Promise<unknown> {
+    return this.request('GET', '/api-gateway/watchlists/api/v2/watchlists');
+  }
+
+  screeners(): Promise<unknown> {
+    return this.request('GET', '/api-gateway/screeners/api/v2/screeners');
+  }
+
+  screenerOptions(): Promise<unknown> {
+    return this.request('GET', '/api-gateway/screeners/api/v2/screeners/options');
+  }
+
+  private async withSecAccNo(secAccNo: string | undefined, fn: (secAccNo: string) => Promise<unknown>): Promise<unknown> {
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
+    return fn(accountNumber);
   }
 }
