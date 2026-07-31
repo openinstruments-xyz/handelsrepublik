@@ -71,14 +71,16 @@ test('limits and truncates long failure lists', () => {
   assert.doesNotMatch(svg, />× six<\/text>/);
 });
 
-test('rejects workflows outside the allowlist', async () => {
-  const response = await worker.fetch(
-    new Request('https://example.com/arbitrary/latest.svg'),
-    { GH_TOKEN: 'unused' },
-    { waitUntil() {} },
-  );
+test('rejects unknown and removed workflow aliases', async () => {
+  for (const alias of ['arbitrary', 'reads', 'venue', 'mutations']) {
+    const response = await worker.fetch(
+      new Request(`https://example.com/${alias}/latest.svg`),
+      { GH_TOKEN: 'unused' },
+      { waitUntil() {} },
+    );
 
-  assert.equal(response.status, 404);
+    assert.equal(response.status, 404);
+  }
 });
 
 test('returns an SVG without exposing configuration errors', async () => {
@@ -119,7 +121,7 @@ test('loads failed steps only for a failing run', async () => {
   };
   try {
     const response = await worker.fetch(
-      new Request('https://example.com/reads/scheduled.svg'),
+      new Request('https://example.com/account-market-mutations/scheduled.svg'),
       { GH_TOKEN: 'test-token' },
       { waitUntil() {} },
     );
@@ -158,7 +160,7 @@ test('redirects each badge link to the run selected for its event', async () => 
       };
 
       const response = await worker.fetch(
-        new Request(`https://example.com/reads/${alias}/run`),
+        new Request(`https://example.com/account-market-mutations/${alias}/run`),
         { GH_TOKEN: 'test-token' },
         { waitUntil() {} },
       );
@@ -188,7 +190,7 @@ test('keeps the Berlin run time out of the visible badge label', async () => {
 
   try {
     const response = await worker.fetch(
-      new Request('https://example.com/reads/latest.svg'),
+      new Request('https://example.com/account-market-mutations/latest.svg'),
       { GH_TOKEN: 'test-token' },
       { waitUntil() {} },
     );

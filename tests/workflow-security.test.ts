@@ -95,7 +95,7 @@ describe('GitHub Actions trust boundaries', () => {
 
     assert.match(
       mergeGate.source,
-      /consolidated-live:\r?\n\s+name: account, market data, and reversible mutations\r?\n\s+if: github\.event_name == 'merge_group'\r?\n\s+needs: \[unit, quality\]\r?\n\s+uses: \.\/\.github\/workflows\/general-read-only-validation\.yml\r?\n\s+secrets: inherit/,
+      /consolidated-live:\r?\n\s+name: account, market data, and reversible mutations\r?\n\s+if: github\.event_name == 'merge_group'\r?\n\s+needs: \[unit, quality\]\r?\n\s+uses: \.\/\.github\/workflows\/validate-account-market-data-and-reversible-mutations\.yml\r?\n\s+secrets: inherit/,
     );
   });
 
@@ -106,7 +106,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.deepEqual(
       liveWorkflows.map((workflow) => workflow.file).sort(),
       [
-        'general-read-only-validation.yml',
+        'validate-account-market-data-and-reversible-mutations.yml',
         'validate-closed-venue-limit-order-rejection.yml',
         'validate-closed-venue-market-order-rejection.yml',
         'validate-open-venue-limit-order-lifecycle.yml',

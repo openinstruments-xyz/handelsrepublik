@@ -24,7 +24,7 @@ jobs:
     name: account, market data, and reversible mutations
     if: github.event_name == 'merge_group'
     needs: [unit, quality]
-    uses: ./.github/workflows/general-read-only-validation.yml
+    uses: ./.github/workflows/validate-account-market-data-and-reversible-mutations.yml
     secrets: inherit
 
   closed-limit-order:

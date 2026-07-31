@@ -244,7 +244,7 @@ function parseOptions(args: string[]): Options {
   const options: Options = {
     repo: DEFAULT_REPOSITORY,
     secret: 'TR_SESSION_JSON',
-    workflow: 'general-read-only-validation.yml',
+    workflow: 'validate-account-market-data-and-reversible-mutations.yml',
     ref: 'main',
     deviceName: 'handelsrepublik github actions',
     timeoutMs: 10 * 60_000,
@@ -270,7 +270,7 @@ function parseOptions(args: string[]): Options {
 Options:
   --repo OWNER/REPO       GitHub repository (default: ${DEFAULT_REPOSITORY})
   --secret NAME           Repository secret (default: TR_SESSION_JSON)
-  --workflow FILE         Workflow file/name (default: general-read-only-validation.yml)
+  --workflow FILE         Workflow file/name (default: validate-account-market-data-and-reversible-mutations.yml)
   --ref BRANCH            Branch to dispatch (default: main)
   --device-name NAME      Trade Republic device label
   --timeout-minutes N     QR approval timeout (default: 10)
