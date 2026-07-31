@@ -497,7 +497,8 @@ creates a replacement challenge and sends it through the same callback.
 `qrCodeTokenExpiresAt` is the shorter lifetime of the currently displayed QR
 token. The server performs the rotation: polling the challenge status returns
 the same challenge ID with a newly signed QR payload. The client does not
-generate or modify tokens locally.
+generate or modify tokens locally. `InstantLoginChallenge` exposes those two
+precise fields and does not provide a generic `expiresAt` alias.
 
 PIN login is also available. It starts the broker login process and polls until
 the session is ready:
@@ -528,6 +529,9 @@ Choose `rawSchemaValidation` deliberately:
 | `'throw'` | Validate covered raw responses and throw on drift. This is the default. |
 | `'passthrough'` | Validate, invoke `onRawSchemaValidationFailure`, and continue with the original payload. |
 | `'off'` | Skip covered raw-response validation entirely. |
+
+Boolean values are not accepted. Use one of the three named modes so
+configuration remains readable at call sites and in environment parsers.
 
 `'passthrough'` helps applications remain observable while Trade Republic's
 private API changes. It does not make an incompatible response safe; downstream
@@ -949,7 +953,9 @@ and 365 days from the reference date, `endOfMonth` maps to `eom`, and
 `validity: { type: 'date', value }` accepts `YYYY-MM-DD`, an ISO timestamp, a
 JavaScript `Date`, or a Unix timestamp in milliseconds. Timestamps are converted
 to their UTC calendar date because the broker payload carries a date rather
-than a time of day.
+than a time of day. `CreateOrderOptions` accepts only `validity`; it does not
+also accept the broker's raw `expiry` shape. The `expiry` values in the comments
+above are the prepared broker payload produced by the SDK.
 
 `orderModes` and `orderExpiries` describe what one specific destination says it
 supports; they are not global capabilities. For example, a captured Lang &
@@ -1152,6 +1158,26 @@ does not yet have a first-class SDK method.
 Methods that need a securities account number resolve it from the active session
 or account profile unless the method accepts and receives an explicit value.
 
+The domain namespaces are the primary interface: they validate inputs and
+normalize results where the SDK has a stable model. `tr.web` retains named
+conveniences for observed private resources and returns the broker response
+directly unless a method documents a normalized result. Representative reads
+include:
+
+```ts
+const documents = await tr.web.documents();
+const taxInformation = await tr.web.taxInformation();
+const watchlists = await tr.web.watchlists();
+const schedule = await tr.web.exchangeSchedule('LSX');
+const rawIban = await tr.web.rawIban();
+```
+
+Prefer `tr.documents`, `tr.tax`, `tr.discovery`, `tr.payments`, and the other
+domain namespaces when they expose the same operation. Use the named `tr.web`
+method when direct private-resource access is useful, and use
+`tr.web.request()`, `requestDetailed()`, `query()`, or `subscribe()` for
+resources without a named convenience.
+
 Less common observed reads have first-class namespace entry points as well:
 
 ```ts
@@ -1289,6 +1315,22 @@ try {
 } finally {
   orderBook.close();
 }
+```
+
+`liveFeed(assetId, options)` and `l2OrderBook(assetId, exchangeId, options)` are
+the concise convenience forms. Their object-parameter counterparts remain
+available when options are already assembled as objects:
+
+```ts
+const feed = tr.market.subscribeLiveFeed({
+  assetId: 'US0378331005',
+  exchangeId: 'LSX',
+});
+
+const orderBook = tr.market.subscribeL2OrderBook({
+  assetId: 'US0378331005',
+  exchangeId: 'XETR',
+});
 ```
 
 Order updates are also a stream:
