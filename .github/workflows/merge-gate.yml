@@ -48,6 +48,13 @@ jobs:
     uses: ./.github/workflows/validate-open-venue-limit-order-lifecycle.yml
     secrets: inherit
 
+  weekend-limit-order:
+    name: weekend limit-order lifecycle
+    if: github.event_name == 'merge_group'
+    needs: [unit, quality]
+    uses: ./.github/workflows/validate-weekend-limit-order-lifecycle.yml
+    secrets: inherit
+
   closed-market-data:
     name: closed-market trading availability
     if: github.event_name == 'merge_group'
@@ -65,6 +72,7 @@ jobs:
       - closed-limit-order
       - closed-market-order
       - open-limit-order
+      - weekend-limit-order
       - closed-market-data
     runs-on: ubuntu-latest
     steps:
@@ -77,6 +85,7 @@ jobs:
           CLOSED_LIMIT_ORDER_RESULT: ${{ needs.closed-limit-order.result }}
           CLOSED_MARKET_ORDER_RESULT: ${{ needs.closed-market-order.result }}
           OPEN_LIMIT_ORDER_RESULT: ${{ needs.open-limit-order.result }}
+          WEEKEND_LIMIT_ORDER_RESULT: ${{ needs.weekend-limit-order.result }}
           CLOSED_MARKET_DATA_RESULT: ${{ needs.closed-market-data.result }}
         run: |
           set -eu
@@ -103,4 +112,5 @@ jobs:
           require_result "closed-market limit-order rejection" "$CLOSED_LIMIT_ORDER_RESULT" "$expected_live_result"
           require_result "closed-market market-order rejection" "$CLOSED_MARKET_ORDER_RESULT" "$expected_live_result"
           require_result "open-market limit-order lifecycle" "$OPEN_LIMIT_ORDER_RESULT" "$expected_live_result"
+          require_result "weekend limit-order lifecycle" "$WEEKEND_LIMIT_ORDER_RESULT" "$expected_live_result"
           require_result "closed-market trading availability" "$CLOSED_MARKET_DATA_RESULT" "$expected_live_result"

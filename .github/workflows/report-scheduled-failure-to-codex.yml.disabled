@@ -11,6 +11,7 @@ on:
       - "Live: limit order rejected while market is closed"
       - "Live: market order rejected while market is closed"
       - "Live: submit, replace, and cancel a limit order"
+      - "Live: submit and cancel a weekend limit order"
     types: [completed]
 
 permissions:

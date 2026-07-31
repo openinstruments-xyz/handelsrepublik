@@ -1,15 +1,15 @@
-name: "Live: limit order rejected while market is closed"
+name: "Live: submit and cancel a weekend limit order"
 
 on:
   push:
     branches: [main]
   schedule:
-    - cron: "30 1 * * *"
+    - cron: "45 11 * * 6,0"
       timezone: Europe/Berlin
   workflow_dispatch:
     inputs:
       confirm_order_request:
-        description: 'I understand this sends a real EUR 1 limit order that must be rejected.'
+        description: 'I understand this sends and cancels a real deeply non-marketable weekend limit order.'
         required: true
         type: boolean
         default: false
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   time-gate:
-    name: require weekday 23:00–06:40 Europe/Berlin
+    name: require Saturday or Sunday in Europe/Berlin
     if: >-
       (github.event_name == 'merge_group' || github.ref == 'refs/heads/main') &&
       (github.event_name != 'workflow_dispatch' ||
@@ -35,32 +35,31 @@ jobs:
       eligible: ${{ steps.clock.outputs.eligible }}
     steps:
       - id: clock
-        name: validate closed-market time window
+        name: validate weekend time window
         env:
           TZ: Europe/Berlin
         run: |
           weekday=$(date +%u)
-          minutes=$((10#$(date +%H) * 60 + 10#$(date +%M)))
-          if (( weekday <= 5 && (minutes >= 1380 || minutes < 400) )); then
+          if (( weekday >= 6 )); then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
             result="✅ Passed"
-            note="Inside weekday 23:00–06:40 Europe/Berlin; the rejection test will run."
+            note="It is Saturday or Sunday in Europe/Berlin; the weekend lifecycle test will run."
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping outside weekday 23:00–06:40 Europe/Berlin."
+            echo "Skipping outside Saturday and Sunday in Europe/Berlin."
             result="⏭️ Skipped"
-            note="Outside weekday 23:00–06:40 Europe/Berlin."
+            note="It is not Saturday or Sunday in Europe/Berlin."
           fi
           {
-            echo "## Closed-market time gate"
+            echo "## Weekend time gate"
             echo ""
             echo "| Test | Result | Notes |"
             echo "|---|:---:|---|"
-            echo "| Closed-market eligibility | $result | $note |"
+            echo "| Weekend eligibility | $result | $note |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  closed-limit-order:
-    name: require a closed market to reject a limit order
+  weekend-limit-order:
+    name: submit and cancel a weekend limit order
     needs: time-gate
     if: needs.time-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
@@ -86,9 +85,9 @@ jobs:
       - name: refresh Trade Republic session
         id: live-ready
         run: node --import tsx scripts/ci-session.ts refresh "$TR_SESSION_FILE"
-      - name: validate closed venue and rejected one-share EUR 1 limit buy
+      - name: submit and cancel a weekend limit order
         continue-on-error: true
-        run: npm run test:ci:record -- orders.closed-limit "Rejected EUR 1 limit buy" -- npm run test:integration:closed-limit-order
+        run: npm run test:ci:record -- orders.weekend-limit-lifecycle "Submit and cancel a weekend limit order" -- npm run test:integration:weekend-limit-order
       - name: rotate encrypted GitHub session secret
         if: ${{ always() && steps.live-ready.outcome == 'success' }}
         env:
@@ -99,4 +98,4 @@ jobs:
         run: rm -f "$TR_SESSION_FILE"
       - name: publish test result table
         if: always()
-        run: npm run test:ci:summary -- "Limit order rejected while market is closed"
+        run: npm run test:ci:summary -- "Submit and cancel a weekend limit order"

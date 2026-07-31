@@ -39,6 +39,13 @@ Capabilities are venue-specific. An instrument can have a full-featured venue
 and a second destination that supports only market orders with day validity.
 Inspect the selected destination before building an order.
 
+The destination's `open` value describes current execution availability, not
+whether the broker accepts every order type. Trade Republic accepts limit
+orders on Saturday and Sunday and allows them to be cancelled before execution,
+so weekend limit-order submission must not be blocked only because `open` is
+`false`. Continue to require an explicitly open destination for market orders
+or any workflow that needs immediate execution.
+
 ## Venue-specific order prices
 
 Use `tr.trading.priceForOrder()` for the quote used by the order flow:
