@@ -111,6 +111,7 @@ describe('GitHub Actions trust boundaries', () => {
         'validate-closed-venue-market-order-rejection.yml',
         'validate-open-venue-limit-order-lifecycle.yml',
         'validate-order-destinations-during-closed-market-hours.yml',
+        'validate-weekend-limit-order-lifecycle.yml',
       ],
     );
 
@@ -214,6 +215,20 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(closedMarketOrder.source, /^\s+group: live-integration-tests-main\r?$/m);
     assert.match(closedMarketOrder.source, /github\.actor == 'VIEWVIEWVIEW'/);
     assert.match(closedMarketOrder.source, /inputs\.confirm_order_request/);
+  });
+
+  it('separates weekday closed-limit rejection from weekend limit acceptance', () => {
+    const rejection = workflows.find((workflow) =>
+      workflow.file === 'validate-closed-venue-limit-order-rejection.yml');
+    const weekend = workflows.find((workflow) =>
+      workflow.file === 'validate-weekend-limit-order-lifecycle.yml');
+    assert.ok(rejection);
+    assert.ok(weekend);
+
+    assert.match(rejection.source, /weekday <= 5/);
+    assert.match(weekend.source, /weekday >= 6/);
+    assert.match(weekend.source, /test:integration:weekend-limit-order/);
+    assert.doesNotMatch(weekend.source, /pull_request(?:_target)?:/);
   });
 
   it('keeps the Codex scheduled-failure triage workflow disabled', () => {

@@ -135,6 +135,27 @@ test('rejects unknown and removed workflow aliases', async () => {
   }
 });
 
+test('resolves the weekend lifecycle badge to its workflow', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl;
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return Response.json({ workflow_runs: [] });
+  };
+  try {
+    const response = await worker.fetch(
+      new Request('https://example.com/weekend-lifecycle/latest.svg'),
+      { GH_TOKEN: 'test-token' },
+      { waitUntil() {} },
+    );
+
+    assert.equal(response.status, 200);
+    assert.match(requestedUrl, /actions\/workflows\/validate-weekend-limit-order-lifecycle\.yml\/runs/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('returns an SVG without exposing configuration errors', async () => {
   const response = await worker.fetch(
     new Request('https://example.com/quality/latest.svg'),

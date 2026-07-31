@@ -599,6 +599,7 @@ export interface OrderDestination {
   orderExpiries?: string[] | undefined;
   listingId?: string | undefined;
   currencyId?: string | undefined;
+  /** Whether the venue is currently executing trades, not whether it accepts queued limit orders. */
   open?: boolean | undefined;
   openTimeOffsetMillis?: number | undefined;
   closeTimeOffsetMillis?: number | undefined;

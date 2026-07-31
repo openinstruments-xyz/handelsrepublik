@@ -13,6 +13,7 @@ const WORKFLOWS = Object.freeze({
   'limit-rejection': 'validate-closed-venue-limit-order-rejection.yml',
   'market-rejection': 'validate-closed-venue-market-order-rejection.yml',
   lifecycle: 'validate-open-venue-limit-order-lifecycle.yml',
+  'weekend-lifecycle': 'validate-weekend-limit-order-lifecycle.yml',
   buy: 'execute-market-buy-on-live-account.yml',
   sell: 'execute-market-sell-on-live-account.yml',
 });

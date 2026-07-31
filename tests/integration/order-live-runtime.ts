@@ -49,9 +49,47 @@ export function isClosedBerlinWindow(now = new Date()): boolean {
   return minutes >= 23 * 60 || minutes < 6 * 60 + 40;
 }
 
+export function isWeekdayClosedBerlinWindow(now = new Date()): boolean {
+  const { weekday } = berlinClock(now);
+  return weekday >= 1 && weekday <= 5 && isClosedBerlinWindow(now);
+}
+
 export function isOpenBerlinWindow(now = new Date()): boolean {
   const { weekday, minutes } = berlinClock(now);
   return weekday >= 1 && weekday <= 5 && minutes >= 7 * 60 && minutes < 22 * 60 + 40;
+}
+
+export function isWeekendBerlin(now = new Date()): boolean {
+  const { weekday } = berlinClock(now);
+  return weekday === 6 || weekday === 7;
+}
+
+export async function selectLimitOrderCandidate(
+  client: TradeRepublicClient,
+  options: { requireOpen: boolean; minimumBid: number },
+): Promise<{ instrumentId: string; destination: OrderDestination } | undefined> {
+  for (const candidate of orderCandidates) {
+    const destinations = await client.trading.orderDestinations(candidate.instrumentId);
+    for (const destination of destinations) {
+      if ((options.requireOpen && destination.open !== true) || !supports(destination, 'limit')) continue;
+      const quote = await client.market.quote(candidate.instrumentId, destination.id);
+      if (quote.bid !== undefined && quote.bid >= options.minimumBid) {
+        return { instrumentId: candidate.instrumentId, destination };
+      }
+    }
+  }
+  return undefined;
+}
+
+export async function resolveAccountNumber(client: TradeRepublicClient): Promise<string> {
+  await client.portfolio.current();
+  const value = client.securitiesAccountNumber ?? client.getSession()?.securitiesAccountNumber;
+  assert.ok(value, 'expected a securities account number for order updates');
+  return value;
+}
+
+export function hasAnyTimestamp(value: Record<string, unknown>, ...keys: string[]): boolean {
+  return keys.some((key) => typeof value[key] === 'string');
 }
 
 export function createOrderUpdateCollector(subscription: Subscription<unknown>) {

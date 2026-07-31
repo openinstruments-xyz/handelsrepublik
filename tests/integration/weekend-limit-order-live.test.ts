@@ -6,56 +6,40 @@ import {
   createLiveOrderClient,
   createOrderUpdateCollector,
   hasAnyTimestamp,
-  isOpenBerlinWindow,
+  isWeekendBerlin,
   resolveAccountNumber,
   selectLimitOrderCandidate,
 } from './order-live-runtime.js';
 
-describe('open-venue limit-order lifecycle', () => {
-  it('streams, submits, replaces, and cancels a deeply non-marketable order', { timeout: 240_000 }, async (t) => withLiveDiagnostics('open-venue limit-order lifecycle', async () => {
-    if (!isOpenBerlinWindow()) return t.skip('runs only on weekdays from 07:00 until before 22:40 Europe/Berlin');
+describe('weekend limit-order lifecycle', () => {
+  it('submits and cancels a deeply non-marketable limit order', { timeout: 180_000 }, async (t) => withLiveDiagnostics('weekend limit-order lifecycle', async () => {
+    if (!isWeekendBerlin()) return t.skip('runs only on Saturday or Sunday in Europe/Berlin');
     const client = await createLiveOrderClient();
     let activeOrderId: string | undefined;
     let collector: ReturnType<typeof createOrderUpdateCollector> | undefined;
     try {
-      const candidate = await selectLimitOrderCandidate(client, { requireOpen: true, minimumBid: 10 });
-      if (!candidate) return t.skip('no candidate has an explicitly open limit venue and a bid of at least EUR 10');
+      const candidate = await selectLimitOrderCandidate(client, { requireOpen: false, minimumBid: 10 });
+      if (!candidate) return t.skip('no candidate advertises limit orders with a bid of at least EUR 10');
       const accountNumber = await resolveAccountNumber(client);
       collector = createOrderUpdateCollector(client.orders.orderUpdates(accountNumber));
 
-      const order = {
+      const submission = await client.orders.submit({
         instrumentId: candidate.instrumentId,
         exchangeId: candidate.destination.id,
-        side: 'buy' as const,
-        mode: 'limit' as const,
+        side: 'buy',
+        mode: 'limit',
         size: 1,
-        validity: 'day' as const,
+        limit: 1,
+        validity: 'day',
         timeoutMs: 60_000,
-      };
-      const submission = await client.orders.submit({ ...order, limit: 1 });
+      });
       if (submission.raw !== undefined) validateRawResponse('orders.submit', submission.raw);
       assert.equal(submission.status, 'succeeded');
-      assert.ok(submission.orderId, 'submission must return an order id');
+      assert.ok(submission.orderId, 'weekend submission must return an order id');
       activeOrderId = submission.orderId;
       await collector.waitFor(
         (event) => event.id === submission.orderId && hasAnyTimestamp(event, 'receivedAt', 'submittedAt', 'openedAt'),
-        `created/open update for ${submission.orderId}`,
-      );
-
-      const replacement = await client.orders.replace(submission.orderId, { ...order, limit: 0.5 }, {
-        cancellationTimeoutMs: 30_000,
-        submissionTimeoutMs: 60_000,
-      });
-      assert.equal(replacement.status, 'succeeded');
-      await collector.waitFor(
-        (event) => event.id === submission.orderId && typeof event.cancelledAt === 'string',
-        `cancelled update for replaced order ${submission.orderId}`,
-      );
-      assert.ok(replacement.submission.orderId, 'replacement must return an order id');
-      activeOrderId = replacement.submission.orderId;
-      await collector.waitFor(
-        (event) => event.id === activeOrderId && hasAnyTimestamp(event, 'receivedAt', 'submittedAt', 'openedAt'),
-        `created/open update for replacement ${activeOrderId}`,
+        `created/submitted update for ${submission.orderId}`,
       );
 
       const cancellation = await client.orders.cancel(activeOrderId, { timeoutMs: 30_000 });
@@ -74,5 +58,5 @@ describe('open-venue limit-order lifecycle', () => {
         await client.close();
       }
     }
-}));
+  }));
 });
