@@ -383,7 +383,6 @@ function normalizeChallenge(raw: unknown, serverTime?: string | null): InstantLo
     deepLink: optionalString(record.deepLink, record.loginUrl, record.url),
     challengeExpiresAt,
     qrCodeTokenExpiresAt,
-    expiresAt: optionalString(record.expiresAt, challengeExpiresAt, qrCodeTokenExpiresAt, record.expiration),
     serverTime: serverTime ?? undefined,
     raw,
   };
@@ -399,7 +398,6 @@ function initialChallenge(
     deepLink: challenge.deepLink,
     challengeExpiresAt: challenge.challengeExpiresAt,
     qrCodeTokenExpiresAt: challenge.qrCodeTokenExpiresAt,
-    expiresAt: challenge.expiresAt,
     serverTime: challenge.serverTime,
     raw: challenge.raw ?? challenge,
   };
@@ -418,7 +416,6 @@ function mergeChallenges(
     deepLink: hasFreshPresentation ? next.deepLink : previous.deepLink,
     challengeExpiresAt: next.challengeExpiresAt ?? previous.challengeExpiresAt,
     qrCodeTokenExpiresAt: next.qrCodeTokenExpiresAt ?? previous.qrCodeTokenExpiresAt,
-    expiresAt: next.expiresAt ?? previous.expiresAt,
     serverTime: next.serverTime ?? previous.serverTime,
   };
 }

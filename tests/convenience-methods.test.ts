@@ -87,7 +87,7 @@ describe('public convenience methods', () => {
   it('calls account and read-only order convenience endpoints', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
+      rawSchemaValidation: 'off',
       fetch: mockFetchSequence(calls, [
         jsonResponse({ session: 'active' }),
         jsonResponse({ orders: [{ id: 'fund-order', status: 'EXECUTED' }] }),
@@ -131,7 +131,7 @@ describe('public convenience methods', () => {
   it('normalizes portfolio convenience queries and resolves explicit positions', async () => {
     const payloads: Array<Record<string, unknown>> = [];
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
+      rawSchemaValidation: 'off',
       websocketFactory: () => {
         const socket = new FakeSocket((payload, id) => {
           payloads.push(payload);
@@ -160,7 +160,7 @@ describe('public convenience methods', () => {
   it('fetches one candle page through CandleQuery', async () => {
     const payloads: Array<Record<string, unknown>> = [];
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
+      rawSchemaValidation: 'off',
       websocketFactory: () => {
         const socket = new FakeSocket((payload, id) => {
           payloads.push(payload);
@@ -187,10 +187,10 @@ describe('public convenience methods', () => {
     });
   });
 
-  it('supports both live-feed entry points and the L2 convenience alias', async () => {
+  it('subscribes to live feeds and L2 order books', async () => {
     const sockets: ManualSocket[] = [];
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
+      rawSchemaValidation: 'off',
       websocketFactory: () => {
         const socket = new ManualSocket((binary) => {
           const request = decodeMapperProtobufRequest(binary);
@@ -217,16 +217,12 @@ describe('public convenience methods', () => {
     });
     direct.close();
 
-    const alias = client.market.liveFeed('US2', { exchangeId: 'XETR' });
-    connect(sockets[1]);
-    expect(subscriptionPayload(sockets[1]?.sent[1])).toMatchObject({
-      isin: 'US2', exchangeId: 'XETR', type: 'tickerV3',
+    const orderBook = client.market.subscribeL2OrderBook({
+      assetId: 'US3',
+      exchangeId: 'XETR',
     });
-    alias.close();
-
-    const orderBook = client.market.l2OrderBook('US3', 'XETR');
-    connect(sockets[2]);
-    expect(decodeMapperProtobufRequest(sockets[2]!.binarySent[0]!)).toEqual({
+    connect(sockets[1]);
+    expect(decodeMapperProtobufRequest(sockets[1]!.binarySent[0]!)).toEqual({
       subscriptionId: 1, topic: 'L2', instrumentId: { isin: 'US3', exchangeId: 'XETR' },
     });
     const bookNext = orderBook[Symbol.asyncIterator]().next();

@@ -576,7 +576,7 @@ describe('TradeRepublicClient', () => {
   it('can disable raw schema validation for drifted payloads', async () => {
     const payload = { unexpected: true };
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
+      rawSchemaValidation: 'off',
       fetch: mockFetch([], payload),
     });
 

@@ -120,24 +120,17 @@ The SDK validates that:
 - Market orders do not contain limit or stop prices.
 - Side and prices are normalized before opening the mutation subscription.
 
-## Validity and expiry
+## Validity
 
-The low-level `expiry` option remains available for protocol-shaped values:
-
-```ts
-expiry: { type: 'gfd' }
-expiry: { type: 'gtd', value: '2026-08-15' }
-expiry: { type: 'gtc' }
-expiry: { type: 'eom' }
-```
-
-The friendlier `validity` option maps broker UI choices to protocol values:
+The single `validity` option maps SDK choices to protocol expiry values:
 
 | SDK validity | Protocol expiry |
 | --- | --- |
 | `day` | `{ type: 'gfd' }` |
+| `endOfMonth` | `{ type: 'eom' }` |
 | `month` | `{ type: 'gtd', value: reference date + 30 days }` |
 | `year` | `{ type: 'gtd', value: reference date + 365 days }` |
+| `{ type: 'date', value }` | `{ type: 'gtd', value: UTC calendar date }` |
 | `goodTillCancelled` | `{ type: 'gtc' }` |
 
 The submitted month order in the capture used July 16 as its reference date and
@@ -151,8 +144,8 @@ For deterministic scheduling or tests, pass a reference date:
 validity: { type: 'month', referenceDate: '2026-07-16' }
 ```
 
-Do not supply both `validity` and `expiry`. Inspect venue capabilities first:
-the broker may reject an expiry that a destination does not advertise.
+Inspect venue capabilities first: the broker may reject a validity whose
+protocol expiry family the destination does not advertise.
 
 ## Submission and cancellation outcomes
 

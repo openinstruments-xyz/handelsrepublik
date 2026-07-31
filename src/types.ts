@@ -7,28 +7,15 @@ export type EndpointKey =
   | 'auth.loginProcess'
   | 'auth.account'
   | 'auth.session'
-  | 'assets.search'
-  | 'assets.detail'
-  | 'assets.all'
-  | 'derivatives.search'
-  | 'derivatives.forUnderlying'
-  | 'derivatives.detail'
   | 'orders.all'
   | 'orders.mutualFunds'
   | 'orders.privateMarkets'
-  | 'portfolio.current'
-  | 'portfolio.cash'
-  | 'portfolio.markToMarket'
   | 'market.subscriptions'
   | 'market.entitlements'
-  | 'market.candles'
-  | 'market.bondCandles'
-  | 'market.liveFeed'
-  | 'market.availableL2Books'
-  | 'market.l2OrderBook';
+  | 'market.bondCandles';
 
 export type EndpointMap = Partial<Record<EndpointKey, string>>;
-export type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
+export type RawSchemaValidationMode = 'throw' | 'passthrough' | 'off';
 
 export interface RawSchemaValidationFailure {
   schemaName: string;
@@ -180,8 +167,6 @@ export interface InstantLoginChallenge {
   deepLink?: string | undefined;
   challengeExpiresAt?: string | undefined;
   qrCodeTokenExpiresAt?: string | undefined;
-  /** @deprecated Prefer challengeExpiresAt or qrCodeTokenExpiresAt. */
-  expiresAt?: string | undefined;
   serverTime?: string | undefined;
   raw: unknown;
 }
@@ -259,19 +244,17 @@ export interface Order {
 export type OrderSide = 'buy' | 'sell';
 export type OrderMode = 'market' | 'limit' | 'stopMarket';
 
-export type OrderExpiry =
-  | { type: 'gfd'; value?: never }
-  | { type: 'gtc'; value?: never }
-  | { type: 'eom'; value?: never }
-  | { type: 'gtd'; value: string | Date | number };
-
-export type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
+export type OrderValidityPreset = 'day' | 'endOfMonth' | 'goodTillCancelled';
 
 export type OrderValidity =
   | OrderValidityPreset
   | {
-      type: OrderValidityPreset;
+      type: 'month' | 'year';
       referenceDate?: string | Date | undefined;
+    }
+  | {
+      type: 'date';
+      value: string | Date | number;
     };
 
 export interface CreateOrderOptions {
@@ -284,7 +267,6 @@ export interface CreateOrderOptions {
   sizeStep?: number | undefined;
   limit?: number | undefined;
   stop?: number | undefined;
-  expiry?: OrderExpiry | undefined;
   validity?: OrderValidity | undefined;
   settlementCurrency?: string | undefined;
   tradingCurrency?: string | undefined;

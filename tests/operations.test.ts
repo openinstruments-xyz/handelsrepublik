@@ -5,7 +5,7 @@ describe('declarative operations', () => {
   it('preserves configured endpoint overrides', async () => {
     const urls: string[] = [];
     const client = TradeRepublicClient.create({
-      rawSchemaValidation: false,
+      rawSchemaValidation: 'off',
       endpoints: {
         'auth.account': '/custom/account',
         'market.entitlements': '/custom/entitlements/{topic}',

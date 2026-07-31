@@ -2568,9 +2568,9 @@ function readDemoClientOptions() {
 
 function schemaValidationMode(value) {
   const normalized = cleanString(value)?.toLowerCase();
-  if (normalized === 'false' || normalized === 'off' || normalized === 'disabled') return false;
-  if (normalized === 'true' || normalized === 'throw' || normalized === 'strict') return true;
-  return 'passthrough';
+  if (normalized === undefined) return 'passthrough';
+  if (normalized === 'throw' || normalized === 'passthrough' || normalized === 'off') return normalized;
+  throw new TypeError('TR_RAW_SCHEMA_VALIDATION must be "throw", "passthrough", or "off".');
 }
 
 function positiveInteger(value, fallback) {

@@ -525,9 +525,9 @@ Choose `rawSchemaValidation` deliberately:
 
 | Value | Behavior |
 | --- | --- |
-| `true` or `'throw'` | Validate covered raw responses and throw on drift. This is the default. |
+| `'throw'` | Validate covered raw responses and throw on drift. This is the default. |
 | `'passthrough'` | Validate, invoke `onRawSchemaValidationFailure`, and continue with the original payload. |
-| `false` | Skip covered raw-response validation entirely. |
+| `'off'` | Skip covered raw-response validation entirely. |
 
 `'passthrough'` helps applications remain observable while Trade Republic's
 private API changes. It does not make an incompatible response safe; downstream
@@ -934,22 +934,22 @@ const untilCancelled = await tr.orders.prepare({
 
 const customDate = await tr.orders.prepare({
   ...stopOrder,
-  expiry: { type: 'gtd', value: '2026-10-20' },
+  validity: { type: 'date', value: '2026-10-20' },
 });
 
 const customTimestamp = await tr.orders.prepare({
   ...stopOrder,
-  expiry: { type: 'gtd', value: new Date('2026-10-20T21:59:59Z') },
+  validity: { type: 'date', value: new Date('2026-10-20T21:59:59Z') },
 }); // Date, ISO timestamp, or Unix milliseconds; normalized to 2026-10-20
 ```
 
 `day` maps to `gfd`, `month` and `year` map to dated `gtd` expiries 30
-and 365 days from the reference date, and `goodTillCancelled` maps to `gtc`.
-`expiry` remains available when the exact broker expiry is already known. A
-`gtd` value accepts `YYYY-MM-DD`, an ISO timestamp, a JavaScript `Date`, or a
-Unix timestamp in milliseconds. Timestamps are converted to their UTC calendar
-date because the broker payload carries a date rather than a time of day. Do
-not provide both `validity` and `expiry`.
+and 365 days from the reference date, `endOfMonth` maps to `eom`, and
+`goodTillCancelled` maps to `gtc`.
+`validity: { type: 'date', value }` accepts `YYYY-MM-DD`, an ISO timestamp, a
+JavaScript `Date`, or a Unix timestamp in milliseconds. Timestamps are converted
+to their UTC calendar date because the broker payload carries a date rather
+than a time of day.
 
 `orderModes` and `orderExpiries` describe what one specific destination says it
 supports; they are not global capabilities. For example, a captured Lang &
@@ -1242,7 +1242,8 @@ const availableResolutions = await tr.market.availableCandleResolutions({
 
 console.log(series.resolutionMs, availableResolutions, candles);
 
-const feed = tr.market.liveFeed('US0378331005', {
+const feed = tr.market.subscribeLiveFeed({
+  assetId: 'US0378331005',
   exchangeId: 'LSX',
 });
 
@@ -1281,7 +1282,10 @@ console.log(MARKET_DATA_STREAM_TOPICS); // { bidAsk: 'tickerV3', orderBook: 'L2'
 // L2 uses the mapper's protobuf order-book stream. Xetra's exchange ID is
 // XETR. Venues such as LSX that do not publish L2 may return a protocol error
 // through the async iterator; close every stream in a finally block.
-const orderBook = tr.market.l2OrderBook('US0378331005', 'XETR');
+const orderBook = tr.market.subscribeL2OrderBook({
+  assetId: 'US0378331005',
+  exchangeId: 'XETR',
+});
 try {
   for await (const book of orderBook) {
     console.log(book.instrumentId, book.currency, book.bids, book.asks);
