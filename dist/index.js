@@ -4889,11 +4889,17 @@ var MarketApi = class {
   subscribeLiveFeed(options) {
     return this.resources.stream(liveFeedSpec, options);
   }
+  liveFeed(assetId, options = {}) {
+    return this.subscribeLiveFeed({ ...options, assetId });
+  }
   availableL2Books(assetId) {
     return this.resources.query(availableL2BooksSpec, { assetId });
   }
   subscribeL2OrderBook(options) {
     return this.resources.protobufStream(l2OrderBookSpec, options);
+  }
+  l2OrderBook(assetId, exchangeId, options = {}) {
+    return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
   }
   async resolveCandleSource(options) {
     const type = options.instrumentType;
@@ -5126,12 +5132,14 @@ var TradingApi = class {
   }
 };
 var WebApi = class {
-  http;
-  raw;
   constructor(runtime) {
+    this.runtime = runtime;
     this.http = runtime.http;
     this.raw = runtime.raw;
   }
+  runtime;
+  http;
+  raw;
   request(method, path, options = {}) {
     return this.http.request(method, path, options.body, options.query);
   }
@@ -5143,6 +5151,152 @@ var WebApi = class {
   }
   subscribe(payload, options = {}) {
     return toSubscription(this.raw.subscribeResource(payload, options));
+  }
+  timeline(after) {
+    return this.query({ type: "timelineActivityLog", ...after ? { after } : {} });
+  }
+  timelineActions() {
+    return this.query({ type: "timelineActionsV2" });
+  }
+  timelineDetail(id, kind = "timeline") {
+    const key = kind === "order" ? "orderId" : kind === "savingsPlan" ? "savingsPlanId" : "id";
+    return this.query({ type: "timelineDetailV2", [key]: id });
+  }
+  priceAlarms() {
+    return this.query({ type: "priceAlarms" });
+  }
+  priceAlarmNotifications() {
+    return this.query({ type: "priceAlarmNotifications" });
+  }
+  savingsPlans(secAccNo) {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "savingsPlans", secAccNo: accountNumber }));
+  }
+  portfolioChart(secAccNo, range = "1y", options = {}) {
+    return this.request("GET", "/api-gateway/portfolio-chart/v2/chart", {
+      query: { secAccNo, range, ...options }
+    });
+  }
+  news(isin) {
+    return this.query({ type: "neonNews", isin });
+  }
+  etfDetails(id) {
+    return this.query({ type: "etfDetails", id });
+  }
+  etfComposition(id, after) {
+    return this.query({ type: "etfComposition", id, after });
+  }
+  mutualFundDetails(id) {
+    return this.query({ type: "mutualFundDetails", id });
+  }
+  mutualFundComposition(id, after) {
+    return this.query({ type: "mutualFundComposition", id, after });
+  }
+  cryptoDetails(id) {
+    return this.query({ type: "cryptoDetails", id });
+  }
+  yieldToMaturity(id) {
+    return this.query({ type: "yieldToMaturity", id });
+  }
+  bondValuation(instrumentId, secAccNo) {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "bondValuationV2", instrumentId, secAccNo: accountNumber }));
+  }
+  fixedSavingsValuation(instrumentId, secAccNo) {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "fixedSavingsValuation", instrumentId, secAccNo: accountNumber }));
+  }
+  privateMarketsPositions(secAccNo) {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "privateMarketsPositions", secAccNo: accountNumber }));
+  }
+  tape(isin, exchangeId, unit = "EUR") {
+    const mapperUnit = unit === "PKT" ? "PTS" : unit === "PRZ" ? "PCT" : unit;
+    return this.subscribe({ type: "tape", isin, exchangeId, unit: mapperUnit });
+  }
+  tradeAggregateHistory(isin, exchangeId, resolution, from, until) {
+    return this.query({ type: "tradeAggregateHistory", isin, exchangeId, resolution, from, until });
+  }
+  priceForOrder(options) {
+    return this.query({ type: "priceForOrderV2", unit: "EUR", ...options });
+  }
+  availableSize(instrumentId, secAccNo) {
+    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "availableSize", parameters: { instrumentId }, secAccNo: accountNumber }));
+  }
+  taxWrapperAccountUtilization(secAccNo) {
+    return this.query({ type: "taxWrapperAccountUtilization", secAccNo });
+  }
+  userPreferences() {
+    return this.request("GET", "/api-gateway/pro-trading/api/v1/user-preferences");
+  }
+  exchangeDetails() {
+    return this.request("GET", "/api-gateway/instrument-universe/api/v1/exchanges-details", { query: { includeMaintenanceWindow: false } });
+  }
+  exchangeSchedule(exchange) {
+    return this.request("GET", `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`);
+  }
+  instrumentStatus(isin, exchange) {
+    return this.request("GET", `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`);
+  }
+  orderDestinations(isin, query = {}) {
+    return this.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, { query });
+  }
+  orderBookSnapshot(tradeId) {
+    return this.request("GET", `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/order-book-snapshot`);
+  }
+  tapeSnapshot(tradeId) {
+    return this.request("GET", `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/tape-snapshot`);
+  }
+  dailyPnl(items) {
+    return this.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { body: { items } });
+  }
+  documents() {
+    return this.request("GET", "/api/v1/documents/all");
+  }
+  personalDetails() {
+    return this.request("GET", "/api/v1/customer/personal-details");
+  }
+  relationships() {
+    return this.request("GET", "/api/v1/customer/relationships/detailed");
+  }
+  cardsHome() {
+    return this.request("GET", "/api/v1/card/cards/home");
+  }
+  accountSettings() {
+    return this.request("GET", "/api/v2/auth/account");
+  }
+  appUsageConsents() {
+    return this.request("GET", "/api/v1/customer/app-usage-data-consents");
+  }
+  paymentMethods() {
+    return this.request("GET", "/api/v2/payment/methods");
+  }
+  async iban() {
+    return normalizeIbanInfo(await this.rawIban());
+  }
+  rawIban() {
+    return this.request("GET", "/api/v1/customer/relationships/detailed");
+  }
+  taxInformation() {
+    return this.request("GET", "/api/v1/taxes/information");
+  }
+  exemptionOrder() {
+    return this.request("GET", "/api/v1/taxes/exemptionorders");
+  }
+  taxResidencies() {
+    return this.request("GET", "/api/v1/auth/account/change/taxresidencies");
+  }
+  taxResidencyCountries() {
+    return this.request("GET", "/api/v1/country/taxresidency");
+  }
+  watchlists() {
+    return this.request("GET", "/api-gateway/watchlists/api/v2/watchlists");
+  }
+  screeners() {
+    return this.request("GET", "/api-gateway/screeners/api/v2/screeners");
+  }
+  screenerOptions() {
+    return this.request("GET", "/api-gateway/screeners/api/v2/screeners/options");
+  }
+  async withSecAccNo(secAccNo, fn) {
+    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
+    return fn(accountNumber);
   }
 };
 

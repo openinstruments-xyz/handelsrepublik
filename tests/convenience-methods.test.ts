@@ -11,6 +11,64 @@ import { FakeSocket } from './fake-socket.js';
 import type { Session, WebSocketLike } from '../src/types.js';
 
 describe('public convenience methods', () => {
+  it('keeps the named web and market convenience surface', () => {
+    const client = TradeRepublicClient.create();
+    const webMethods = [
+      'timeline',
+      'timelineActions',
+      'timelineDetail',
+      'priceAlarms',
+      'priceAlarmNotifications',
+      'savingsPlans',
+      'portfolioChart',
+      'news',
+      'etfDetails',
+      'etfComposition',
+      'mutualFundDetails',
+      'mutualFundComposition',
+      'cryptoDetails',
+      'yieldToMaturity',
+      'bondValuation',
+      'fixedSavingsValuation',
+      'privateMarketsPositions',
+      'tape',
+      'tradeAggregateHistory',
+      'priceForOrder',
+      'availableSize',
+      'taxWrapperAccountUtilization',
+      'userPreferences',
+      'exchangeDetails',
+      'exchangeSchedule',
+      'instrumentStatus',
+      'orderDestinations',
+      'orderBookSnapshot',
+      'tapeSnapshot',
+      'dailyPnl',
+      'documents',
+      'personalDetails',
+      'relationships',
+      'cardsHome',
+      'accountSettings',
+      'appUsageConsents',
+      'paymentMethods',
+      'iban',
+      'rawIban',
+      'taxInformation',
+      'exemptionOrder',
+      'taxResidencies',
+      'taxResidencyCountries',
+      'watchlists',
+      'screeners',
+      'screenerOptions',
+    ] as const;
+
+    for (const method of webMethods) {
+      expect(typeof client.web[method]).toBe('function');
+    }
+    expect(typeof client.market.liveFeed).toBe('function');
+    expect(typeof client.market.l2OrderBook).toBe('function');
+  });
+
   it('treats stored sessions without device information as unrestorable', async () => {
     const client = TradeRepublicClient.create({
       sessionStore: {
@@ -187,7 +245,7 @@ describe('public convenience methods', () => {
     });
   });
 
-  it('subscribes to live feeds and L2 order books', async () => {
+  it('supports both live-feed entry points and the L2 convenience alias', async () => {
     const sockets: ManualSocket[] = [];
     const client = TradeRepublicClient.create({
       rawSchemaValidation: 'off',
@@ -217,12 +275,16 @@ describe('public convenience methods', () => {
     });
     direct.close();
 
-    const orderBook = client.market.subscribeL2OrderBook({
-      assetId: 'US3',
-      exchangeId: 'XETR',
-    });
+    const alias = client.market.liveFeed('US2', { exchangeId: 'XETR' });
     connect(sockets[1]);
-    expect(decodeMapperProtobufRequest(sockets[1]!.binarySent[0]!)).toEqual({
+    expect(subscriptionPayload(sockets[1]?.sent[1])).toMatchObject({
+      isin: 'US2', exchangeId: 'XETR', type: 'tickerV3',
+    });
+    alias.close();
+
+    const orderBook = client.market.l2OrderBook('US3', 'XETR');
+    connect(sockets[2]);
+    expect(decodeMapperProtobufRequest(sockets[2]!.binarySent[0]!)).toEqual({
       subscriptionId: 1, topic: 'L2', instrumentId: { isin: 'US3', exchangeId: 'XETR' },
     });
     const bookNext = orderBook[Symbol.asyncIterator]().next();

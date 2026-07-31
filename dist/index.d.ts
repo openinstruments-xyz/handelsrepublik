@@ -1245,8 +1245,10 @@ declare class MarketApi {
         maxCandlesPerRequest?: number;
     }): Promise<Candle[]>;
     subscribeLiveFeed(options: LiveFeedOptions): Subscription<LiveFeedEvent>;
+    liveFeed(assetId: string, options?: Omit<LiveFeedOptions, 'assetId'>): Subscription<LiveFeedEvent>;
     availableL2Books(assetId: string): Promise<L2Venue[]>;
     subscribeL2OrderBook(options: L2OrderBookOptions): Subscription<L2OrderBook>;
+    l2OrderBook(assetId: string, exchangeId: string, options?: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'>): Subscription<L2OrderBook>;
     private resolveCandleSource;
 }
 declare class TimelineApi {
@@ -1386,6 +1388,7 @@ declare class TradingApi {
     private resolveSecuritiesAccountNumber;
 }
 declare class WebApi {
+    private readonly runtime;
     private readonly http;
     private readonly raw;
     constructor(runtime: ClientRuntime);
@@ -1404,6 +1407,61 @@ declare class WebApi {
     }>;
     query<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
     subscribe(payload: Record<string, unknown>, options?: RawSubscriptionOptions): Subscription<unknown>;
+    timeline(after?: string): Promise<unknown>;
+    timelineActions(): Promise<unknown>;
+    timelineDetail(id: string, kind?: 'timeline' | 'order' | 'savingsPlan'): Promise<unknown>;
+    priceAlarms(): Promise<unknown>;
+    priceAlarmNotifications(): Promise<unknown>;
+    savingsPlans(secAccNo?: string): Promise<unknown>;
+    portfolioChart(secAccNo: string, range?: string, options?: {
+        currency?: string;
+        instrumentCategories?: string;
+    }): Promise<unknown>;
+    news(isin: string): Promise<unknown>;
+    etfDetails(id: string): Promise<unknown>;
+    etfComposition(id: string, after?: string): Promise<unknown>;
+    mutualFundDetails(id: string): Promise<unknown>;
+    mutualFundComposition(id: string, after?: string): Promise<unknown>;
+    cryptoDetails(id: string): Promise<unknown>;
+    yieldToMaturity(id: string): Promise<unknown>;
+    bondValuation(instrumentId: string, secAccNo?: string): Promise<unknown>;
+    fixedSavingsValuation(instrumentId: string, secAccNo?: string): Promise<unknown>;
+    privateMarketsPositions(secAccNo?: string): Promise<unknown>;
+    tape(isin: string, exchangeId: string, unit?: string): Subscription<unknown>;
+    tradeAggregateHistory(isin: string, exchangeId: string, resolution: number, from: number, until?: number): Promise<unknown>;
+    priceForOrder(options: {
+        isin: string;
+        exchangeId: string;
+        side: string;
+        unit?: string;
+    }): Promise<unknown>;
+    availableSize(instrumentId: string, secAccNo?: string): Promise<unknown>;
+    taxWrapperAccountUtilization(secAccNo: string): Promise<unknown>;
+    userPreferences(): Promise<unknown>;
+    exchangeDetails(): Promise<unknown>;
+    exchangeSchedule(exchange: string): Promise<unknown>;
+    instrumentStatus(isin: string, exchange: string): Promise<unknown>;
+    orderDestinations(isin: string, query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
+    orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot>;
+    tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot>;
+    dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]>;
+    documents(): Promise<unknown>;
+    personalDetails(): Promise<unknown>;
+    relationships(): Promise<unknown>;
+    cardsHome(): Promise<unknown>;
+    accountSettings(): Promise<unknown>;
+    appUsageConsents(): Promise<unknown>;
+    paymentMethods(): Promise<unknown>;
+    iban(): Promise<IbanInfo>;
+    rawIban(): Promise<unknown>;
+    taxInformation(): Promise<unknown>;
+    exemptionOrder(): Promise<unknown>;
+    taxResidencies(): Promise<unknown>;
+    taxResidencyCountries(): Promise<unknown>;
+    watchlists(): Promise<unknown>;
+    screeners(): Promise<unknown>;
+    screenerOptions(): Promise<unknown>;
+    private withSecAccNo;
 }
 
 declare function redactSession(session: Session): Record<string, unknown>;

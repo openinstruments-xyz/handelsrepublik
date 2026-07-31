@@ -1242,8 +1242,7 @@ const availableResolutions = await tr.market.availableCandleResolutions({
 
 console.log(series.resolutionMs, availableResolutions, candles);
 
-const feed = tr.market.subscribeLiveFeed({
-  assetId: 'US0378331005',
+const feed = tr.market.liveFeed('US0378331005', {
   exchangeId: 'LSX',
 });
 
@@ -1282,10 +1281,7 @@ console.log(MARKET_DATA_STREAM_TOPICS); // { bidAsk: 'tickerV3', orderBook: 'L2'
 // L2 uses the mapper's protobuf order-book stream. Xetra's exchange ID is
 // XETR. Venues such as LSX that do not publish L2 may return a protocol error
 // through the async iterator; close every stream in a finally block.
-const orderBook = tr.market.subscribeL2OrderBook({
-  assetId: 'US0378331005',
-  exchangeId: 'XETR',
-});
+const orderBook = tr.market.l2OrderBook('US0378331005', 'XETR');
 try {
   for await (const book of orderBook) {
     console.log(book.instrumentId, book.currency, book.bids, book.asks);
