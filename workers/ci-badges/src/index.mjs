@@ -3,6 +3,7 @@ const REPOSITORY = 'handelsrepublik';
 const BRANCH = 'main';
 const API_VERSION = '2026-03-10';
 const BADGE_TIME_ZONE = 'Europe/Berlin';
+const MAX_RESULT_BODY_BYTES = 256 * 1024;
 
 const WORKFLOWS = Object.freeze({
   quality: 'quality.yml',
@@ -15,6 +16,8 @@ const WORKFLOWS = Object.freeze({
   buy: 'execute-market-buy-on-live-account.yml',
   sell: 'execute-market-sell-on-live-account.yml',
 });
+
+const STORED_RESULT_WORKFLOWS = new Set(['account-market-mutations']);
 
 const EVENTS = Object.freeze({
   latest: undefined,
@@ -199,10 +202,20 @@ function parseRequestPath(pathname) {
   }
 
   return {
+    workflowAlias,
     workflow,
+    eventAlias,
     event: EVENTS[eventAlias],
     responseKind: runLinkMatch ? 'run-link' : 'badge',
   };
+}
+
+function parseIngestPath(pathname) {
+  const match = /^\/results\/([a-z-]+)$/.exec(pathname);
+  const workflowAlias = match?.[1];
+  return workflowAlias && STORED_RESULT_WORKFLOWS.has(workflowAlias)
+    ? workflowAlias
+    : undefined;
 }
 
 export function formatRunTitle(message, run) {
@@ -318,8 +331,177 @@ async function loadFailedChecks(runId, token) {
   return [...new Set(failures)];
 }
 
+function storedResultKey(workflowAlias, eventAlias) {
+  return `result:${workflowAlias}:${eventAlias}`;
+}
+
+async function loadStoredReport(selection, env) {
+  if (!env.CI_RESULTS) return undefined;
+  const value = await env.CI_RESULTS.get(
+    storedResultKey(selection.workflowAlias, selection.eventAlias),
+    'json',
+  );
+  return value ? validateStoredReport(value, selection.workflowAlias) : undefined;
+}
+
+function storedReportAsRun(report) {
+  return {
+    id: report.runId,
+    html_url: report.runUrl,
+    status: 'completed',
+    conclusion: report.conclusion,
+    run_started_at: report.createdAt,
+  };
+}
+
+function validateStoredReport(value, expectedWorkflow) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('The stored CI result must be an object.');
+  }
+  const result = value;
+  if (
+    result.schemaVersion !== 1
+    || result.workflow !== expectedWorkflow
+    || !Number.isSafeInteger(result.runId)
+    || result.runId <= 0
+    || !Number.isSafeInteger(result.runAttempt)
+    || result.runAttempt <= 0
+    || typeof result.runUrl !== 'string'
+    || !result.runUrl.startsWith('https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/')
+    || !['push', 'schedule', 'workflow_dispatch'].includes(result.event)
+    || typeof result.sha !== 'string'
+    || result.sha.length < 7
+    || result.sha.length > 64
+    || !Number.isFinite(Date.parse(result.createdAt))
+    || !['success', 'failure'].includes(result.conclusion)
+    || !Array.isArray(result.results)
+    || result.results.length > 500
+  ) {
+    throw new TypeError('The stored CI result fields are invalid.');
+  }
+  result.results.forEach(validateCaseResult);
+  const expectedConclusion = result.results.length > 0
+    && result.results.every((caseResult) => caseResult.status !== 'failed')
+    ? 'success'
+    : 'failure';
+  if (result.conclusion !== expectedConclusion) {
+    throw new TypeError('The stored CI conclusion does not match its case results.');
+  }
+  return result;
+}
+
+function validateCaseResult(result) {
+  if (
+    !result
+    || typeof result !== 'object'
+    || Array.isArray(result)
+    || typeof result.id !== 'string'
+    || result.id.length < 1
+    || result.id.length > 160
+    || typeof result.name !== 'string'
+    || result.name.length < 1
+    || result.name.length > 160
+    || !['passed', 'failed', 'skipped'].includes(result.status)
+    || !Number.isFinite(result.durationMs)
+    || result.durationMs < 0
+    || typeof result.note !== 'string'
+    || result.note.length > 2_000
+  ) {
+    throw new TypeError('A stored CI case result is invalid.');
+  }
+}
+
+async function hasValidBearerToken(request, expectedToken) {
+  if (!expectedToken) return false;
+  const authorization = request.headers.get('authorization') ?? '';
+  const suppliedToken = authorization.startsWith('Bearer ')
+    ? authorization.slice('Bearer '.length)
+    : '';
+  const encoder = new TextEncoder();
+  const [suppliedDigest, expectedDigest] = await Promise.all([
+    crypto.subtle.digest('SHA-256', encoder.encode(suppliedToken)),
+    crypto.subtle.digest('SHA-256', encoder.encode(expectedToken)),
+  ]);
+  if (typeof crypto.subtle.timingSafeEqual === 'function') {
+    return crypto.subtle.timingSafeEqual(suppliedDigest, expectedDigest);
+  }
+  const supplied = new Uint8Array(suppliedDigest);
+  const expected = new Uint8Array(expectedDigest);
+  let difference = supplied.length ^ expected.length;
+  for (let index = 0; index < Math.min(supplied.length, expected.length); index += 1) {
+    difference |= supplied[index] ^ expected[index];
+  }
+  return difference === 0;
+}
+
+async function readResultPayload(request, workflowAlias) {
+  if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
+    throw new TypeError('Content-Type must be application/json.');
+  }
+  const declaredLength = Number(request.headers.get('content-length') ?? 0);
+  if (declaredLength > MAX_RESULT_BODY_BYTES) {
+    throw new RangeError('The CI result payload is too large.');
+  }
+  const source = await request.text();
+  if (new TextEncoder().encode(source).byteLength > MAX_RESULT_BODY_BYTES) {
+    throw new RangeError('The CI result payload is too large.');
+  }
+  return validateStoredReport(JSON.parse(source), workflowAlias);
+}
+
+function isNewerReport(incoming, current) {
+  return !current
+    || incoming.runId > current.runId
+    || (incoming.runId === current.runId && incoming.runAttempt > current.runAttempt);
+}
+
+async function putReportIfNewer(env, key, report) {
+  const currentValue = await env.CI_RESULTS.get(key, 'json');
+  const current = currentValue ? validateStoredReport(currentValue, report.workflow) : undefined;
+  if (!isNewerReport(report, current)) return false;
+  await env.CI_RESULTS.put(key, JSON.stringify(report));
+  return true;
+}
+
+async function ingestResults(request, env, workflowAlias) {
+  if (!env.CI_RESULTS || !env.CI_RESULTS_INGEST_TOKEN) {
+    return new Response('Service unavailable', { status: 503 });
+  }
+  if (!await hasValidBearerToken(request, env.CI_RESULTS_INGEST_TOKEN)) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+
+  let report;
+  try {
+    report = await readResultPayload(request, workflowAlias);
+  } catch (error) {
+    const status = error instanceof RangeError ? 413 : 400;
+    return new Response(error instanceof Error ? error.message : 'Invalid result payload.', { status });
+  }
+
+  const keys = [storedResultKey(workflowAlias, 'latest')];
+  if (report.event === 'schedule') keys.push(storedResultKey(workflowAlias, 'scheduled'));
+  if (report.event === 'workflow_dispatch') keys.push(storedResultKey(workflowAlias, 'manual'));
+  const writes = [];
+  for (const key of keys) {
+    writes.push(await putReportIfNewer(env, key, report));
+  }
+  return Response.json(
+    { stored: writes.some(Boolean), runId: report.runId },
+    { status: writes.some(Boolean) ? 201 : 202 },
+  );
+}
+
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+    const ingestWorkflow = request.method === 'POST'
+      ? parseIngestPath(url.pathname)
+      : undefined;
+    if (ingestWorkflow) {
+      return ingestResults(request, env, ingestWorkflow);
+    }
+
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('Method not allowed', {
         status: 405,
@@ -327,9 +509,35 @@ export default {
       });
     }
 
-    const selection = parseRequestPath(new URL(request.url).pathname);
+    const selection = parseRequestPath(url.pathname);
     if (!selection) {
       return new Response('Not found', { status: 404 });
+    }
+
+    if (STORED_RESULT_WORKFLOWS.has(selection.workflowAlias)) {
+      try {
+        const report = await loadStoredReport(selection, env);
+        const run = report ? storedReportAsRun(report) : undefined;
+        if (selection.responseKind === 'run-link') {
+          return runLinkResponse(run, request.method);
+        }
+        const state = badgeState(run);
+        const failures = report?.results
+          .filter((result) => result.status === 'failed')
+          .map((result) => result.name) ?? [];
+        const response = svgResponse(
+          state.message,
+          state.color,
+          failures,
+          200,
+          formatRunTitle(state.message, run),
+        );
+        return request.method === 'HEAD'
+          ? new Response(null, response)
+          : response;
+      } catch {
+        return svgResponse('unknown', COLORS.unknown, [], 502);
+      }
     }
 
     if (!env.GH_TOKEN) {

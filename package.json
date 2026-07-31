@@ -28,6 +28,7 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "test:ci:record": "node --import tsx scripts/ci-test-report.ts run",
     "test:ci:summary": "node --import tsx scripts/ci-test-report.ts summary",
+    "test:ci:publish": "node --import tsx scripts/ci-publish-results.ts",
     "test:integration": "npm run test:integration:read",
     "test:integration:consolidated": "node --import tsx scripts/ci-live-validation.ts",
     "test:integration:read": "node --import tsx --test tests/integration/read-live.test.ts",

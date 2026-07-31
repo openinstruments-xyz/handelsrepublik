@@ -2,7 +2,18 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "handelsrepublik-ci-badges",
   "main": "src/index.mjs",
-  "compatibility_date": "2026-07-23",
+  "compatibility_date": "2026-07-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "kv_namespaces": [
+    {
+      "binding": "CI_RESULTS",
+      "id": "c011e5e21ac64929a0c7e1afc18d86aa"
+    }
+  ],
   "workers_dev": true,
-  "preview_urls": false
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
 }
