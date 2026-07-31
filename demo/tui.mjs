@@ -954,7 +954,7 @@ async function requestFreshQr(reason) {
         state.login.challenge = update;
         state.login.qrPayload = payload;
         state.login.qrText = renderTerminalQr(payload);
-        state.login.expiresAt = update.challengeExpiresAt ?? details.expiresAt ?? update.expiresAt;
+        state.login.expiresAt = update.challengeExpiresAt ?? details.expiresAt;
         state.login.refreshAt = update.qrCodeTokenExpiresAt;
         const countdownTargetMs = parseDateMs(state.login.refreshAt) || parseDateMs(state.login.expiresAt);
         state.login.countdown = countdownTargetMs ? formatCountdown(countdownTargetMs) : '';
@@ -2168,7 +2168,6 @@ async function resolveQrChallengeDetails(client, challenge) {
     deepFindString(challenge.raw, 'challengeExpiresAt'),
     deepFindString(challenge, 'qrCodeTokenExpiresAt'),
     deepFindString(challenge.raw, 'qrCodeTokenExpiresAt'),
-    challenge.expiresAt,
   );
   const inlineTokenExpiresAt = firstString(
     deepFindString(challenge, 'qrCodeTokenExpiresAt'),

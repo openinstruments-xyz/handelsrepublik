@@ -181,7 +181,7 @@ async function loginQr(options = {}) {
             ? '\nScan this QR code with the Trade Republic app:'
             : '\nQR token rotated; use the newest code:');
         await writeConsoleLine(renderTerminalQr(payload));
-        const challengeExpiry = update.challengeExpiresAt ?? details.expiresAt ?? update.expiresAt;
+        const challengeExpiry = update.challengeExpiresAt ?? details.expiresAt;
         if (challengeExpiry && challengeExpiry !== displayedChallengeExpiry) {
           displayedChallengeExpiry = challengeExpiry;
           stopCountdown();
@@ -263,7 +263,7 @@ async function loginProfile() {
 
 async function resolveQrChallengeDetails(challenge) {
   const inlinePayload = challenge.qrCode ?? challenge.deepLink;
-  const inlineExpiresAt = firstString(challenge.challengeExpiresAt, challenge.expiresAt, challenge.qrCodeTokenExpiresAt);
+  const inlineExpiresAt = firstString(challenge.challengeExpiresAt, challenge.qrCodeTokenExpiresAt);
   if (inlinePayload) {
     return {
       payload: inlinePayload,
