@@ -34,7 +34,7 @@ describe('live integration case manifest', () => {
 
   it('runs compatible live blocks concurrently behind one session refresh', () => {
     const workflow = readFileSync(
-      join(process.cwd(), '.github', 'workflows', 'general-read-only-validation.yml'),
+      join(process.cwd(), '.github', 'workflows', 'validate-account-market-data-and-reversible-mutations.yml'),
       'utf8',
     );
     const testSource = readFileSync(

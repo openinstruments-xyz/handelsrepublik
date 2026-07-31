@@ -33,9 +33,9 @@ That endpoint redirects to the exact latest run for the selected category.
 `scheduled` selects the latest `schedule` run, while `manual` selects the latest
 `workflow_dispatch` run.
 
-The fixed workflow aliases are `quality`, `unit`, `reads`, `destinations`,
-`venue`, `mutations`, `limit-rejection`, `market-rejection`, `lifecycle`,
-`buy`, and `sell`.
+The fixed workflow aliases are `quality`, `unit`, `account-market-mutations`,
+`destinations`, `limit-rejection`, `market-rejection`, `lifecycle`, `buy`, and
+`sell`.
 
 Changes under `workers/ci-badges/` deploy automatically after merging to
 `main`. Configure the repository secrets `CLOUDFLARE_API_TOKEN` and

@@ -7,10 +7,8 @@ const BADGE_TIME_ZONE = 'Europe/Berlin';
 const WORKFLOWS = Object.freeze({
   quality: 'quality.yml',
   unit: 'unit-tests.yml',
-  reads: 'general-read-only-validation.yml',
+  'account-market-mutations': 'validate-account-market-data-and-reversible-mutations.yml',
   destinations: 'validate-order-destinations-during-closed-market-hours.yml',
-  venue: 'general-read-only-validation.yml',
-  mutations: 'general-read-only-validation.yml',
   'limit-rejection': 'validate-closed-venue-limit-order-rejection.yml',
   'market-rejection': 'validate-closed-venue-market-order-rejection.yml',
   lifecycle: 'validate-open-venue-limit-order-lifecycle.yml',
