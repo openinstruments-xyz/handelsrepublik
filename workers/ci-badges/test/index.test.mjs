@@ -3,6 +3,58 @@ import test from 'node:test';
 
 import worker, { formatRunTitle, renderBadge } from '../src/index.mjs';
 
+class MemoryKv {
+  values = new Map();
+
+  async get(key, type) {
+    const value = this.values.get(key);
+    return type === 'json' && value !== undefined ? JSON.parse(value) : value ?? null;
+  }
+
+  async put(key, value) {
+    this.values.set(key, value);
+  }
+}
+
+const resultToken = 'test-ingest-token';
+
+function resultReport(overrides = {}) {
+  return {
+    schemaVersion: 1,
+    workflow: 'account-market-mutations',
+    runId: 123,
+    runAttempt: 1,
+    runUrl: 'https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/123',
+    event: 'schedule',
+    sha: 'abcdef1234567890',
+    createdAt: '2026-07-24T21:45:00Z',
+    conclusion: 'success',
+    results: [{
+      id: 'account.current',
+      name: 'account.current',
+      status: 'passed',
+      durationMs: 42,
+      note: 'validated',
+    }],
+    ...overrides,
+  };
+}
+
+async function ingestResult(kv, report, token = resultToken) {
+  return worker.fetch(
+    new Request('https://example.com/results/account-market-mutations', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(report),
+    }),
+    { CI_RESULTS: kv, CI_RESULTS_INGEST_TOKEN: resultToken },
+    { waitUntil() {} },
+  );
+}
+
 test('renders a compact status-only SVG', () => {
   const svg = renderBadge('passing', '#4c1');
 
@@ -121,7 +173,7 @@ test('loads failed steps only for a failing run', async () => {
   };
   try {
     const response = await worker.fetch(
-      new Request('https://example.com/account-market-mutations/scheduled.svg'),
+      new Request('https://example.com/destinations/scheduled.svg'),
       { GH_TOKEN: 'test-token' },
       { waitUntil() {} },
     );
@@ -138,69 +190,116 @@ test('loads failed steps only for a failing run', async () => {
   }
 });
 
+test('stores structured results and renders exact failed case names', async () => {
+  const kv = new MemoryKv();
+  const report = resultReport({
+    conclusion: 'failure',
+    results: [
+      {
+        id: 'account.current',
+        name: 'account.current',
+        status: 'passed',
+        durationMs: 42,
+        note: 'validated',
+      },
+      {
+        id: 'mutations.price-alert',
+        name: 'mutations.price-alert',
+        status: 'failed',
+        durationMs: 84,
+        note: 'failed',
+      },
+    ],
+  });
+
+  const ingest = await ingestResult(kv, report);
+  assert.equal(ingest.status, 201);
+
+  const response = await worker.fetch(
+    new Request('https://example.com/account-market-mutations/latest.svg'),
+    { CI_RESULTS: kv },
+    { waitUntil() {} },
+  );
+  const svg = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(svg, />failing<\/text>/);
+  assert.match(svg, /\u00d7 mutations.price-alert/);
+  assert.equal(
+    kv.values.get('result:account-market-mutations:latest'),
+    kv.values.get('result:account-market-mutations:scheduled'),
+  );
+});
+
+test('rejects unauthorized and stale result ingestion', async () => {
+  const kv = new MemoryKv();
+  assert.equal(await ingestResult(kv, resultReport(), 'wrong-token').then((response) => response.status), 401);
+  assert.equal(await ingestResult(kv, resultReport({ runId: 200 })).then((response) => response.status), 201);
+  assert.equal(await ingestResult(kv, resultReport({ runId: 199 })).then((response) => response.status), 202);
+
+  const stored = JSON.parse(kv.values.get('result:account-market-mutations:latest'));
+  assert.equal(stored.runId, 200);
+});
+
+test('rejects a conclusion that disagrees with its case results', async () => {
+  const kv = new MemoryKv();
+  const response = await ingestResult(kv, resultReport({
+    conclusion: 'success',
+    results: [{
+      id: 'mutations.price-alert',
+      name: 'mutations.price-alert',
+      status: 'failed',
+      durationMs: 12,
+      note: 'broker rejected mutation',
+    }],
+  }));
+
+  assert.equal(response.status, 400);
+  assert.equal(kv.values.size, 0);
+});
+
 test('redirects each badge link to the run selected for its event', async () => {
-  const originalFetch = globalThis.fetch;
+  const kv = new MemoryKv();
   const cases = [
-    { alias: 'latest', expectedEvent: undefined, runId: 101 },
-    { alias: 'scheduled', expectedEvent: 'schedule', runId: 102 },
-    { alias: 'manual', expectedEvent: 'workflow_dispatch', runId: 103 },
+    { alias: 'latest', event: 'push', runId: 101 },
+    { alias: 'scheduled', event: 'schedule', runId: 102 },
+    { alias: 'manual', event: 'workflow_dispatch', runId: 103 },
   ];
 
-  try {
-    for (const { alias, expectedEvent, runId } of cases) {
-      globalThis.fetch = async (url) => {
-        const endpoint = new URL(url);
-        assert.equal(endpoint.searchParams.get('event') ?? undefined, expectedEvent);
-        return Response.json({
-          workflow_runs: [{
-            id: runId,
-            html_url: `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
-          }],
-        });
-      };
+  for (const { alias, event, runId } of cases) {
+    const report = resultReport({
+      runId,
+      event,
+      runUrl: `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
+    });
+    kv.values.set(`result:account-market-mutations:${alias}`, JSON.stringify(report));
+    const response = await worker.fetch(
+      new Request(`https://example.com/account-market-mutations/${alias}/run`),
+      { CI_RESULTS: kv },
+      { waitUntil() {} },
+    );
 
-      const response = await worker.fetch(
-        new Request(`https://example.com/account-market-mutations/${alias}/run`),
-        { GH_TOKEN: 'test-token' },
-        { waitUntil() {} },
-      );
-
-      assert.equal(response.status, 302);
-      assert.equal(
-        response.headers.get('location'),
-        `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
-      );
-      assert.equal(response.headers.get('cache-control'), 'no-store');
-    }
-  } finally {
-    globalThis.fetch = originalFetch;
+    assert.equal(response.status, 302);
+    assert.equal(
+      response.headers.get('location'),
+      `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
+    );
+    assert.equal(response.headers.get('cache-control'), 'no-store');
   }
 });
 
 test('keeps the Berlin run time out of the visible badge label', async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({
-    workflow_runs: [{
-      id: 123,
-      status: 'completed',
-      conclusion: 'success',
-      run_started_at: '2026-07-24T21:45:00Z',
-    }],
-  });
+  const kv = new MemoryKv();
+  kv.values.set('result:account-market-mutations:latest', JSON.stringify(resultReport()));
+  const response = await worker.fetch(
+    new Request('https://example.com/account-market-mutations/latest.svg'),
+    { CI_RESULTS: kv },
+    { waitUntil() {} },
+  );
+  const svg = await response.text();
 
-  try {
-    const response = await worker.fetch(
-      new Request('https://example.com/account-market-mutations/latest.svg'),
-      { GH_TOKEN: 'test-token' },
-      { waitUntil() {} },
-    );
-    const svg = await response.text();
-
-    assert.match(svg, /<title>passing - 24\/7 23:45<\/title>/);
-    assert.match(svg, /aria-label="passing - 24\/7 23:45"/);
-    assert.match(svg, />passing<\/text>/);
-    assert.doesNotMatch(svg, />passing - 24\/7 23:45<\/text>/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  assert.match(svg, /<title>passing - 24\/7 23:45<\/title>/);
+  assert.match(svg, /aria-label="passing - 24\/7 23:45"/);
+  assert.match(svg, />passing<\/text>/);
+  assert.doesNotMatch(svg, />passing - 24\/7 23:45<\/text>/);
 });

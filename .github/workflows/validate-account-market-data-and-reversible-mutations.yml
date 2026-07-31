@@ -56,6 +56,14 @@ jobs:
       - name: remove materialized session
         if: always()
         run: rm -f "$TR_SESSION_FILE"
+      - name: publish structured badge results
+        if: ${{ always() && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          CI_BADGE_RESULTS_URL: https://handelsrepublik-ci-badges.99o.workers.dev/results/account-market-mutations
+          CI_BADGE_INGEST_TOKEN: ${{ secrets.CI_BADGE_INGEST_TOKEN }}
+          CI_BADGE_WORKFLOW: account-market-mutations
+        run: npm run test:ci:publish
       - name: publish test result table
         if: always()
         run: npm run test:ci:summary -- "Account, market data, and reversible mutation results"
