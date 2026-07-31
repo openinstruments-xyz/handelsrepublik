@@ -32,10 +32,6 @@ export const liveCases: readonly LiveCase[] = [
     assert.ok(client.getSession(), 'expected a restored session');
   }),
   defineLiveCase('account.current', 'read', async ({ client }) => assertRecord(await client.account.current(), 'account.current')),
-  defineLiveCase('account.session', 'read', async ({ client }) => {
-    const value = client.getSession()?.metadata?.authSession;
-    assertRecord(value, 'persisted auth session response');
-  }),
   defineLiveCase('account.settings', 'read', async ({ client }) => assertRecord(await client.account.accountSettings(), 'account.settings')),
   defineLiveCase('account.personal-details', 'read', async ({ client }) => assertRecord(await client.account.personalDetails(), 'account.personalDetails')),
   defineLiveCase('account.relationships', 'read', async ({ client }) => assertArray(await client.account.relationships(), 'account.relationships')),

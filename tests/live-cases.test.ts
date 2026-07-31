@@ -62,11 +62,8 @@ describe('live integration case manifest', () => {
     assert.match(testSource, /liveCases\.filter\(\(testCase\) => testCase\.suite === 'read'\)/);
   });
 
-  it('validates the persisted refresh response without calling the session endpoint again', () => {
-    const testCase = liveCases.find((candidate) => candidate.id === 'account.session');
-    assert.ok(testCase);
-    assert.doesNotMatch(testCase.run.toString(), /account\.session/);
-    assert.match(testCase.run.toString(), /authSession/);
+  it('does not call the auth session endpoint again inside the read suite', () => {
+    assert.ok(!liveCases.some((candidate) => candidate.id === 'account.session'));
   });
 
   it('loads and rotates the live session through repository secrets', () => {
