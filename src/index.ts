@@ -96,7 +96,6 @@ export type {
   OrderCancellationOutcomeUnknown,
   OrderCancellationSucceeded,
   CreateOrderOptions,
-  OrderExpiry,
   OrderFeeItem,
   OrderMode,
   OrderMutationError,

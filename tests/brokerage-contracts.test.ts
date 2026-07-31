@@ -25,17 +25,15 @@ describe('captured brokerage behavior', () => {
       validity: { type: 'year', referenceDate: '2026-07-16' },
     });
     const goodTillCancelled = await client.orders.prepare({ ...base, validity: 'goodTillCancelled' });
+    const endOfMonth = await client.orders.prepare({ ...base, validity: 'endOfMonth' });
 
     expect(month.parameters.expiry).toEqual({ type: 'gtd', value: '2026-08-15' });
     expect(year.parameters.expiry).toEqual({ type: 'gtd', value: '2027-07-16' });
     expect(goodTillCancelled.parameters.expiry).toEqual({ type: 'gtc' });
-    await assert.rejects(
-      client.orders.prepare({ ...base, validity: 'month', expiry: { type: 'gfd' } }),
-      /either validity or expiry/i,
-    );
+    expect(endOfMonth.parameters.expiry).toEqual({ type: 'eom' });
   });
 
-  it('normalizes custom expiry dates and timestamps to broker gtd dates', async () => {
+  it('normalizes explicit validity dates and timestamps to broker gtd dates', async () => {
     const client = TradeRepublicClient.create();
     const base = {
       instrumentId: 'DE0007164600',
@@ -47,26 +45,26 @@ describe('captured brokerage behavior', () => {
       secAccNo: '0000000000',
     };
 
-    const date = await client.orders.prepare({ ...base, expiry: { type: 'gtd', value: '2026-10-20' } });
+    const date = await client.orders.prepare({ ...base, validity: { type: 'date', value: '2026-10-20' } });
     const isoTimestamp = await client.orders.prepare({
       ...base,
-      expiry: { type: 'gtd', value: '2026-10-20T21:59:59.000Z' },
+      validity: { type: 'date', value: '2026-10-20T21:59:59.000Z' },
     });
     const dateObject = await client.orders.prepare({
       ...base,
-      expiry: { type: 'gtd', value: new Date('2026-10-20T21:59:59.000Z') },
+      validity: { type: 'date', value: new Date('2026-10-20T21:59:59.000Z') },
     });
     const unixMilliseconds = await client.orders.prepare({
       ...base,
-      expiry: { type: 'gtd', value: Date.parse('2026-10-20T21:59:59.000Z') },
+      validity: { type: 'date', value: Date.parse('2026-10-20T21:59:59.000Z') },
     });
 
     for (const order of [date, isoTimestamp, dateObject, unixMilliseconds]) {
       expect(order.parameters.expiry).toEqual({ type: 'gtd', value: '2026-10-20' });
     }
     await assert.rejects(
-      client.orders.prepare({ ...base, expiry: { type: 'gtd', value: '2026-02-30' } }),
-      /gtd expiry requires/i,
+      client.orders.prepare({ ...base, validity: { type: 'date', value: '2026-02-30' } }),
+      /date validity requires/i,
     );
   });
 

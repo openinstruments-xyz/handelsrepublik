@@ -153,7 +153,10 @@ describe('market abstractions', () => {
       },
     });
 
-    const subscription = client.market.l2OrderBook('US1', 'LSX');
+    const subscription = client.market.subscribeL2OrderBook({
+      assetId: 'US1',
+      exchangeId: 'LSX',
+    });
     await assert.rejects(subscription[Symbol.asyncIterator]().next(), {
       name: 'TradeRepublicProtocolError',
       message: 'Trade Republic protobuf resource failed (5): No L2 market data is available for US1.LSX',

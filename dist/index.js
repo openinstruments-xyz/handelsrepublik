@@ -1357,7 +1357,6 @@ function normalizeChallenge(raw, serverTime) {
     deepLink: optionalString2(record2.deepLink, record2.loginUrl, record2.url),
     challengeExpiresAt,
     qrCodeTokenExpiresAt,
-    expiresAt: optionalString2(record2.expiresAt, challengeExpiresAt, qrCodeTokenExpiresAt, record2.expiration),
     serverTime: serverTime ?? void 0,
     raw
   };
@@ -1370,7 +1369,6 @@ function initialChallenge(challenge) {
     deepLink: challenge.deepLink,
     challengeExpiresAt: challenge.challengeExpiresAt,
     qrCodeTokenExpiresAt: challenge.qrCodeTokenExpiresAt,
-    expiresAt: challenge.expiresAt,
     serverTime: challenge.serverTime,
     raw: challenge.raw ?? challenge
   };
@@ -1385,7 +1383,6 @@ function mergeChallenges(previous, next) {
     deepLink: hasFreshPresentation ? next.deepLink : previous.deepLink,
     challengeExpiresAt: next.challengeExpiresAt ?? previous.challengeExpiresAt,
     qrCodeTokenExpiresAt: next.qrCodeTokenExpiresAt ?? previous.qrCodeTokenExpiresAt,
-    expiresAt: next.expiresAt ?? previous.expiresAt,
     serverTime: next.serverTime ?? previous.serverTime
   };
 }
@@ -2426,25 +2423,12 @@ var DEFAULT_ENDPOINTS = {
   "auth.loginProcess": "/api/v2/auth/web/login/processes/{processId}",
   "auth.account": "/api/v2/auth/account",
   "auth.session": "/api/v1/auth/web/session",
-  "assets.search": "/api/v2/search/instruments",
-  "assets.detail": "/api/v2/instruments/{assetId}",
-  "assets.all": "/api/v2/instruments",
-  "derivatives.search": "/api/v2/derivatives",
-  "derivatives.forUnderlying": "/api/v2/instruments/{underlyingId}/derivatives",
-  "derivatives.detail": "/api/v2/derivatives/{derivativeId}",
   "orders.all": "/web-trading-gateway/api/customer/v1/orders",
   "orders.mutualFunds": "/api-gateway/mutual-funds/api/v1/orders",
   "orders.privateMarkets": "/api/v1/private-markets/orders/all",
-  "portfolio.current": "/api/v2/portfolio",
-  "portfolio.cash": "/api/v2/portfolio/cash",
-  "portfolio.markToMarket": "/api/v2/portfolio/mark-to-market",
   "market.subscriptions": "/api-gateway/subscriptions/api/v1/subscriptions",
   "market.entitlements": "/api-gateway/subscriptions/api/v1/entitlements/topics/{topic}",
-  "market.candles": "/api/v2/market-data/candles",
-  "market.bondCandles": "/api-gateway/quotes-api/v1/instruments/{assetId}.{exchangeId}/ytm/aggregateHistory",
-  "market.liveFeed": "/api/v2/market-data/live-feed",
-  "market.availableL2Books": "/api/v2/market-data/l2/venues",
-  "market.l2OrderBook": "/api/v2/market-data/l2/orderbook"
+  "market.bondCandles": "/api-gateway/quotes-api/v1/instruments/{assetId}.{exchangeId}/ytm/aggregateHistory"
 };
 var EndpointResolver = class {
   endpoints;
@@ -4515,7 +4499,7 @@ function normalizeCreateOrderOptions(options) {
   if (options.mode === "market" && (options.limit !== void 0 || options.stop !== void 0)) {
     throw new TypeError("Market orders must not include limit or stop prices.");
   }
-  const expiry = normalizeOrderValidity(options.validity, options.expiry);
+  const expiry = normalizeOrderValidity(options.validity);
   const parameters = {
     instrumentId,
     exchangeId,
@@ -4535,41 +4519,29 @@ function normalizeCreateOrderOptions(options) {
   if (options.acceptedTerms?.length) parameters.acceptedTerms = options.acceptedTerms;
   return { parameters };
 }
-function normalizeOrderExpiry(expiry) {
-  if (!expiry) return { type: "gfd" };
-  if (expiry.type !== "gfd" && expiry.type !== "gtc" && expiry.type !== "eom" && expiry.type !== "gtd") {
-    throw new TypeError('expiry.type must be "gfd", "gtc", "eom", or "gtd".');
-  }
-  if (expiry.type !== "gtd") return { type: expiry.type };
-  return { type: expiry.type, value: normalizeOrderExpiryDate(expiry.value) };
-}
-function normalizeOrderExpiryDate(value) {
+function normalizeOrderValidityDate(value) {
   if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const date2 = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
     if (!Number.isNaN(date2.getTime()) && date2.toISOString().slice(0, 10) === value) return value;
   }
   if (typeof value === "string" && !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
-    throw new TypeError("A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
+    throw new TypeError("A date validity requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
   }
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError("A gtd expiry requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
+    throw new TypeError("A date validity requires YYYY-MM-DD, an ISO timestamp, a Date, or a Unix timestamp in milliseconds.");
   }
   return date.toISOString().slice(0, 10);
 }
-function normalizeOrderValidity(validity, expiry) {
-  if (validity !== void 0 && expiry !== void 0) {
-    throw new TypeError("Provide either validity or expiry, not both.");
+function normalizeOrderValidity(validity) {
+  if (validity === void 0 || validity === "day") return { type: "gfd" };
+  if (validity === "goodTillCancelled") return { type: "gtc" };
+  if (validity === "endOfMonth") return { type: "eom" };
+  if (validity.type === "date") {
+    return { type: "gtd", value: normalizeOrderValidityDate(validity.value) };
   }
-  if (validity === void 0) return normalizeOrderExpiry(expiry);
-  const preset = typeof validity === "string" ? validity : validity.type;
-  if (preset === "day") return { type: "gfd" };
-  if (preset === "goodTillCancelled") return { type: "gtc" };
-  if (preset !== "month" && preset !== "year") {
-    throw new TypeError('validity must be "day", "month", "year", or "goodTillCancelled".');
-  }
-  const referenceDate = typeof validity === "string" ? /* @__PURE__ */ new Date() : parseValidityReferenceDate(validity.referenceDate);
-  referenceDate.setUTCDate(referenceDate.getUTCDate() + (preset === "month" ? 30 : 365));
+  const referenceDate = parseValidityReferenceDate(validity.referenceDate);
+  referenceDate.setUTCDate(referenceDate.getUTCDate() + (validity.type === "month" ? 30 : 365));
   return { type: "gtd", value: referenceDate.toISOString().slice(0, 10) };
 }
 function parseValidityReferenceDate(value) {
@@ -4861,8 +4833,8 @@ async function validated(validateRaw, schemaName, value) {
 function skipRawSchemaValidation(_schemaName, value) {
   return value;
 }
-function createRawSchemaValidator(mode = true, onFailure) {
-  if (mode === false) return skipRawSchemaValidation;
+function createRawSchemaValidator(mode = "throw", onFailure) {
+  if (mode === "off") return skipRawSchemaValidation;
   if (mode === "passthrough") {
     return (schemaName, value) => {
       try {
@@ -4917,17 +4889,11 @@ var MarketApi = class {
   subscribeLiveFeed(options) {
     return this.resources.stream(liveFeedSpec, options);
   }
-  liveFeed(assetId, options = {}) {
-    return this.subscribeLiveFeed({ ...options, assetId });
-  }
   availableL2Books(assetId) {
     return this.resources.query(availableL2BooksSpec, { assetId });
   }
   subscribeL2OrderBook(options) {
     return this.resources.protobufStream(l2OrderBookSpec, options);
-  }
-  l2OrderBook(assetId, exchangeId, options = {}) {
-    return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
   }
   async resolveCandleSource(options) {
     const type = options.instrumentType;
@@ -5160,14 +5126,12 @@ var TradingApi = class {
   }
 };
 var WebApi = class {
+  http;
+  raw;
   constructor(runtime) {
-    this.runtime = runtime;
     this.http = runtime.http;
     this.raw = runtime.raw;
   }
-  runtime;
-  http;
-  raw;
   request(method, path, options = {}) {
     return this.http.request(method, path, options.body, options.query);
   }
@@ -5179,152 +5143,6 @@ var WebApi = class {
   }
   subscribe(payload, options = {}) {
     return toSubscription(this.raw.subscribeResource(payload, options));
-  }
-  timeline(after) {
-    return this.query({ type: "timelineActivityLog", ...after ? { after } : {} });
-  }
-  timelineActions() {
-    return this.query({ type: "timelineActionsV2" });
-  }
-  timelineDetail(id, kind = "timeline") {
-    const key = kind === "order" ? "orderId" : kind === "savingsPlan" ? "savingsPlanId" : "id";
-    return this.query({ type: "timelineDetailV2", [key]: id });
-  }
-  priceAlarms() {
-    return this.query({ type: "priceAlarms" });
-  }
-  priceAlarmNotifications() {
-    return this.query({ type: "priceAlarmNotifications" });
-  }
-  savingsPlans(secAccNo) {
-    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "savingsPlans", secAccNo: accountNumber }));
-  }
-  portfolioChart(secAccNo, range = "1y", options = {}) {
-    return this.request("GET", "/api-gateway/portfolio-chart/v2/chart", {
-      query: { secAccNo, range, ...options }
-    });
-  }
-  news(isin) {
-    return this.query({ type: "neonNews", isin });
-  }
-  etfDetails(id) {
-    return this.query({ type: "etfDetails", id });
-  }
-  etfComposition(id, after) {
-    return this.query({ type: "etfComposition", id, after });
-  }
-  mutualFundDetails(id) {
-    return this.query({ type: "mutualFundDetails", id });
-  }
-  mutualFundComposition(id, after) {
-    return this.query({ type: "mutualFundComposition", id, after });
-  }
-  cryptoDetails(id) {
-    return this.query({ type: "cryptoDetails", id });
-  }
-  yieldToMaturity(id) {
-    return this.query({ type: "yieldToMaturity", id });
-  }
-  bondValuation(instrumentId, secAccNo) {
-    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "bondValuationV2", instrumentId, secAccNo: accountNumber }));
-  }
-  fixedSavingsValuation(instrumentId, secAccNo) {
-    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "fixedSavingsValuation", instrumentId, secAccNo: accountNumber }));
-  }
-  privateMarketsPositions(secAccNo) {
-    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "privateMarketsPositions", secAccNo: accountNumber }));
-  }
-  tape(isin, exchangeId, unit = "EUR") {
-    const mapperUnit = unit === "PKT" ? "PTS" : unit === "PRZ" ? "PCT" : unit;
-    return this.subscribe({ type: "tape", isin, exchangeId, unit: mapperUnit });
-  }
-  tradeAggregateHistory(isin, exchangeId, resolution, from, until) {
-    return this.query({ type: "tradeAggregateHistory", isin, exchangeId, resolution, from, until });
-  }
-  priceForOrder(options) {
-    return this.query({ type: "priceForOrderV2", unit: "EUR", ...options });
-  }
-  availableSize(instrumentId, secAccNo) {
-    return this.withSecAccNo(secAccNo, (accountNumber) => this.query({ type: "availableSize", parameters: { instrumentId }, secAccNo: accountNumber }));
-  }
-  taxWrapperAccountUtilization(secAccNo) {
-    return this.query({ type: "taxWrapperAccountUtilization", secAccNo });
-  }
-  userPreferences() {
-    return this.request("GET", "/api-gateway/pro-trading/api/v1/user-preferences");
-  }
-  exchangeDetails() {
-    return this.request("GET", "/api-gateway/instrument-universe/api/v1/exchanges-details", { query: { includeMaintenanceWindow: false } });
-  }
-  exchangeSchedule(exchange) {
-    return this.request("GET", `/api-gateway/instrument-universe/api/v1/exchanges/${encodeURIComponent(exchange)}/schedule`);
-  }
-  instrumentStatus(isin, exchange) {
-    return this.request("GET", `/api-gateway/instrument-universe/api/v1/instruments/${encodeURIComponent(isin)}/status/${encodeURIComponent(exchange)}`);
-  }
-  orderDestinations(isin, query = {}) {
-    return this.request("GET", `/api-gateway/order-router/api/v2/instruments/${encodeURIComponent(isin)}/destinations`, { query });
-  }
-  orderBookSnapshot(tradeId) {
-    return this.request("GET", `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/order-book-snapshot`);
-  }
-  tapeSnapshot(tradeId) {
-    return this.request("GET", `/web-trading-gateway/api/customer/v1/trades/${encodeURIComponent(tradeId)}/tape-snapshot`);
-  }
-  dailyPnl(items) {
-    return this.request("POST", "/web-trading-gateway/api/customer/v1/pnl/daily", { body: { items } });
-  }
-  documents() {
-    return this.request("GET", "/api/v1/documents/all");
-  }
-  personalDetails() {
-    return this.request("GET", "/api/v1/customer/personal-details");
-  }
-  relationships() {
-    return this.request("GET", "/api/v1/customer/relationships/detailed");
-  }
-  cardsHome() {
-    return this.request("GET", "/api/v1/card/cards/home");
-  }
-  accountSettings() {
-    return this.request("GET", "/api/v2/auth/account");
-  }
-  appUsageConsents() {
-    return this.request("GET", "/api/v1/customer/app-usage-data-consents");
-  }
-  paymentMethods() {
-    return this.request("GET", "/api/v2/payment/methods");
-  }
-  async iban() {
-    return normalizeIbanInfo(await this.rawIban());
-  }
-  rawIban() {
-    return this.request("GET", "/api/v1/customer/relationships/detailed");
-  }
-  taxInformation() {
-    return this.request("GET", "/api/v1/taxes/information");
-  }
-  exemptionOrder() {
-    return this.request("GET", "/api/v1/taxes/exemptionorders");
-  }
-  taxResidencies() {
-    return this.request("GET", "/api/v1/auth/account/change/taxresidencies");
-  }
-  taxResidencyCountries() {
-    return this.request("GET", "/api/v1/country/taxresidency");
-  }
-  watchlists() {
-    return this.request("GET", "/api-gateway/watchlists/api/v2/watchlists");
-  }
-  screeners() {
-    return this.request("GET", "/api-gateway/screeners/api/v2/screeners");
-  }
-  screenerOptions() {
-    return this.request("GET", "/api-gateway/screeners/api/v2/screeners/options");
-  }
-  async withSecAccNo(secAccNo, fn) {
-    const accountNumber = secAccNo ?? await this.runtime.resolveSecuritiesAccountNumber();
-    return fn(accountNumber);
   }
 };
 

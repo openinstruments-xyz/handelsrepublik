@@ -254,14 +254,20 @@ export const liveCases: readonly LiveCase[] = [
   defineLiveCase('open-venue.subscriptions', 'open-venue', async ({ client }) => assertArray(await client.market.subscriptions(), 'market.subscriptions')),
   defineLiveCase('open-venue.entitlements', 'open-venue', async ({ client }) => assertRecord(await client.market.entitlements('L2', { exchangeIds: [TIB, DEFAULT_EXCHANGE] }), 'market.entitlements')),
   defineLiveCase('open-venue.ticker', 'open-venue', async ({ client }) => {
-    assertRecord(await nextStreamValue(client.market.liveFeed(APPLE, { exchangeId: DEFAULT_EXCHANGE }), 'AAPL ticker'), 'ticker event');
+    assertRecord(await nextStreamValue(client.market.subscribeLiveFeed({
+      assetId: APPLE,
+      exchangeId: DEFAULT_EXCHANGE,
+    }), 'AAPL ticker'), 'ticker event');
   }),
   defineLiveCase('open-venue.last-trades-tape', 'open-venue', async ({ client }) => {
     assertRecord(await nextStreamValue(client.trading.tape(APPLE, DEFAULT_EXCHANGE), 'AAPL tape'), 'tape event');
   }),
   defineLiveCase('open-venue.l2-books', 'open-venue', async ({ client }) => {
     assertArray(await client.market.availableL2Books(APPLE), 'availableL2Books');
-    const book = await nextStreamValue(client.market.l2OrderBook(APPLE, TIB), 'AAPL L2');
+    const book = await nextStreamValue(client.market.subscribeL2OrderBook({
+      assetId: APPLE,
+      exchangeId: TIB,
+    }), 'AAPL L2');
     assert.ok(book.bids.length + book.asks.length > 0, 'expected at least one L2 level');
   }),
   defineLiveCase('mutations.price-alert', 'mutations', async ({ client }) => {

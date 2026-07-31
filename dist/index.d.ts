@@ -1,9 +1,9 @@
 import { ZodType } from 'zod';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'assets.search' | 'assets.detail' | 'assets.all' | 'derivatives.search' | 'derivatives.forUnderlying' | 'derivatives.detail' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'portfolio.current' | 'portfolio.cash' | 'portfolio.markToMarket' | 'market.subscriptions' | 'market.entitlements' | 'market.candles' | 'market.bondCandles' | 'market.liveFeed' | 'market.availableL2Books' | 'market.l2OrderBook';
+type EndpointKey = 'auth.qrChallenge' | 'auth.qrStatus' | 'auth.login' | 'auth.loginProcess' | 'auth.account' | 'auth.session' | 'orders.all' | 'orders.mutualFunds' | 'orders.privateMarkets' | 'market.subscriptions' | 'market.entitlements' | 'market.bondCandles';
 type EndpointMap = Partial<Record<EndpointKey, string>>;
-type RawSchemaValidationMode = boolean | 'throw' | 'passthrough';
+type RawSchemaValidationMode = 'throw' | 'passthrough' | 'off';
 interface RawSchemaValidationFailure {
     schemaName: string;
     value: unknown;
@@ -139,8 +139,6 @@ interface InstantLoginChallenge {
     deepLink?: string | undefined;
     challengeExpiresAt?: string | undefined;
     qrCodeTokenExpiresAt?: string | undefined;
-    /** @deprecated Prefer challengeExpiresAt or qrCodeTokenExpiresAt. */
-    expiresAt?: string | undefined;
     serverTime?: string | undefined;
     raw: unknown;
 }
@@ -200,23 +198,13 @@ interface Order {
 }
 type OrderSide = 'buy' | 'sell';
 type OrderMode = 'market' | 'limit' | 'stopMarket';
-type OrderExpiry = {
-    type: 'gfd';
-    value?: never;
-} | {
-    type: 'gtc';
-    value?: never;
-} | {
-    type: 'eom';
-    value?: never;
-} | {
-    type: 'gtd';
-    value: string | Date | number;
-};
-type OrderValidityPreset = 'day' | 'month' | 'year' | 'goodTillCancelled';
+type OrderValidityPreset = 'day' | 'endOfMonth' | 'goodTillCancelled';
 type OrderValidity = OrderValidityPreset | {
-    type: OrderValidityPreset;
+    type: 'month' | 'year';
     referenceDate?: string | Date | undefined;
+} | {
+    type: 'date';
+    value: string | Date | number;
 };
 interface CreateOrderOptions {
     instrumentId: string;
@@ -228,7 +216,6 @@ interface CreateOrderOptions {
     sizeStep?: number | undefined;
     limit?: number | undefined;
     stop?: number | undefined;
-    expiry?: OrderExpiry | undefined;
     validity?: OrderValidity | undefined;
     settlementCurrency?: string | undefined;
     tradingCurrency?: string | undefined;
@@ -1258,10 +1245,8 @@ declare class MarketApi {
         maxCandlesPerRequest?: number;
     }): Promise<Candle[]>;
     subscribeLiveFeed(options: LiveFeedOptions): Subscription<LiveFeedEvent>;
-    liveFeed(assetId: string, options?: Omit<LiveFeedOptions, 'assetId'>): Subscription<LiveFeedEvent>;
     availableL2Books(assetId: string): Promise<L2Venue[]>;
     subscribeL2OrderBook(options: L2OrderBookOptions): Subscription<L2OrderBook>;
-    l2OrderBook(assetId: string, exchangeId: string, options?: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'>): Subscription<L2OrderBook>;
     private resolveCandleSource;
 }
 declare class TimelineApi {
@@ -1401,7 +1386,6 @@ declare class TradingApi {
     private resolveSecuritiesAccountNumber;
 }
 declare class WebApi {
-    private readonly runtime;
     private readonly http;
     private readonly raw;
     constructor(runtime: ClientRuntime);
@@ -1420,61 +1404,6 @@ declare class WebApi {
     }>;
     query<T = unknown>(payload: Record<string, unknown>, options?: RawQueryOptions): Promise<T>;
     subscribe(payload: Record<string, unknown>, options?: RawSubscriptionOptions): Subscription<unknown>;
-    timeline(after?: string): Promise<unknown>;
-    timelineActions(): Promise<unknown>;
-    timelineDetail(id: string, kind?: 'timeline' | 'order' | 'savingsPlan'): Promise<unknown>;
-    priceAlarms(): Promise<unknown>;
-    priceAlarmNotifications(): Promise<unknown>;
-    savingsPlans(secAccNo?: string): Promise<unknown>;
-    portfolioChart(secAccNo: string, range?: string, options?: {
-        currency?: string;
-        instrumentCategories?: string;
-    }): Promise<unknown>;
-    news(isin: string): Promise<unknown>;
-    etfDetails(id: string): Promise<unknown>;
-    etfComposition(id: string, after?: string): Promise<unknown>;
-    mutualFundDetails(id: string): Promise<unknown>;
-    mutualFundComposition(id: string, after?: string): Promise<unknown>;
-    cryptoDetails(id: string): Promise<unknown>;
-    yieldToMaturity(id: string): Promise<unknown>;
-    bondValuation(instrumentId: string, secAccNo?: string): Promise<unknown>;
-    fixedSavingsValuation(instrumentId: string, secAccNo?: string): Promise<unknown>;
-    privateMarketsPositions(secAccNo?: string): Promise<unknown>;
-    tape(isin: string, exchangeId: string, unit?: string): Subscription<unknown>;
-    tradeAggregateHistory(isin: string, exchangeId: string, resolution: number, from: number, until?: number): Promise<unknown>;
-    priceForOrder(options: {
-        isin: string;
-        exchangeId: string;
-        side: string;
-        unit?: string;
-    }): Promise<unknown>;
-    availableSize(instrumentId: string, secAccNo?: string): Promise<unknown>;
-    taxWrapperAccountUtilization(secAccNo: string): Promise<unknown>;
-    userPreferences(): Promise<unknown>;
-    exchangeDetails(): Promise<unknown>;
-    exchangeSchedule(exchange: string): Promise<unknown>;
-    instrumentStatus(isin: string, exchange: string): Promise<unknown>;
-    orderDestinations(isin: string, query?: Record<string, string | number | boolean | undefined>): Promise<unknown>;
-    orderBookSnapshot(tradeId: string): Promise<ExecutionOrderBookSnapshot>;
-    tapeSnapshot(tradeId: string): Promise<ExecutionTapeSnapshot>;
-    dailyPnl(items: DailyPnlRequestItem[]): Promise<DailyPnlResult[]>;
-    documents(): Promise<unknown>;
-    personalDetails(): Promise<unknown>;
-    relationships(): Promise<unknown>;
-    cardsHome(): Promise<unknown>;
-    accountSettings(): Promise<unknown>;
-    appUsageConsents(): Promise<unknown>;
-    paymentMethods(): Promise<unknown>;
-    iban(): Promise<IbanInfo>;
-    rawIban(): Promise<unknown>;
-    taxInformation(): Promise<unknown>;
-    exemptionOrder(): Promise<unknown>;
-    taxResidencies(): Promise<unknown>;
-    taxResidencyCountries(): Promise<unknown>;
-    watchlists(): Promise<unknown>;
-    screeners(): Promise<unknown>;
-    screenerOptions(): Promise<unknown>;
-    private withSecAccNo;
 }
 
 declare function redactSession(session: Session): Record<string, unknown>;
@@ -1560,4 +1489,4 @@ declare const MARKET_DATA_STREAM_TOPICS: {
 type MarketDataStream = keyof typeof MARKET_DATA_STREAM_TOPICS;
 declare function venueDisplayName(exchangeId: string): string;
 
-export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafTokenOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type DailyPnlRequestItem, type DailyPnlResult, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, type ExecutionOrderBookSnapshot, type ExecutionOrderBookSnapshotLevel, type ExecutionTapeSnapshot, type ExecutionTapeSnapshotTrade, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstantLoginChallengeHandler, type InstrumentNewsItem, type InstrumentStatus, type KnownVenueId, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type LoginWithPinOptions, type LoginWithQrOptions, MARKET_DATA_STREAM_TOPICS, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataStream, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderExpiry, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type PollLoginOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StartLoginWithPinOptions, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafTokenOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafToken, type TradeRepublicWebContext, VENUE_DISPLAY_NAMES, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafToken, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse, venueDisplayName };
+export { type AccountRelationship, type AccountRelationshipBankingInfo, type Asset, type AssetDetail, type AssetSearchType, type AvailableCandleResolutionsOptions, BOND_CANDLE_RESOLUTIONS, CANDLE_TIMEFRAME_MS, type Candle, type CandleDownloadOptions, CandleQuery, type CandleRange, type CandleResolution, type CandleSeries, type CandleTimeframe, type CashSummary, type CollectTradeRepublicWafTokenOptions, type CreateOrderOptions, DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS, type DailyPnlRequestItem, type DailyPnlResult, type Derivative, type EndpointMap, type ExchangeDetails, type ExchangeSchedule, type ExecutionOrderBookSnapshot, type ExecutionOrderBookSnapshotLevel, type ExecutionTapeSnapshot, type ExecutionTapeSnapshotTrade, FileSessionStore, type HttpMethod, type IbanInfo, type InstantLoginChallenge, type InstantLoginChallengeHandler, type InstrumentNewsItem, type InstrumentStatus, type KnownVenueId, type L2OrderBook, type L2OrderBookOptions, type L2Venue, type LiveFeedEvent, type LiveFeedOptions, type LoginWithPinOptions, type LoginWithQrOptions, MARKET_DATA_STREAM_TOPICS, type MapperDeliveryState, MapperRequestError, type MapperRequestFailureReason, type MarketDataStream, type MarketDataTopic, type MarketEntitlement, type MarketEntitlementQuery, type MarketEntitlementSet, type MarketEntitlementsOptions, type MarketQuote, type MarketSubscription, type MarketSubscriptionPlan, type MarketSubscriptionPrice, type MarketSubscriptionTerm, type MarketSubscriptionTier, MemorySessionStore, type MutationOutcomeUnknownReason, type MutualFundOrdersOptions, type Order, type OrderCancellation, type OrderCancellationFailed, type OrderCancellationOutcomeUnknown, type OrderCancellationSucceeded, type OrderDestination, type OrderFeeItem, type OrderMode, type OrderMutationError, type OrderMutationErrorCode, type OrderMutationErrorDetails, type OrderMutationStatus, type OrderMutationUpdate, type OrderPreview, type OrderPriceOptions, type OrderPriceQuote, type OrderReplacement, type OrderReplacementCancelFailed, type OrderReplacementCancelOutcomeUnknown, type OrderReplacementFailed, type OrderReplacementNotSent, type OrderReplacementOptions, type OrderReplacementOutcomeUnknown, type OrderReplacementSucceeded, type OrderSide, type OrderSubmission, type OrderSubmissionFailed, type OrderSubmissionOutcomeUnknown, type OrderSubmissionStatus, type OrderSubmissionSucceeded, type OrderValidity, type OrderValidityPreset, type OrdersListOptions, type PollLoginOptions, type Portfolio, type PortfolioChart, type PortfolioPosition, type PreparedOrder, type PriceAlarm, type PriceAlarmCancellation, type PriceAlarmCreation, type PriceAlarmMutationStatus, type PrivateMarketsOrdersOptions, type ProtobufStreamSpec, type QuerySpec, type RawOperationKind, type RawQueryOptions, type RawSubscription, type RawSubscriptionOptions, type RequestOptions, STANDARD_CANDLE_RESOLUTIONS, type SavingsPlan, type SchemaRisk, type SchemaTransport, type Session, type SessionStore, type StartLoginWithPinOptions, type StreamSpec, type Subscription, type TimelineAction, type TimelineDetail, type TimelineDetailKind, type TimelineItem, type TradeRepublicBrowserContextLike, type TradeRepublicBrowserLaunchOptions, type TradeRepublicBrowserLike, TradeRepublicClient, type TradeRepublicClientOptions, type TradeRepublicCollectWafTokenOptions, type TradeRepublicCookieLike, type TradeRepublicDefaultHeaders, type TradeRepublicDeviceInfo, TradeRepublicError, TradeRepublicHttpError, type TradeRepublicPageLike, TradeRepublicProtocolError, type TradeRepublicRequestLike, type TradeRepublicSchemaEntry, TradeRepublicSchemaError, type TradeRepublicWafToken, type TradeRepublicWebContext, VENUE_DISPLAY_NAMES, type Watchlist, type WatchlistItem, type WebSocketDisconnectEvent, type WebSocketReconnectEvent, candleResolutionMs, candleResolutionsForInstrumentType, classifyMapperOperation, collectTradeRepublicWafToken, redactSession, schemaCatalogMarkdown, schemaRegistry, validateRawResponse, venueDisplayName };
