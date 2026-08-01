@@ -250,7 +250,6 @@ function gh(args: string[], input?: string, capture = false): Promise<string> {
     child.on('exit', (code) => {
       if (code === 0) resolve(stdout.trim());
       else {
-        if (stderr) process.stderr.write(stderr);
         reject(new GhCommandError(args, code, stderr));
       }
     });

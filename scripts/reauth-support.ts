@@ -4,7 +4,11 @@ export class GhCommandError extends Error {
     readonly exitCode: number | null,
     readonly stderr: string,
   ) {
-    super(`gh ${args.join(' ')} failed with exit code ${exitCode ?? 'unknown'}.`);
+    const detail = stderr.trim();
+    super(
+      `gh ${args.join(' ')} failed with exit code ${exitCode ?? 'unknown'}.`
+      + (detail ? `\n${detail}` : ''),
+    );
     this.name = 'GhCommandError';
   }
 }
