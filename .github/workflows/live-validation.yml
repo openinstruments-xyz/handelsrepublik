@@ -73,7 +73,14 @@ jobs:
     timeout-minutes: 180
     environment: Live Integration Tests
     outputs:
-      statuses: ${{ steps.live-suites.outputs.statuses }}
+      status_read_only: ${{ steps.live-suites.outputs.status_read_only }}
+      status_mutations: ${{ steps.live-suites.outputs.status_mutations }}
+      status_open_market_data: ${{ steps.live-suites.outputs.status_open_market_data }}
+      status_closed_market_data: ${{ steps.live-suites.outputs.status_closed_market_data }}
+      status_closed_limit_order_rejection: ${{ steps.live-suites.outputs.status_closed_limit_order_rejection }}
+      status_closed_market_order_rejection: ${{ steps.live-suites.outputs.status_closed_market_order_rejection }}
+      status_open_limit_order_lifecycle: ${{ steps.live-suites.outputs.status_open_limit_order_lifecycle }}
+      status_weekend_limit_order_lifecycle: ${{ steps.live-suites.outputs.status_weekend_limit_order_lifecycle }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -137,7 +144,7 @@ jobs:
         env:
           RUN_EVENT: ${{ github.event_name }}
           SUITE_NAME: ${{ matrix.suite.name }}
-          SUITE_STATUS: ${{ fromJSON(needs.execute.outputs.statuses || '{}')[matrix.suite.id] }}
+          SUITE_STATUS: ${{ needs.execute.outputs[matrix.suite.output] }}
         run: |
           exit_code=0
           case "$SUITE_STATUS" in

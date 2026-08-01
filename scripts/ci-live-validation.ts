@@ -148,7 +148,7 @@ export async function runLiveValidation(
       options.githubOutputFile,
       [
         `suites=${JSON.stringify(suiteReports.map(({ id, name }) => ({ id, name })))}`,
-        `statuses=${JSON.stringify(Object.fromEntries(suiteReports.map(({ id, status }) => [id, status])))}`,
+        ...suiteReports.map(({ id, status }) => `status_${id.replaceAll('-', '_')}=${status}`),
       ].join('\n') + '\n',
       'utf8',
     );

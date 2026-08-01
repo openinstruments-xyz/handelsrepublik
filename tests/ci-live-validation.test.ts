@@ -62,6 +62,7 @@ describe('live validation orchestration', () => {
     const directory = await mkdtemp(join(tmpdir(), 'handelsrepublik-live-validation-'));
     const resultFile = join(directory, 'results.ndjson');
     const reportFile = join(directory, 'report.json');
+    const githubOutputFile = join(directory, 'github-output.txt');
     const calls: string[] = [];
     const adapter: LiveSuiteAdapter = async (suite) => {
       calls.push(suite.id);
@@ -86,6 +87,7 @@ describe('live validation orchestration', () => {
         allowOrderRequests: true,
         resultFile,
         reportFile,
+        githubOutputFile,
       }, adapter);
 
       assert.deepEqual(calls, [
@@ -100,6 +102,11 @@ describe('live validation orchestration', () => {
       assert.equal(report.suites.find((suite) => suite.id === 'closed-market-data')?.status, 'skipped');
       assert.equal(report.suites.find((suite) => suite.id === 'weekend-limit-order-lifecycle')?.status, 'skipped');
       assert.match(await readFile(reportFile, 'utf8'), /"mutations"/);
+      const githubOutput = await readFile(githubOutputFile, 'utf8');
+      assert.match(githubOutput, /^status_read_only=passed$/m);
+      assert.match(githubOutput, /^status_mutations=failed$/m);
+      assert.match(githubOutput, /^status_closed_market_data=skipped$/m);
+      assert.doesNotMatch(githubOutput, /^statuses=/m);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

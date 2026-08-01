@@ -219,6 +219,9 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(liveValidation.source, /inputs\.confirm_order_request/);
     assert.match(liveValidation.source, /closed-market-order-rejection/);
     assert.match(liveValidation.source, /weekend-limit-order-lifecycle/);
+    assert.match(liveValidation.source, /status_read_only: \$\{\{ steps\.live-suites\.outputs\.status_read_only \}\}/);
+    assert.match(liveValidation.source, /SUITE_STATUS: \$\{\{ needs\.execute\.outputs\[matrix\.suite\.output\] \}\}/);
+    assert.doesNotMatch(liveValidation.source, /outputs\.statuses/);
   });
 
   it('keeps the Codex scheduled-failure triage workflow disabled', () => {

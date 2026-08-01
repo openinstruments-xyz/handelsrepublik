@@ -19,6 +19,10 @@ if (!process.env.GITHUB_OUTPUT) {
 
 appendFileSync(
   process.env.GITHUB_OUTPUT,
-  `selection=${selection}\nsuites=${JSON.stringify(selected.map(({ id, name }) => ({ id, name })))}\n`,
+  `selection=${selection}\nsuites=${JSON.stringify(selected.map(({ id, name }) => ({
+    id,
+    name,
+    output: `status_${id.replaceAll('-', '_')}`,
+  })))}\n`,
   'utf8',
 );
