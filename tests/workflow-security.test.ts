@@ -95,46 +95,49 @@ describe('GitHub Actions trust boundaries', () => {
 
     assert.match(
       mergeGate.source,
-      /consolidated-live:\r?\n\s+name: account, market data, and reversible mutations\r?\n\s+if: github\.event_name == 'merge_group'\r?\n\s+needs: \[unit, quality\]\r?\n\s+uses: \.\/\.github\/workflows\/validate-account-market-data-and-reversible-mutations\.yml\r?\n\s+secrets: inherit/,
+      /live-preview:\r?\n\s+name: live suites awaiting merge queue[\s\S]*?uses: \.\/\.github\/workflows\/live-validation\.yml\r?\n\r?\n  live:/,
     );
+    assert.match(mergeGate.source, /github\.event_name == 'pull_request'/);
+    assert.match(mergeGate.source, /github\.event_name == 'merge_group'/);
+    assert.match(
+      mergeGate.source,
+      /needs: \[unit, quality\]\r?\n\s+uses: \.\/\.github\/workflows\/live-validation\.yml\r?\n\s+secrets: inherit/,
+    );
+    const previewBlock = mergeGate.source.match(/  live-preview:[\s\S]*?\r?\n\r?\n  live:/)?.[0];
+    assert.ok(previewBlock);
+    assert.doesNotMatch(previewBlock, /secrets:/);
   });
 
-  it('runs live pull-request code only from a merge candidate', () => {
-    const liveWorkflows = workflows.filter((workflow) =>
-      workflow.source.startsWith('name: "Live:'));
+  it('keeps live session access restricted to main and merge candidates', () => {
+    const liveWorkflows = workflows.filter((workflow) => workflow.file === 'live-validation.yml');
 
     assert.deepEqual(
       liveWorkflows.map((workflow) => workflow.file).sort(),
-      [
-        'validate-account-market-data-and-reversible-mutations.yml',
-        'validate-closed-venue-limit-order-rejection.yml',
-        'validate-closed-venue-market-order-rejection.yml',
-        'validate-open-venue-limit-order-lifecycle.yml',
-        'validate-order-destinations-during-closed-market-hours.yml',
-        'validate-weekend-limit-order-lifecycle.yml',
-      ],
+      ['live-validation.yml'],
     );
 
     const mergeGate = workflows.find((workflow) => workflow.file === 'merge-gate.yml');
     assert.ok(mergeGate);
     assert.match(mergeGate.source, /^    name: Merge gate \/ merge gate\r?$/m);
 
-    for (const workflow of liveWorkflows) {
-      assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), false);
-      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_call'), true);
-      assert.match(workflow.source, /^\s+environment: Live Integration Tests\r?$/m);
-      assert.match(workflow.source, /^\s+persist-credentials: false\r?$/m);
-      assert.match(workflow.source, /github\.event_name == 'merge_group'/);
-      assert.match(
-        mergeGate.source,
-        new RegExp(
-          `if: github\\.event_name == 'merge_group'\\r?\\n` +
-          `\\s+needs: \\[unit, quality\\]\\r?\\n` +
-          `\\s+uses: \\.\\/\\.github\\/workflows\\/${workflow.file.replaceAll('.', '\\.')}\\r?\\n` +
-          `\\s+secrets: inherit`,
-        ),
-      );
-    }
+    const liveWorkflow = liveWorkflows[0];
+    assert.ok(liveWorkflow);
+    assert.equal(hasTopLevelTrigger(liveWorkflow.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(liveWorkflow.source, 'workflow_call'), true);
+    assert.match(liveWorkflow.source, /^\s+environment: Live Integration Tests\r?$/m);
+    assert.match(liveWorkflow.source, /^\s+persist-credentials: false\r?$/m);
+    assert.match(liveWorkflow.source, /github\.event_name == 'merge_group'/);
+    assert.equal(liveWorkflow.source.match(/ci-session\.ts refresh/g)?.length, 1);
+    assert.equal(liveWorkflow.source.match(/gh secret set TR_SESSION_JSON/g)?.length, 1);
+    assert.match(liveWorkflow.source, /select suites without accessing the live session/);
+    assert.match(liveWorkflow.source, /RUN_EVENT: \$\{\{ github\.event_name \}\}/);
+    assert.match(liveWorkflow.source, /The live suite runs after this pull request enters the trusted merge queue/);
+    assert.match(liveWorkflow.source, /name: Live \/ \$\{\{ matrix\.suite\.name \}\}/);
+    assert.match(liveWorkflow.source, /weekend-limit-order-lifecycle/);
+    assert.equal(
+      workflows.some((workflow) => workflow.file === 'validate-weekend-limit-order-lifecycle.yml'),
+      false,
+    );
 
     assert.doesNotMatch(
       mergeGate.source,
@@ -198,37 +201,24 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(manualSell.source, /inputs\.confirm_live_execution/);
     assert.match(manualSell.source, /TR_INTEGRATION_SELL_SIZE/);
 
-    const closedMarketOrder = workflows.find((workflow) =>
-      workflow.file === 'validate-closed-venue-market-order-rejection.yml');
-    assert.ok(closedMarketOrder);
+    const liveValidation = workflows.find((workflow) => workflow.file === 'live-validation.yml');
+    assert.ok(liveValidation);
 
-    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'workflow_dispatch'), true);
-    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'workflow_call'), true);
-    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'schedule'), true);
-    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'push'), false);
-    assert.equal(hasTopLevelTrigger(closedMarketOrder.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(liveValidation.source, 'workflow_dispatch'), true);
+    assert.equal(hasTopLevelTrigger(liveValidation.source, 'workflow_call'), true);
+    assert.equal(hasTopLevelTrigger(liveValidation.source, 'schedule'), true);
+    assert.equal(hasTopLevelTrigger(liveValidation.source, 'push'), true);
+    assert.equal(hasTopLevelTrigger(liveValidation.source, 'pull_request'), false);
     assert.match(
-      closedMarketOrder.source,
-      /cron: "0 2 \* \* \*"\r?\n\s+timezone: Europe\/Berlin/,
+      liveValidation.source,
+      /cron: "0 1,11 \* \* \*"\r?\n\s+timezone: Europe\/Berlin/,
     );
-    assert.match(closedMarketOrder.source, /^\s+environment: Live Integration Tests\r?$/m);
-    assert.match(closedMarketOrder.source, /^\s+group: live-integration-tests-main\r?$/m);
-    assert.match(closedMarketOrder.source, /github\.actor == 'VIEWVIEWVIEW'/);
-    assert.match(closedMarketOrder.source, /inputs\.confirm_order_request/);
-  });
-
-  it('separates weekday closed-limit rejection from weekend limit acceptance', () => {
-    const rejection = workflows.find((workflow) =>
-      workflow.file === 'validate-closed-venue-limit-order-rejection.yml');
-    const weekend = workflows.find((workflow) =>
-      workflow.file === 'validate-weekend-limit-order-lifecycle.yml');
-    assert.ok(rejection);
-    assert.ok(weekend);
-
-    assert.match(rejection.source, /weekday <= 5/);
-    assert.match(weekend.source, /weekday >= 6/);
-    assert.match(weekend.source, /test:integration:weekend-limit-order/);
-    assert.doesNotMatch(weekend.source, /pull_request(?:_target)?:/);
+    assert.match(liveValidation.source, /^\s+environment: Live Integration Tests\r?$/m);
+    assert.match(liveValidation.source, /^\s+group: live-integration-tests-main\r?$/m);
+    assert.match(liveValidation.source, /github\.actor == 'VIEWVIEWVIEW'/);
+    assert.match(liveValidation.source, /inputs\.confirm_order_request/);
+    assert.match(liveValidation.source, /closed-market-order-rejection/);
+    assert.match(liveValidation.source, /weekend-limit-order-lifecycle/);
   });
 
   it('keeps the Codex scheduled-failure triage workflow disabled', () => {

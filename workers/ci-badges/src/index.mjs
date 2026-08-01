@@ -8,17 +8,24 @@ const MAX_RESULT_BODY_BYTES = 256 * 1024;
 const WORKFLOWS = Object.freeze({
   quality: 'quality.yml',
   unit: 'unit-tests.yml',
-  'account-market-mutations': 'validate-account-market-data-and-reversible-mutations.yml',
-  destinations: 'validate-order-destinations-during-closed-market-hours.yml',
-  'limit-rejection': 'validate-closed-venue-limit-order-rejection.yml',
-  'market-rejection': 'validate-closed-venue-market-order-rejection.yml',
-  lifecycle: 'validate-open-venue-limit-order-lifecycle.yml',
-  'weekend-lifecycle': 'validate-weekend-limit-order-lifecycle.yml',
+  'account-market-mutations': 'live-validation.yml',
+  destinations: 'live-validation.yml',
+  'limit-rejection': 'live-validation.yml',
+  'market-rejection': 'live-validation.yml',
+  lifecycle: 'live-validation.yml',
+  'weekend-lifecycle': 'live-validation.yml',
   buy: 'execute-market-buy-on-live-account.yml',
   sell: 'execute-market-sell-on-live-account.yml',
 });
 
-const STORED_RESULT_WORKFLOWS = new Set(['account-market-mutations']);
+const STORED_RESULT_WORKFLOWS = new Set([
+  'account-market-mutations',
+  'destinations',
+  'limit-rejection',
+  'market-rejection',
+  'lifecycle',
+  'weekend-lifecycle',
+]);
 
 const EVENTS = Object.freeze({
   latest: undefined,

@@ -29,6 +29,7 @@
     "test:ci:record": "node --import tsx scripts/ci-test-report.ts run",
     "test:ci:summary": "node --import tsx scripts/ci-test-report.ts summary",
     "test:ci:publish": "node --import tsx scripts/ci-publish-results.ts",
+    "test:ci:publish-live": "node --import tsx scripts/ci-publish-live-results.ts",
     "test:integration": "npm run test:integration:read",
     "test:integration:consolidated": "node --import tsx scripts/ci-live-validation.ts",
     "test:integration:read": "node --import tsx --test tests/integration/read-live.test.ts",
@@ -57,12 +58,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/VIEWVIEWVIEW/handelsrepublik.git"
+    "url": "git+https://github.com/openinstruments-xyz/handelsrepublik.git"
   },
   "bugs": {
-    "url": "https://github.com/VIEWVIEWVIEW/handelsrepublik/issues"
+    "url": "https://github.com/openinstruments-xyz/handelsrepublik/issues"
   },
-  "homepage": "https://github.com/VIEWVIEWVIEW/handelsrepublik#readme",
+  "homepage": "https://github.com/openinstruments-xyz/handelsrepublik#readme",
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.1",
     "ws": "^8.18.0",

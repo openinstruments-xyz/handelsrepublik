@@ -20,46 +20,19 @@ jobs:
     name: package checks
     uses: ./.github/workflows/quality.yml
 
-  consolidated-live:
-    name: account, market data, and reversible mutations
-    if: github.event_name == 'merge_group'
+  live-preview:
+    name: live suites awaiting merge queue
+    if: ${{ always() && github.event_name == 'pull_request' }}
     needs: [unit, quality]
-    uses: ./.github/workflows/validate-account-market-data-and-reversible-mutations.yml
-    secrets: inherit
+    uses: ./.github/workflows/live-validation.yml
 
-  closed-limit-order:
-    name: closed-market limit-order rejection
-    if: github.event_name == 'merge_group'
+  live:
+    name: independently reported live suites
+    if: >-
+      always() && github.event_name == 'merge_group' &&
+      needs.unit.result == 'success' && needs.quality.result == 'success'
     needs: [unit, quality]
-    uses: ./.github/workflows/validate-closed-venue-limit-order-rejection.yml
-    secrets: inherit
-
-  closed-market-order:
-    name: closed-market market-order rejection
-    if: github.event_name == 'merge_group'
-    needs: [unit, quality]
-    uses: ./.github/workflows/validate-closed-venue-market-order-rejection.yml
-    secrets: inherit
-
-  open-limit-order:
-    name: open-market limit-order lifecycle
-    if: github.event_name == 'merge_group'
-    needs: [unit, quality]
-    uses: ./.github/workflows/validate-open-venue-limit-order-lifecycle.yml
-    secrets: inherit
-
-  weekend-limit-order:
-    name: weekend limit-order lifecycle
-    if: github.event_name == 'merge_group'
-    needs: [unit, quality]
-    uses: ./.github/workflows/validate-weekend-limit-order-lifecycle.yml
-    secrets: inherit
-
-  closed-market-data:
-    name: closed-market trading availability
-    if: github.event_name == 'merge_group'
-    needs: [unit, quality]
-    uses: ./.github/workflows/validate-order-destinations-during-closed-market-hours.yml
+    uses: ./.github/workflows/live-validation.yml
     secrets: inherit
 
   merge-gate:
@@ -68,12 +41,8 @@ jobs:
     needs:
       - unit
       - quality
-      - consolidated-live
-      - closed-limit-order
-      - closed-market-order
-      - open-limit-order
-      - weekend-limit-order
-      - closed-market-data
+      - live-preview
+      - live
     runs-on: ubuntu-latest
     steps:
       - name: require the checks selected for this event
@@ -81,12 +50,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           UNIT_RESULT: ${{ needs.unit.result }}
           QUALITY_RESULT: ${{ needs.quality.result }}
-          CONSOLIDATED_LIVE_RESULT: ${{ needs.consolidated-live.result }}
-          CLOSED_LIMIT_ORDER_RESULT: ${{ needs.closed-limit-order.result }}
-          CLOSED_MARKET_ORDER_RESULT: ${{ needs.closed-market-order.result }}
-          OPEN_LIMIT_ORDER_RESULT: ${{ needs.open-limit-order.result }}
-          WEEKEND_LIMIT_ORDER_RESULT: ${{ needs.weekend-limit-order.result }}
-          CLOSED_MARKET_DATA_RESULT: ${{ needs.closed-market-data.result }}
+          LIVE_PREVIEW_RESULT: ${{ needs.live-preview.result }}
+          LIVE_RESULT: ${{ needs.live.result }}
         run: |
           set -eu
 
@@ -103,14 +68,15 @@ jobs:
           require_result "unit tests" "$UNIT_RESULT" "success"
           require_result "package checks" "$QUALITY_RESULT" "success"
 
+          expected_preview_result="skipped"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            expected_preview_result="success"
+          fi
+          require_result "live suite PR entries" "$LIVE_PREVIEW_RESULT" "$expected_preview_result"
+
           expected_live_result="skipped"
-          if [ "$EVENT_NAME" = "merge_group" ]; then
+          if [ "$EVENT_NAME" = "merge_group" ] &&
+             [ "$UNIT_RESULT" = "success" ] && [ "$QUALITY_RESULT" = "success" ]; then
             expected_live_result="success"
           fi
-
-          require_result "account, market data, and reversible mutations" "$CONSOLIDATED_LIVE_RESULT" "$expected_live_result"
-          require_result "closed-market limit-order rejection" "$CLOSED_LIMIT_ORDER_RESULT" "$expected_live_result"
-          require_result "closed-market market-order rejection" "$CLOSED_MARKET_ORDER_RESULT" "$expected_live_result"
-          require_result "open-market limit-order lifecycle" "$OPEN_LIMIT_ORDER_RESULT" "$expected_live_result"
-          require_result "weekend limit-order lifecycle" "$WEEKEND_LIMIT_ORDER_RESULT" "$expected_live_result"
-          require_result "closed-market trading availability" "$CLOSED_MARKET_DATA_RESULT" "$expected_live_result"
+          require_result "independently reported live suites" "$LIVE_RESULT" "$expected_live_result"
