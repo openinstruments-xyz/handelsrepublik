@@ -10,6 +10,7 @@ import type {
   Session,
   TradeRepublicBrowserLike,
 } from '../src/index.js';
+import { GhCommandError, isMissingRemoteWorkflow } from './reauth-support.js';
 
 const require = createRequire(import.meta.url);
 const qrcodeTerminal = require('qrcode-terminal') as {
@@ -108,13 +109,18 @@ async function run(): Promise<void> {
 }
 
 async function remoteWorkflowUsesRepositorySecret(repo: string): Promise<boolean> {
-  const source = await gh([
-    'api',
-    `repos/${repo}/contents/.github/workflows/${options.workflow}?ref=${encodeURIComponent(options.ref)}`,
-    '--header',
-    'Accept: application/vnd.github.raw+json',
-  ], undefined, true);
-  return source.includes('gh secret set TR_SESSION_JSON --repo ');
+  try {
+    const source = await gh([
+      'api',
+      `repos/${repo}/contents/.github/workflows/${options.workflow}?ref=${encodeURIComponent(options.ref)}`,
+      '--header',
+      'Accept: application/vnd.github.raw+json',
+    ], undefined, true);
+    return source.includes('gh secret set TR_SESSION_JSON --repo ');
+  } catch (error) {
+    if (isMissingRemoteWorkflow(error)) return false;
+    throw error;
+  }
 }
 
 async function loginWithRotatingQr(client: TradeRepublicClient): Promise<Session> {
@@ -224,17 +230,29 @@ async function findDispatchedRun(
 function gh(args: string[], input?: string, capture = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.platform === 'win32' ? 'gh.exe' : 'gh', args, {
-      stdio: [input === undefined ? 'inherit' : 'pipe', capture ? 'pipe' : 'inherit', 'inherit'],
+      stdio: [
+        input === undefined ? 'inherit' : 'pipe',
+        capture ? 'pipe' : 'inherit',
+        capture ? 'pipe' : 'inherit',
+      ],
     });
     let stdout = '';
+    let stderr = '';
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
     });
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
     child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) resolve(stdout.trim());
-      else reject(new Error(`gh ${args.join(' ')} failed with exit code ${code ?? 'unknown'}.`));
+      else {
+        if (stderr) process.stderr.write(stderr);
+        reject(new GhCommandError(args, code, stderr));
+      }
     });
     if (input !== undefined) child.stdin?.end(input);
   });
