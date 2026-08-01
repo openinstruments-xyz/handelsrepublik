@@ -18,8 +18,12 @@ describe('weekend limit-order lifecycle', () => {
     let activeOrderId: string | undefined;
     let collector: ReturnType<typeof createOrderUpdateCollector> | undefined;
     try {
-      const candidate = await selectLimitOrderCandidate(client, { requireOpen: false, minimumBid: 10 });
-      if (!candidate) return t.skip('no candidate advertises limit orders with a bid of at least EUR 10');
+      const candidate = await selectLimitOrderCandidate(client, {
+        requireOpen: false,
+        minimumBid: 10,
+        requiredExpiry: 'gtd',
+      });
+      if (!candidate) return t.skip('no candidate advertises GTD limit orders with a bid of at least EUR 10');
       const accountNumber = await resolveAccountNumber(client);
       collector = createOrderUpdateCollector(client.orders.orderUpdates(accountNumber));
 
@@ -30,11 +34,17 @@ describe('weekend limit-order lifecycle', () => {
         mode: 'limit',
         size: 1,
         limit: 1,
-        validity: 'day',
+        validity: { type: 'month' },
         timeoutMs: 60_000,
       });
       if (submission.raw !== undefined) validateRawResponse('orders.submit', submission.raw);
-      assert.equal(submission.status, 'succeeded');
+      assert.equal(
+        submission.status,
+        'succeeded',
+        submission.status === 'failed'
+          ? `weekend submission failed: ${submission.error.code ?? 'unknown'} ${submission.error.message ?? ''}`.trim()
+          : `weekend submission outcome is ${submission.status}`,
+      );
       assert.ok(submission.orderId, 'weekend submission must return an order id');
       activeOrderId = submission.orderId;
       await collector.waitFor(

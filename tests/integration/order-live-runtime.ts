@@ -66,12 +66,17 @@ export function isWeekendBerlin(now = new Date()): boolean {
 
 export async function selectLimitOrderCandidate(
   client: TradeRepublicClient,
-  options: { requireOpen: boolean; minimumBid: number },
+  options: { requireOpen: boolean; minimumBid: number; requiredExpiry?: string },
 ): Promise<{ instrumentId: string; destination: OrderDestination } | undefined> {
   for (const candidate of orderCandidates) {
     const destinations = await client.trading.orderDestinations(candidate.instrumentId);
     for (const destination of destinations) {
-      if ((options.requireOpen && destination.open !== true) || !supports(destination, 'limit')) continue;
+      if (
+        (options.requireOpen && destination.open !== true)
+        || !supports(destination, 'limit')
+        || (options.requiredExpiry !== undefined
+          && !destination.orderExpiries?.some((expiry) => expiry.toLowerCase() === options.requiredExpiry))
+      ) continue;
       const quote = await client.market.quote(candidate.instrumentId, destination.id);
       if (quote.bid !== undefined && quote.bid >= options.minimumBid) {
         return { instrumentId: candidate.instrumentId, destination };

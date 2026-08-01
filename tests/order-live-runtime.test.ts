@@ -64,4 +64,40 @@ describe('live order safety windows', () => {
       },
     );
   });
+
+  it('requires an explicitly advertised expiry when selecting a weekend destination', async () => {
+    const client = {
+      trading: {
+        async orderDestinations() {
+          return [
+            { id: 'GFD', open: false, orderModes: ['limit'], orderExpiries: ['gfd'], raw: {} },
+            { id: 'GTD', open: false, orderModes: ['limit'], orderExpiries: ['GTD'], raw: {} },
+          ];
+        },
+      },
+      market: {
+        async quote() {
+          return { bid: 200 };
+        },
+      },
+    } as unknown as TradeRepublicClient;
+
+    assert.deepEqual(
+      await selectLimitOrderCandidate(client, {
+        requireOpen: false,
+        minimumBid: 10,
+        requiredExpiry: 'gtd',
+      }),
+      {
+        instrumentId: 'US67066G1040',
+        destination: {
+          id: 'GTD',
+          open: false,
+          orderModes: ['limit'],
+          orderExpiries: ['GTD'],
+          raw: {},
+        },
+      },
+    );
+  });
 });
