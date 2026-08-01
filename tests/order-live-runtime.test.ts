@@ -31,7 +31,7 @@ describe('live order safety windows', () => {
     assert.equal(isWeekdayClosedBerlinWindow(new Date('2026-07-27T04:30:00Z')), true);
   });
 
-  it('accepts the whole Berlin weekend for queued limit orders', () => {
+  it('identifies the whole Berlin weekend for rejection checks', () => {
     assert.equal(isWeekendBerlin(new Date('2026-07-24T21:59:00Z')), false);
     assert.equal(isWeekendBerlin(new Date('2026-07-24T22:00:00Z')), true);
     assert.equal(isWeekendBerlin(new Date('2026-07-26T21:59:00Z')), true);
@@ -65,39 +65,4 @@ describe('live order safety windows', () => {
     );
   });
 
-  it('requires an explicitly advertised expiry when selecting a weekend destination', async () => {
-    const client = {
-      trading: {
-        async orderDestinations() {
-          return [
-            { id: 'GFD', open: false, orderModes: ['limit'], orderExpiries: ['gfd'], raw: {} },
-            { id: 'GTD', open: false, orderModes: ['limit'], orderExpiries: ['GTD'], raw: {} },
-          ];
-        },
-      },
-      market: {
-        async quote() {
-          return { bid: 200 };
-        },
-      },
-    } as unknown as TradeRepublicClient;
-
-    assert.deepEqual(
-      await selectLimitOrderCandidate(client, {
-        requireOpen: false,
-        minimumBid: 10,
-        requiredExpiry: 'gtd',
-      }),
-      {
-        instrumentId: 'US67066G1040',
-        destination: {
-          id: 'GTD',
-          open: false,
-          orderModes: ['limit'],
-          orderExpiries: ['GTD'],
-          raw: {},
-        },
-      },
-    );
-  });
 });

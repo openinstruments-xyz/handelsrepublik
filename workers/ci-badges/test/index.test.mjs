@@ -135,13 +135,13 @@ test('rejects unknown and removed workflow aliases', async () => {
   }
 });
 
-test('accepts structured weekend lifecycle results from the unified workflow', async () => {
+test('accepts structured weekend rejection results from the unified workflow', async () => {
   const kv = new MemoryKv();
   const report = resultReport({
-    workflow: 'weekend-lifecycle',
+    workflow: 'weekend-rejection',
     results: [{
-      id: 'orders.weekend-limit-lifecycle',
-      name: 'Submit and cancel a weekend limit order',
+      id: 'orders.weekend-limit-rejection',
+      name: 'Rejected weekend EUR 1 limit buy',
       status: 'passed',
       durationMs: 42,
       note: 'validated',
@@ -149,8 +149,8 @@ test('accepts structured weekend lifecycle results from the unified workflow', a
   });
 
   assert.equal((await ingestResult(kv, report)).status, 201);
-  assert.ok(kv.values.has('result:weekend-lifecycle:latest'));
-  assert.ok(kv.values.has('result:weekend-lifecycle:scheduled'));
+  assert.ok(kv.values.has('result:weekend-rejection:latest'));
+  assert.ok(kv.values.has('result:weekend-rejection:scheduled'));
 });
 
 test('returns an SVG without exposing configuration errors', async () => {

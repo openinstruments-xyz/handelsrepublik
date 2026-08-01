@@ -6,5 +6,5 @@
   { "id": "closed-limit-order-rejection", "name": "closed-market limit-order rejection", "automatic": true },
   { "id": "closed-market-order-rejection", "name": "closed-market market-order rejection", "automatic": false },
   { "id": "open-limit-order-lifecycle", "name": "open-market limit-order lifecycle", "automatic": true },
-  { "id": "weekend-limit-order-lifecycle", "name": "weekend limit-order lifecycle", "automatic": true }
+  { "id": "weekend-limit-order-rejection", "name": "weekend limit-order rejection", "automatic": true }
 ]

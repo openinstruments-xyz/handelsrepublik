@@ -8,7 +8,7 @@ export type LiveSuiteId =
   | 'closed-limit-order-rejection'
   | 'closed-market-order-rejection'
   | 'open-limit-order-lifecycle'
-  | 'weekend-limit-order-lifecycle';
+  | 'weekend-limit-order-rejection';
 
 export type LiveTimeWindow =
   | 'always'

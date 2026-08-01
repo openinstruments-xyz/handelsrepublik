@@ -13,7 +13,7 @@ const WORKFLOWS = Object.freeze({
   'limit-rejection': 'live-validation.yml',
   'market-rejection': 'live-validation.yml',
   lifecycle: 'live-validation.yml',
-  'weekend-lifecycle': 'live-validation.yml',
+  'weekend-rejection': 'live-validation.yml',
   buy: 'execute-market-buy-on-live-account.yml',
   sell: 'execute-market-sell-on-live-account.yml',
 });
@@ -24,7 +24,7 @@ const STORED_RESULT_WORKFLOWS = new Set([
   'limit-rejection',
   'market-rejection',
   'lifecycle',
-  'weekend-lifecycle',
+  'weekend-rejection',
 ]);
 
 const EVENTS = Object.freeze({

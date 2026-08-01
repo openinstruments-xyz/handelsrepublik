@@ -75,11 +75,11 @@ The protected order probes retain their clock and live-venue gates:
 npm run test:integration:closed-limit-order
 npm run test:integration:closed-market-order
 npm run test:integration:open-limit-order
-npm run test:integration:weekend-limit-order
+npm run test:integration:weekend-limit-order-rejection
 ```
 
-Closed-market probes must be rejected. The open and weekend limit lifecycles use
-deliberately non-marketable prices but still send real orders and have no
+Closed-market and weekend probes must be rejected. The open limit lifecycle uses
+a deliberately non-marketable price but still sends a real order and has no
 absolute no-fill guarantee. The manual market-buy workflow intentionally
 executes and can cost up to EUR 5 plus the expected EUR 1 fee.
 

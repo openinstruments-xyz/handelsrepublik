@@ -22,7 +22,7 @@ on:
           - closed-limit-order-rejection
           - closed-market-order-rejection
           - open-limit-order-lifecycle
-          - weekend-limit-order-lifecycle
+          - weekend-limit-order-rejection
       confirm_order_request:
         description: I understand selected order suites send real orders designed to be rejected or cancelled.
         required: true
@@ -80,7 +80,7 @@ jobs:
       status_closed_limit_order_rejection: ${{ steps.live-suites.outputs.status_closed_limit_order_rejection }}
       status_closed_market_order_rejection: ${{ steps.live-suites.outputs.status_closed_market_order_rejection }}
       status_open_limit_order_lifecycle: ${{ steps.live-suites.outputs.status_open_limit_order_lifecycle }}
-      status_weekend_limit_order_lifecycle: ${{ steps.live-suites.outputs.status_weekend_limit_order_lifecycle }}
+      status_weekend_limit_order_rejection: ${{ steps.live-suites.outputs.status_weekend_limit_order_rejection }}
     steps:
       - uses: actions/checkout@v6
         with:

@@ -43,7 +43,7 @@ That endpoint redirects to the exact latest run for the selected category.
 
 The fixed workflow aliases are `quality`, `unit`, `account-market-mutations`,
 `destinations`, `limit-rejection`, `market-rejection`, `lifecycle`,
-`weekend-lifecycle`, `buy`, and `sell`.
+`weekend-rejection`, `buy`, and `sell`.
 
 Changes under `workers/ci-badges/` deploy automatically after merging to
 `main`. Configure the repository secrets `CLOUDFLARE_API_TOKEN` and

@@ -39,12 +39,10 @@ Capabilities are venue-specific. An instrument can have a full-featured venue
 and a second destination that supports only market orders with day validity.
 Inspect the selected destination before building an order.
 
-The destination's `open` value describes current execution availability, not
-whether the broker accepts every order type. Trade Republic accepts limit
-orders on Saturday and Sunday and allows them to be cancelled before execution,
-so weekend limit-order submission must not be blocked only because `open` is
-`false`. Continue to require an explicitly open destination for market orders
-or any workflow that needs immediate execution.
+The destination's `open` value describes current execution availability. Live
+validation confirmed that Trade Republic rejects new Lang & Schwarz Exchange
+limit orders with `exchangeClosed` on weekends. Require an explicitly open
+destination whenever a workflow expects an order to be accepted.
 
 ## Venue-specific order prices
 

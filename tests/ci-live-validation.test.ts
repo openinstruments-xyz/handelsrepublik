@@ -28,7 +28,7 @@ describe('live validation orchestration', () => {
         'closed-limit-order-rejection',
         'closed-market-order-rejection',
         'open-limit-order-lifecycle',
-        'weekend-limit-order-lifecycle',
+        'weekend-limit-order-rejection',
       ],
     );
     assert.deepEqual(
@@ -100,7 +100,7 @@ describe('live validation orchestration', () => {
       assert.equal(report.suites.find((suite) => suite.id === 'mutations')?.status, 'failed');
       assert.equal(report.suites.find((suite) => suite.id === 'open-market-data')?.status, 'passed');
       assert.equal(report.suites.find((suite) => suite.id === 'closed-market-data')?.status, 'skipped');
-      assert.equal(report.suites.find((suite) => suite.id === 'weekend-limit-order-lifecycle')?.status, 'skipped');
+      assert.equal(report.suites.find((suite) => suite.id === 'weekend-limit-order-rejection')?.status, 'skipped');
       assert.match(await readFile(reportFile, 'utf8'), /"mutations"/);
       const githubOutput = await readFile(githubOutputFile, 'utf8');
       assert.match(githubOutput, /^status_read_only=passed$/m);

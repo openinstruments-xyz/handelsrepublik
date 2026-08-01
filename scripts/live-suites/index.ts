@@ -6,7 +6,7 @@ import { openLimitOrderLifecycleSuite } from './open-limit-order-lifecycle.js';
 import { openMarketDataSuite } from './open-market-data.js';
 import { readOnlySuite } from './read-only.js';
 import { liveSuiteManifest } from './manifest.js';
-import { weekendLimitOrderLifecycleSuite } from './weekend-limit-order-lifecycle.js';
+import { weekendLimitOrderRejectionSuite } from './weekend-limit-order-rejection.js';
 import type { LiveSuiteDefinition, LiveSuiteId } from './types.js';
 
 export const liveSuiteDefinitions: readonly LiveSuiteDefinition[] = [
@@ -17,7 +17,7 @@ export const liveSuiteDefinitions: readonly LiveSuiteDefinition[] = [
   closedLimitOrderRejectionSuite,
   closedMarketOrderRejectionSuite,
   openLimitOrderLifecycleSuite,
-  weekendLimitOrderLifecycleSuite,
+  weekendLimitOrderRejectionSuite,
 ];
 
 export const automaticLiveSuiteIds: readonly LiveSuiteId[] = liveSuiteManifest

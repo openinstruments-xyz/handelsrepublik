@@ -133,7 +133,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(liveWorkflow.source, /RUN_EVENT: \$\{\{ github\.event_name \}\}/);
     assert.match(liveWorkflow.source, /The live suite runs after this pull request enters the trusted merge queue/);
     assert.match(liveWorkflow.source, /name: Live \/ \$\{\{ matrix\.suite\.name \}\}/);
-    assert.match(liveWorkflow.source, /weekend-limit-order-lifecycle/);
+    assert.match(liveWorkflow.source, /weekend-limit-order-rejection/);
     assert.equal(
       workflows.some((workflow) => workflow.file === 'validate-weekend-limit-order-lifecycle.yml'),
       false,
@@ -218,7 +218,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(liveValidation.source, /github\.actor == 'VIEWVIEWVIEW'/);
     assert.match(liveValidation.source, /inputs\.confirm_order_request/);
     assert.match(liveValidation.source, /closed-market-order-rejection/);
-    assert.match(liveValidation.source, /weekend-limit-order-lifecycle/);
+    assert.match(liveValidation.source, /weekend-limit-order-rejection/);
     assert.match(liveValidation.source, /status_read_only: \$\{\{ steps\.live-suites\.outputs\.status_read_only \}\}/);
     assert.match(liveValidation.source, /SUITE_STATUS: \$\{\{ needs\.execute\.outputs\[matrix\.suite\.output\] \}\}/);
     assert.doesNotMatch(liveValidation.source, /outputs\.statuses/);
