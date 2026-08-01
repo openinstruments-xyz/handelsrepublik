@@ -42,7 +42,7 @@ function resultReport(overrides = {}) {
 
 async function ingestResult(kv, report, token = resultToken) {
   return worker.fetch(
-    new Request('https://example.com/results/account-market-mutations', {
+    new Request(`https://example.com/results/${report.workflow}`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
@@ -135,25 +135,22 @@ test('rejects unknown and removed workflow aliases', async () => {
   }
 });
 
-test('resolves the weekend lifecycle badge to its workflow', async () => {
-  const originalFetch = globalThis.fetch;
-  let requestedUrl;
-  globalThis.fetch = async (url) => {
-    requestedUrl = String(url);
-    return Response.json({ workflow_runs: [] });
-  };
-  try {
-    const response = await worker.fetch(
-      new Request('https://example.com/weekend-lifecycle/latest.svg'),
-      { GH_TOKEN: 'test-token' },
-      { waitUntil() {} },
-    );
+test('accepts structured weekend rejection results from the unified workflow', async () => {
+  const kv = new MemoryKv();
+  const report = resultReport({
+    workflow: 'weekend-rejection',
+    results: [{
+      id: 'orders.weekend-limit-rejection',
+      name: 'Rejected weekend EUR 1 limit buy',
+      status: 'passed',
+      durationMs: 42,
+      note: 'validated',
+    }],
+  });
 
-    assert.equal(response.status, 200);
-    assert.match(requestedUrl, /actions\/workflows\/validate-weekend-limit-order-lifecycle\.yml\/runs/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  assert.equal((await ingestResult(kv, report)).status, 201);
+  assert.ok(kv.values.has('result:weekend-rejection:latest'));
+  assert.ok(kv.values.has('result:weekend-rejection:scheduled'));
 });
 
 test('returns an SVG without exposing configuration errors', async () => {
@@ -194,7 +191,7 @@ test('loads failed steps only for a failing run', async () => {
   };
   try {
     const response = await worker.fetch(
-      new Request('https://example.com/destinations/scheduled.svg'),
+      new Request('https://example.com/buy/manual.svg'),
       { GH_TOKEN: 'test-token' },
       { waitUntil() {} },
     );
@@ -250,6 +247,24 @@ test('stores structured results and renders exact failed case names', async () =
     kv.values.get('result:account-market-mutations:latest'),
     kv.values.get('result:account-market-mutations:scheduled'),
   );
+});
+
+test('accepts independently published structured live-suite aliases', async () => {
+  const kv = new MemoryKv();
+  const report = resultReport({
+    workflow: 'destinations',
+    results: [{
+      id: 'closed-venue.quote',
+      name: 'closed-venue.quote',
+      status: 'passed',
+      durationMs: 42,
+      note: 'validated',
+    }],
+  });
+
+  assert.equal((await ingestResult(kv, report)).status, 201);
+  assert.ok(kv.values.has('result:destinations:latest'));
+  assert.ok(kv.values.has('result:destinations:scheduled'));
 });
 
 test('rejects unauthorized and stale result ingestion', async () => {

@@ -1,5 +1,7 @@
 # handelsrepublik
 
+<sub>[Maintainer documentation](https://github.com/openinstruments-xyz/handelsrepublik/blob/main/docs/maintainers.md)</sub>
+
 # Don't use, it's still in heavy development and will contain bugs. 
 
 **Workflow status**
@@ -8,14 +10,27 @@
 |---|:---:|:---:|:---:|
 | [Package checks](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/quality.yml)<br><details><summary><sub>typecheck, build, distribution</sub></summary><sub>Checks that the TypeScript source has no type errors, builds the installable package, and confirms that the committed <code>dist/</code> files exactly match a fresh build.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual/run) |
 | [Unit tests](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/unit-tests.yml)<br><details><summary><sub>client, schemas, transports, normalizers, sessions, venues, WAF</sub></summary><sub>Runs the mocked test suite without using a live brokerage account. It checks login and session behavior, request headers, response validation, data normalization, order safety and recovery, websocket reconnection, market helpers, venue metadata, WAF-token handling, and the live-test infrastructure itself.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual/run) |
-| [Live: account, market data, and reversible mutations](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/validate-account-market-data-and-reversible-mutations.yml)<br><details><summary><sub>account reads, assets, market data, streaming, alerts, watchlist</sub></summary><sub>Refreshes the shared session once, then concurrently runs account and market-data reads, reversible alert/watchlist mutations, and—during weekday Berlin market hours—open-market quote, L2, ticker, and tape checks. It persists the refreshed session once after all blocks finish and publishes the structured case results to the badge Worker.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/manual/run) |
-| [Live: trading availability when markets are closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/validate-order-destinations-during-closed-market-hours.yml)<br><details><summary><sub>destinations, exchange schedule, instrument status, quotation</sub></summary><sub>Runs during the Berlin overnight window and checks the live venue state without placing an order. For each supported asset class it reads the available order destinations and expects ordinary exchange-traded assets not to expose an open destination. It also validates the LSX schedule, Apple's closed instrument status, and a closed-market quotation. Continuously available or differently traded classes such as crypto are allowed to remain open.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/manual/run) |
-| [Live: limit order rejected while market is closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/validate-closed-venue-limit-order-rejection.yml)<br><details><summary><sub>closed venue must reject a deeply priced limit order</sub></summary><sub>Runs only during weekday Berlin overnights and confirms that LSX reports closed. It then tries to submit a one-share Apple limit buy at EUR 1 and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. Weekend acceptance is covered separately.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual/run) |
-| [Live: market order rejected while market is closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/validate-closed-venue-market-order-rejection.yml)<br><details><summary><sub>closed venue must reject a market order</sub></summary><sub>Runs only after an explicit owner dispatch, confirmation, and the Berlin overnight time gate. It confirms that LSX reports closed, then tries to submit an amount-based EUR 1 Apple market buy and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. If the venue unexpectedly accepts the order, the test immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual/run) |
-| [Live: submit, replace, and cancel a limit order](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/validate-open-venue-limit-order-lifecycle.yml)<br><details><summary><sub>submit, observe, replace, cancel, and clean up a limit order</sub></summary><sub>Runs on weekdays during the Berlin market window, selects NVIDIA, Apple, or Microsoft on an explicitly open destination, and requires a bid of at least EUR 10. It opens the order-update stream, submits one share at a deliberately non-marketable EUR 1 limit, verifies the created/open update, replaces the order at EUR 0.50, verifies the cancellation and replacement updates, then cancels the replacement and verifies its cancellation. Cleanup is retried in all cases, although any real order carries some execution risk.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual/run) |
-| [Live: submit and cancel a weekend limit order](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/validate-weekend-limit-order-lifecycle.yml)<br><details><summary><sub>weekend submit, observe, cancel, and clean up</sub></summary><sub>Runs on Saturday and Sunday in Europe/Berlin. It selects a destination advertising limit orders without requiring <code>open: true</code>, requires a bid of at least EUR 10, submits one share at a deliberately non-marketable EUR 1 limit, verifies acceptance, cancels it, and verifies cancellation. Cleanup is retried in all cases.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-lifecycle/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-lifecycle/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-lifecycle/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-lifecycle/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-lifecycle/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-lifecycle/manual/run) |
+| [Live: account, market data, and reversible mutations](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>account reads, assets, market data, streaming, alerts, watchlist</sub></summary><sub>Uses the shared one-refresh executor and independently reports account and market-data reads, reversible alert/watchlist mutations, and—during weekday Berlin market hours—open-market quote, L2, ticker, and tape checks. It persists the refreshed session once after all blocks finish and publishes the structured case results to the badge Worker.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/manual/run) |
+| [Live: trading availability when markets are closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>destinations, exchange schedule, instrument status, quotation</sub></summary><sub>Runs during the Berlin overnight window and checks the live venue state without placing an order. For each supported asset class it reads the available order destinations and expects ordinary exchange-traded assets not to expose an open destination. It also validates the LSX schedule, Apple's closed instrument status, and a closed-market quotation. Continuously available or differently traded classes such as crypto are allowed to remain open.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/manual/run) |
+| [Live: limit order rejected while market is closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>closed venue must reject a deeply priced limit order</sub></summary><sub>Runs only during weekday Berlin overnights and confirms that LSX reports closed. It then tries to submit a one-share Apple limit buy at EUR 1 and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. Weekend acceptance is covered separately.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual/run) |
+| [Live: market order rejected while market is closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>closed venue must reject a market order</sub></summary><sub>Runs only from the trusted merge queue or after an explicit owner dispatch and confirmation, plus the Berlin overnight time gate. It confirms that LSX reports closed, then tries to submit an amount-based EUR 1 Apple market buy and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. If the venue unexpectedly accepts the order, the test immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual/run) |
+| [Live: submit, replace, and cancel a limit order](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>submit, observe, replace, cancel, and clean up a limit order</sub></summary><sub>Runs on weekdays during the Berlin market window, selects NVIDIA, Apple, or Microsoft on an explicitly open destination, and requires a bid of at least EUR 10. It opens the order-update stream, submits one share at a deliberately non-marketable EUR 1 limit, verifies the created/open update, replaces the order at EUR 0.50, verifies the cancellation and replacement updates, then cancels the replacement and verifies its cancellation. Cleanup is retried in all cases, although any real order carries some execution risk.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual/run) |
+| [Live: limit order rejected on weekends](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>weekend venue must reject a deeply priced limit order</sub></summary><sub>Runs on Saturday and Sunday in Europe/Berlin. It confirms that LSX reports closed, submits a one-share Apple limit buy at EUR 1, and passes only when Trade Republic rejects the request with <code>exchangeClosed</code>. If the venue unexpectedly accepts the order, cleanup immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/manual/run) |
 | [Manual: buy up to €5 of an instrument](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)<br><details><summary><sub>confirmed real purchase of a custom instrument</sub></summary><sub>Runs only when the repository owner manually supplies an ISIN, a gross budget of at most EUR 5, and explicit confirmation. It selects an open market-order venue, reads the current ask, calculates how many whole units fit within the budget, submits the real market buy, and waits for execution. The purchased position is intentionally left in the account; there is no automatic sell, and the broker's expected EUR 1 order fee is additional.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/buy/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/buy/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/buy/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/buy/manual/run) |
 | [Manual: sell whole units of an instrument](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/execute-market-sell-on-live-account.yml)<br><details><summary><sub>confirmed real sale of an exact whole-unit quantity</sub></summary><sub>Runs only when the repository owner manually supplies the same ISIN as a preceding buy, an exact positive whole-unit quantity, and explicit confirmation. It selects an open market-order venue, reads the current bid, submits the sell, and waits for execution. It never discovers or sells an entire existing position automatically.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/sell/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/sell/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/sell/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/sell/manual/run) |
+
+## Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [WAF token collection](#waf-token-collection)
+- [Authentication workflows](#authentication-workflows)
+- [Trading safely](#trading-safely)
+- [API namespaces](#api-namespaces)
+- [Market data and streams](#market-data-and-streams)
+- [Security and privacy](#security-and-privacy)
+- [Maintainer documentation](https://github.com/openinstruments-xyz/handelsrepublik/blob/main/docs/maintainers.md)
 
 ## Overview
 
@@ -32,7 +47,7 @@ Read subscriptions can reconnect automatically. Order submissions and other high
 
 The package provides:
 
-- Login -- based on the web based "instant login" by scanning a QR code with your phone method. Also does session persistence, and provides session refresh helpers.
+- QR-based instant login, approved in the Trade Republic app, plus session persistence and refresh helpers.
 - Typed domain namespaces for account, portfolio, orders, trading, market data,
   timeline, instruments, discovery, documents, tax, and payments.
 - Shared mapper-websocket subscriptions with observable disconnect and reconnect
@@ -70,7 +85,7 @@ data: [Sonderbedingungen fuer Marktdaten und vorvertragliche Informationen
 Install the package directly from GitHub:
 
 ```bash
-npm install github:VIEWVIEWVIEW/handelsrepublik
+npm install github:openinstruments-xyz/handelsrepublik
 ```
 
 The package is ESM-only and includes its compiled `dist` output. Consumers do
@@ -90,6 +105,10 @@ You can omit Playwright if your application supplies a valid
 `TradeRepublicWafToken` through another mechanism.
 
 ## Quick Start
+
+This read-only example collects the required WAF token, restores or creates a
+session, then reads the cash balance and searches instruments. It never creates,
+changes, or submits an order.
 
 ```ts
 import {
@@ -119,13 +138,22 @@ if (session) {
 if (!session) {
   session = await tr.auth.loginWithQr({
     onChallengeUpdate(challenge) {
-      // Open this URL on your phone. It rotates automatically while login is pending.
+      // Approve this QR-based login in the Trade Republic app. The URL rotates
+      // automatically while login is pending.
       console.log(challenge.qrCode);
     },
   });
 }
 
-tr.close();
+try {
+  console.log('Cash:', await tr.portfolio.cash());
+  console.log('Apple matches:', await tr.assets.search('AAPL', {
+    type: 'stock',
+    limit: 5,
+  }));
+} finally {
+  tr.close();
+}
 ```
 
 ## Extended Start
@@ -202,7 +230,9 @@ try {
 }
 ```
 
-### Search for and buy a stock
+## Trading with real money
+
+### Preview and submit a stock order
 
 The following example assumes `tr` is authenticated and still open. It searches
 for Apple, fetches its normalized instrument details, and previews a market order
@@ -969,12 +999,6 @@ Schwarz Exchange (`LSX`) destination for a stock returned:
 }
 ```
 
-`open` reports whether the destination is currently executing trades. It is
-not a general order-acceptance gate: Trade Republic accepts limit orders on
-Saturday and Sunday and allows them to be cancelled before execution. Check
-the destination's `orderModes` for `limit`; require `open: true` for operations
-that must execute immediately, such as market orders.
-
 For that destination, a market, limit, or stop-market order can use `day`
 (`gfd`), while `month` and `year` are represented by a dated `gtd`. It did not
 advertise `gtc`, so `goodTillCancelled` should not be submitted there. The
@@ -1535,239 +1559,8 @@ as a general SDK demo.
 - Treat `outcomeUnknown` as a business state requiring investigation.
 - Do not use this SDK as a broker compliance or suitability layer.
 
-## Development and verification
+## Maintainer documentation
 
-```bash
-npm install
-npm run typecheck
-npm test
-npm run build
-```
-
-Keep `dist` committed because GitHub consumers install the compiled package
-without running the TypeScript build.
-
-### Pull-request security boundary
-
-Every pull request runs the two `PR-safe` GitHub Actions workflows. They install
-the locked dependencies, run
-the unit tests and TypeScript typecheck, build the package locally, and verify
-that the committed `dist` output is current. These jobs receive no repository
-or environment secrets, use only a read-only `GITHUB_TOKEN`, and do not persist
-checkout credentials. Neither job selects a GitHub environment, so environment
-reviewers cannot hold these safe checks for approval.
-
-The workflows themselves contain no author, contributor, or approval condition
-for these checks. If GitHub shows its repository-level **Approve and run
-workflows** gate for a pull request, that single approval releases both
-`pull_request` workflows. Same-repository pull requests may start immediately
-according to the repository policy. Keep write tokens and secrets disabled for
-pull-request workflows; package checks and unit tests run with a read-only token
-and no repository or environment secrets.
-
-Pull-request code is untrusted, including package lifecycle scripts, tests, and
-build scripts. Never add secrets, deployments, write permissions, privileged
-external services, or `pull_request_target` to the `PR-safe` workflows.
-
-Live integration workflows do not run pull-request code or receive approval
-through the pull-request gate. They run separately from trusted default-branch,
-scheduled, or manual triggers.
-
-The SDK is a modular monolith. `ClientRuntime` owns shared transport,
-schema-validation, and securities-account resolution dependencies. Declarative
-REST and mapper calls live in `src/operation-specs.ts` and run through
-`OperationClient`; domain adapters live under `src/domains/`. Authentication,
-order preparation, submission, and cancellation remain explicit workflows.
-`MapperConnection` owns multiplexing and reconnect behavior.
-
-Unit tests use mocked HTTP and websocket transports. Live tests use a saved
-session and enable raw-response validation. Captured concrete response variants
-use strict schemas: an unknown response field or incompatible field type fails
-its visible Actions step before normalization. An empty list is valid when the
-endpoint allows it; the step summary then says that the item schema was not
-observed in that run instead of claiming that an unseen item shape was proven.
-
-Run the read-only suite or one stable case locally:
-
-```powershell
-$env:TR_SESSION_FILE = './demo/.demo-session.json'
-npm run test:integration
-npm run test:integration:case -- candles.standard-aapl
-```
-
-The live workflow matrix is:
-
-| Workflow | Triggers | Gate | Exact checks |
-| --- | --- | --- | --- |
-| Live: account, market data, and reversible mutations | push to `main`, manual, 01:00 and 11:00 daily | open-market block only: weekdays 07:00–22:40 Berlin | One session refresh, then three concurrent blocks: bounded-concurrent account and market-data reads; sequential disposable price-alert/default-watchlist mutations with cleanup; and, while markets are open, order destinations, executable prices, subscriptions, entitlements, ticker, tape and L2 streams. The refresh command verifies that authentication material was persisted before the blocks start. One combined case-level report is published to GitHub and the badge Worker's KV store, then the refreshed session is written back once. |
-| Live: trading availability when markets are closed | push to `main`, manual, 01:00 daily | 23:00–06:40 Berlin, then live venue state | Order destinations for stock, ETF, fund, mutual fund, private fund, derivative, crypto, bond and synthetic assets; LSX exchange schedule, instrument status and quotation. Crypto is validated as returned and may remain open around the clock. |
-| Live: limit order rejected while market is closed | push to `main`, manual, 01:30 daily | weekdays 23:00–06:40 Berlin in workflow and test; LSX must report `open: false` | Submit one Apple share with a EUR 1 limit and require the exact `exchangeClosed` error details. Weekend acceptance is covered separately. |
-| Live: market order rejected while market is closed | manual only | explicit owner confirmation; 23:00–06:40 Berlin in workflow and test; LSX must report `open: false` | Submit an amount-based EUR 1 Apple market buy and require the exact `exchangeClosed` error details; cancel immediately if the venue unexpectedly accepts it. |
-| Live: submit, replace, and cancel a limit order | push to `main`, manual, 11:30 weekdays | weekdays 07:00–22:40 Berlin in workflow and test; destination must report open and bid at least EUR 10 | Select NVIDIA, Apple or Microsoft automatically; open the order-update stream; submit one share at EUR 1; require a created/open update; replace it with EUR 0.50; require old-order cancellation and new-order creation updates; cancel the replacement; require its cancellation update; retry cleanup in `finally`. |
-| Live: submit and cancel a weekend limit order | push to `main`, manual, 11:45 Saturday and Sunday | Saturday or Sunday in Europe/Berlin; destination must advertise limit orders and bid at least EUR 10; `open` may be false | Select NVIDIA, Apple or Microsoft automatically; open the order-update stream; submit one share at EUR 1; require an accepted order and created/submitted update; cancel it; require its cancellation update; retry cleanup in `finally`. |
-| Manual: buy up to €5 of an instrument | manual only | explicit owner confirmation; automatic open market-order venue | Buy a custom ISIN with a user-entered gross budget of at most EUR 5, wait for execution and leave the position in the account. No automatic sell. |
-| Manual: sell whole units of an instrument | manual only | explicit owner confirmation; automatic open market-order venue; user-entered exact whole-unit quantity | Sell the supplied ISIN at the current bid and wait for execution. The workflow never infers a quantity or sells an entire position. |
-
-The AAPL standard candle matrix requires `1m`, `3m`, `5m`, `10m`, `15m`,
-`20m`, `30m`, `45m`, `1h`, `2h`, `4h`, `1d`, `1w`, and `1M` responses.
-Derivative and crypto fixtures require `10m`, `1h`, `4h`, `1d`, and `1w`;
-bonds require `1d` and `1w`; ETF and mutual-fund fixtures receive a separate
-daily smoke test. `market.candles()` routes stocks, ETFs and funds through
-`tradeAggregateHistory`, derivatives and crypto through
-`aggregateHistoryLightV2`, and bonds through the venue's YTM-history endpoint.
-AAPL candles must contain timestamp and OHLCV fields. The other variants must
-contain timestamp and OHLC fields; volume is type-checked when the endpoint
-provides it. The tests only require those values to exist with the documented
-types and do not judge whether changing market values are plausible.
-
-Every independent read-only server check remains a named Node test. The read
-suite runs at most four checks concurrently, while the read, reversible-mutation
-and eligible open-market blocks run concurrently as separate child processes.
-Each block writes an isolated result file; the orchestrator merges them into one
-case-level Actions summary after all blocks finish. Trusted `main` runs also
-send the same typed JSON records to the badge Worker. The Worker overwrites its
-latest KV record and, for scheduled or manual runs, the matching event-specific
-record. Failed badges therefore list exact failed case IDs without parsing
-concurrent process logs or GitHub job-step names.
-All live workflows share the `live-integration-tests-main` concurrency group with a
-maximal queue. GitHub therefore keeps each triggered workflow visible as its
-own run while executing session-consuming workflows one at a time instead of
-canceling additional pending runs.
-
-The local read, venue and reversible-mutation suites can also be run directly:
-
-```powershell
-npm run test:integration:read
-npm run test:integration:closed-venue
-npm run test:integration:open-venue
-npm run test:integration:mutations
-```
-
-The protected order probes have separate local commands. They retain the
-same clock and live-venue gates as GitHub Actions:
-
-```powershell
-npm run test:integration:closed-limit-order
-npm run test:integration:closed-market-order
-npm run test:integration:open-limit-order
-npm run test:integration:weekend-limit-order
-```
-
-The closed probes are expected to be rejected and therefore should not incur a
-broker order fee. The open and weekend limit lifecycles use deliberately
-non-marketable prices, but they still send real orders and cannot provide an
-absolute no-fill guarantee. The manual market buy intentionally executes and
-can cost up to EUR 5 plus the expected EUR 1 fee.
-
-Successful live buying uses a different suite and workflow. The
-**execute market buy on live account** workflow has only a `workflow_dispatch`
-trigger. It
-requires an ISIN, gross purchase budget in EUR, and explicit confirmation that
-a real market buy will execute. The test automatically selects the first
-broker-provided destination that explicitly reports `open: true` and supports
-market orders; it skips without submitting an order if none is available. It
-fetches that venue's current buy quote and buys as many whole units as fit within
-the budget at the ask (or fallback market price). The live workflow explicitly
-uses a size step of `1`, so the calculated quantity is rounded down. It caps the
-gross purchase budget at EUR 5; the expected EUR 1 fee is additional. It waits
-for the buy to execute.
-It does not automatically sell the purchased quantity, which remains in the
-account. To sell after a successful buy, run the **execute market sell on live
-account** workflow manually with the same ISIN and the exact whole-unit
-quantity to sell. It independently requires confirmation, selects an open
-market-order venue, uses its current bid, and never infers a position quantity
-or sells an entire holding.
-The manual market-order workflows are started manually and retain an explicit
-confirmation input and safety checks.
-Savings-plan, money-movement, document-acceptance, and account-security
-mutations are never exercised.
-
-The `PR-safe` quality and unit workflows run for every pull request and once
-more on pushes to `main`. Restricting
-their push trigger to `main` avoids duplicate push and pull-request runs for
-ordinary branches. Non-market live workflows run on pushes to `main`;
-time-dependent jobs stop at their first time gate when the current Berlin
-window does not fit. Both market-order workflows remain manual-only.
-
-The private repository belongs to a GitHub Free organization, so its live jobs
-use the repository-level `TR_SESSION_JSON` secret rather than an environment
-secret. Successful live runs refresh and rotate that repository secret in
-place. The shared concurrency group serializes workflows that use the session.
-
-When the GitHub Actions session can no longer be refreshed, renew it from a
-maintainer machine:
-
-```powershell
-npm run ci:reauth
-```
-
-The command verifies the local GitHub CLI login, opens a browser briefly to
-collect the matching Trade Republic web context and WAF token, renders a QR code in the
-terminal, and waits for approval in the Trade Republic app. Short-lived QR
-challenges are replaced automatically until approval or the overall timeout. It
-then updates the repository-level `TR_SESSION_JSON` secret in
-`openinstruments-xyz/handelsrepublik` by default, dispatches
-`validate-account-market-data-and-reversible-mutations.yml` on `main`, and
-watches the new workflow run. The new
-session is held in memory and is not written to the repository.
-
-The live workflow also expects the repository-level
-`GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` secret. It must contain a token allowed
-to update Actions repository secrets for this repository so the refreshed
-session can be rotated after each run.
-
-### Scheduled failure triage
-
-The **report trusted scheduled failures to Codex** workflow follows failed
-scheduled runs of the six allowlisted non-market live workflows on `main`. It
-does not check out or execute repository code and receives no Trade Republic or
-OpenAI credential. It creates one deduplicated `codex-triage` issue per failing
-workflow, attaches a short redacted failed-step excerpt, and posts an `@codex`
-triage request through the connected maintainer GitHub account.
-
-The issue is only the transport used to invoke the Codex GitHub connector; it
-is not a declaration that the SDK has a defect. Codex must first classify the
-failure as a reproducible repository defect, flaky test, external-service or
-market-data problem, expired session, rate limit, infrastructure problem, or
-unknown. Every non-repository classification must be recorded on the issue and
-must stop without a branch or pull request. Only a plausibly reproducible
-repository defect may produce a minimal `codex/` fix branch and pull request.
-The PR title must end with the single `[live:<profile>]` suffix requested in the
-triage comment. The resulting pull request first runs the secret-free `PR-safe`
-checks.
-
-GitHub-authored bot mentions are not used to start Codex. The final issue
-comment uses the existing
-`GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` repository secret and verifies that it
-authenticates as `VIEWVIEWVIEW`, whose GitHub identity is connected to the
-ChatGPT Codex account. This uses the ChatGPT subscription through the connector;
-there is no `OPENAI_API_KEY` and no `openai/codex-action`.
-
-After the `PR-safe` quality workflow succeeds, the **trusted Codex PR
-non-market live validation** workflow re-reads the pull request through the
-GitHub API. It continues only when the PR is still open, belongs to this
-repository, is authored by `VIEWVIEWVIEW`, uses a `codex/` branch, and its exact
-head SHA equals the already-tested quality-run SHA. It then runs all unit,
-typecheck, build, and distribution checks again before loading
-`TR_SESSION_JSON` and executing only the profile encoded in the title.
-
-This is the explicit trust decision for fully automatic Codex fixes: SDK code
-generated by Codex can access the live Trade Republic session during that final
-profile. The live-case runtime can only restore sessions; the job receives no
-session-administration token and executes no refresh or rotation step, persists
-no checkout credential, and removes its ephemeral session file afterward.
-Open- and closed-market profiles
-fail outside their documented Berlin windows rather than silently passing
-through skipped tests.
-
-Session refresh failures and both market-order workflows are deliberately
-absent from the allowlist. Market-order tests remain separately and explicitly
-triggered. Codex is instructed not to request or run with live-account secrets,
-weaken the Actions trust boundary, grant untrusted PR code secrets, deploy, or modify
-the market-order workflows.
-
-Use `npm run ci:reauth -- -- --no-watch` to return after dispatching, or
-`npm run ci:reauth -- -- --help` to see repository, workflow, branch, timeout, and
-diagnostic overrides. During the initial migration, the command detects that
-the remote workflow is not ready, seeds the repository secret, and returns
-without dispatching the incompatible workflow.
+Repository development, live-test operations, CI session renewal, and the
+GitHub Actions trust boundary are documented in
+[the maintainer documentation](https://github.com/openinstruments-xyz/handelsrepublik/blob/main/docs/maintainers.md).

@@ -29,6 +29,7 @@
     "test:ci:record": "node --import tsx scripts/ci-test-report.ts run",
     "test:ci:summary": "node --import tsx scripts/ci-test-report.ts summary",
     "test:ci:publish": "node --import tsx scripts/ci-publish-results.ts",
+    "test:ci:publish-live": "node --import tsx scripts/ci-publish-live-results.ts",
     "test:integration": "npm run test:integration:read",
     "test:integration:consolidated": "node --import tsx scripts/ci-live-validation.ts",
     "test:integration:read": "node --import tsx --test tests/integration/read-live.test.ts",
@@ -41,7 +42,7 @@
     "test:integration:closed-limit-order": "node --import tsx --test tests/integration/closed-venue-limit-order-live.test.ts",
     "test:integration:closed-market-order": "node --import tsx --test tests/integration/closed-venue-market-order-live.test.ts",
     "test:integration:open-limit-order": "node --import tsx --test tests/integration/open-venue-limit-order-live.test.ts",
-    "test:integration:weekend-limit-order": "node --import tsx --test tests/integration/weekend-limit-order-live.test.ts",
+    "test:integration:weekend-limit-order-rejection": "node --import tsx --test tests/integration/weekend-limit-order-rejection-live.test.ts",
     "ci:reauth": "node --import tsx scripts/reauth-ci.ts",
     "typecheck": "tsc --noEmit",
     "schemas:doc": "node --import tsx scripts/generate-schema-catalog.ts"
@@ -57,12 +58,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/VIEWVIEWVIEW/handelsrepublik.git"
+    "url": "git+https://github.com/openinstruments-xyz/handelsrepublik.git"
   },
   "bugs": {
-    "url": "https://github.com/VIEWVIEWVIEW/handelsrepublik/issues"
+    "url": "https://github.com/openinstruments-xyz/handelsrepublik/issues"
   },
-  "homepage": "https://github.com/VIEWVIEWVIEW/handelsrepublik#readme",
+  "homepage": "https://github.com/openinstruments-xyz/handelsrepublik#readme",
   "dependencies": {
     "@bufbuild/protobuf": "^2.12.1",
     "ws": "^8.18.0",

@@ -6,12 +6,7 @@ name: report trusted scheduled failures to Codex
 on:
   workflow_run:
     workflows:
-      - "Live: account, market data, and reversible mutations"
-      - "Live: trading availability when markets are closed"
-      - "Live: limit order rejected while market is closed"
-      - "Live: market order rejected while market is closed"
-      - "Live: submit, replace, and cancel a limit order"
-      - "Live: submit and cancel a weekend limit order"
+      - "Live validation"
     types: [completed]
 
 permissions:

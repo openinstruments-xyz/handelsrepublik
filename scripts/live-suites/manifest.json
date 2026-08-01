@@ -1,0 +1,10 @@
+[
+  { "id": "read-only", "name": "read-only account and asset definitions", "automatic": true },
+  { "id": "mutations", "name": "reversible mutations", "automatic": true },
+  { "id": "open-market-data", "name": "open-market data", "automatic": true },
+  { "id": "closed-market-data", "name": "closed-market availability", "automatic": true },
+  { "id": "closed-limit-order-rejection", "name": "closed-market limit-order rejection", "automatic": true },
+  { "id": "closed-market-order-rejection", "name": "closed-market market-order rejection", "automatic": false },
+  { "id": "open-limit-order-lifecycle", "name": "open-market limit-order lifecycle", "automatic": true },
+  { "id": "weekend-limit-order-rejection", "name": "weekend limit-order rejection", "automatic": true }
+]

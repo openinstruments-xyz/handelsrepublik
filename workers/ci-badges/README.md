@@ -5,10 +5,11 @@ allowlisted workflows in the private `openinstruments-xyz/handelsrepublik`
 repository.
 Passing, running, and unknown badges remain one line tall. A failing badge
 expands downward with up to five failed checks; additional failures are
-summarized on a final line. The `account-market-mutations` workflow publishes
-its structured case results directly to this Worker, which stores the latest,
-scheduled, and manual records in KV. Other workflows still resolve their
-status and failed Actions steps through GitHub. Each badge's SVG title includes
+summarized on a final line. The unified live-validation workflow publishes
+separate structured case results for each live badge alias, which the Worker
+stores as latest, scheduled, and manual records in KV. Package, unit, buy, and
+sell workflows still resolve their status and failed Actions steps through
+GitHub. Each badge's SVG title includes
 the run start in Berlin time, such as `passing - 24/7 23:45`.
 
 The deployed Worker requires two secrets:
@@ -42,7 +43,7 @@ That endpoint redirects to the exact latest run for the selected category.
 
 The fixed workflow aliases are `quality`, `unit`, `account-market-mutations`,
 `destinations`, `limit-rejection`, `market-rejection`, `lifecycle`,
-`weekend-lifecycle`, `buy`, and `sell`.
+`weekend-rejection`, `buy`, and `sell`.
 
 Changes under `workers/ci-badges/` deploy automatically after merging to
 `main`. Configure the repository secrets `CLOUDFLARE_API_TOKEN` and
@@ -57,6 +58,6 @@ For example:
 
 The badge endpoint is intentionally public, but it exposes only the latest
 workflow state. Structured result ingestion requires the bearer secret, accepts
-only the fixed `account-market-mutations` workflow, and ignores older run
-attempts. Repository names and workflow filenames are not accepted from request
+only the fixed live workflow aliases, and ignores older run attempts.
+Repository names and workflow filenames are not accepted from request
 parameters.

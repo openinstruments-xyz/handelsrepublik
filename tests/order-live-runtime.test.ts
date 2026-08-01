@@ -31,7 +31,7 @@ describe('live order safety windows', () => {
     assert.equal(isWeekdayClosedBerlinWindow(new Date('2026-07-27T04:30:00Z')), true);
   });
 
-  it('accepts the whole Berlin weekend for queued limit orders', () => {
+  it('identifies the whole Berlin weekend for rejection checks', () => {
     assert.equal(isWeekendBerlin(new Date('2026-07-24T21:59:00Z')), false);
     assert.equal(isWeekendBerlin(new Date('2026-07-24T22:00:00Z')), true);
     assert.equal(isWeekendBerlin(new Date('2026-07-26T21:59:00Z')), true);
@@ -64,4 +64,5 @@ describe('live order safety windows', () => {
       },
     );
   });
+
 });

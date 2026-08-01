@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { TradeRepublicClient } from '../src/index.js';
+import { liveSuiteDefinitions } from '../scripts/live-suites/index.js';
 import { liveCases } from './integration/live-cases.js';
 
 describe('live integration case manifest', () => {
@@ -17,24 +18,9 @@ describe('live integration case manifest', () => {
     assert.deepEqual([...suites].sort(), ['closed-venue', 'mutations', 'open-venue', 'read']);
   });
 
-  it('keeps closed-market checks in their time-gated workflow', () => {
-    const workflowBySuite = {
-      'closed-venue': 'validate-order-destinations-during-closed-market-hours.yml',
-    } as const;
-    for (const [suite, workflow] of Object.entries(workflowBySuite)) {
-      const source = readFileSync(join(process.cwd(), '.github', 'workflows', workflow), 'utf8');
-      for (const testCase of liveCases.filter((candidate) => candidate.suite === suite)) {
-        assert.match(source, new RegExp(`npm run test:integration:case -- ${escapeRegex(testCase.id)}(?:\\r?\\n|$)`));
-        assert.match(source, new RegExp(
-          `continue-on-error: true\\r?\\n\\s+run: npm run test:integration:case -- ${escapeRegex(testCase.id)}(?:\\r?\\n|$)`,
-        ));
-      }
-    }
-  });
-
-  it('runs compatible live blocks concurrently behind one session refresh', () => {
+  it('runs separately defined live suites behind one session refresh', () => {
     const workflow = readFileSync(
-      join(process.cwd(), '.github', 'workflows', 'validate-account-market-data-and-reversible-mutations.yml'),
+      join(process.cwd(), '.github', 'workflows', 'live-validation.yml'),
       'utf8',
     );
     const testSource = readFileSync(
@@ -49,14 +35,25 @@ describe('live integration case manifest', () => {
     assert.ok(!readCaseIds.includes('session.restore-refresh'));
     assert.match(workflow, /run: npm run test:integration:consolidated/);
     assert.equal(workflow.match(/ci-session\.ts refresh/g)?.length, 1);
-    assert.equal(
-      existsSync(join(process.cwd(), '.github', 'workflows', 'validate-reversible-account-mutations.yml')),
-      false,
-    );
-    assert.equal(
-      existsSync(join(process.cwd(), '.github', 'workflows', 'validate-venue-during-opening-times.yml')),
-      false,
-    );
+    assert.equal(workflow.match(/gh secret set TR_SESSION_JSON/g)?.length, 1);
+    assert.match(workflow, /name: Live \/ \$\{\{ matrix\.suite\.name \}\}/);
+    for (const suite of liveSuiteDefinitions) {
+      assert.match(workflow, new RegExp(`          - ${escapeRegex(suite.id)}(?:\\r?\\n|$)`));
+      assert.equal(
+        existsSync(join(process.cwd(), 'scripts', 'live-suites', `${suite.id}.ts`)),
+        true,
+      );
+    }
+    for (const removed of [
+      'validate-account-market-data-and-reversible-mutations.yml',
+      'validate-order-destinations-during-closed-market-hours.yml',
+      'validate-closed-venue-limit-order-rejection.yml',
+      'validate-closed-venue-market-order-rejection.yml',
+      'validate-open-venue-limit-order-lifecycle.yml',
+      'validate-weekend-limit-order-lifecycle.yml',
+    ]) {
+      assert.equal(existsSync(join(process.cwd(), '.github', 'workflows', removed)), false);
+    }
     assert.match(testSource, /const READ_LIVE_CONCURRENCY = 4/);
     assert.match(testSource, /describe\('read-only live validations', \{ concurrency: READ_LIVE_CONCURRENCY \}/);
     assert.match(testSource, /liveCases\.filter\(\(testCase\) => testCase\.suite === 'read'\)/);
