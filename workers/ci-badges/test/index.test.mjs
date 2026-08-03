@@ -153,7 +153,7 @@ test('accepts structured weekend rejection results from the unified workflow', a
   assert.ok(kv.values.has('result:weekend-rejection:scheduled'));
 });
 
-test('returns an SVG without exposing configuration errors', async () => {
+test('returns an unknown badge without exposing configuration errors', async () => {
   const response = await worker.fetch(
     new Request('https://example.com/quality/latest.svg'),
     {},
@@ -163,6 +163,27 @@ test('returns an SVG without exposing configuration errors', async () => {
   assert.equal(response.status, 503);
   assert.equal(response.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
   assert.match(await response.text(), />unknown<\/text>/);
+});
+
+test('renders a queued live workflow as a blue pending badge before it publishes results', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    workflow_runs: [{ id: 123, status: 'queued', conclusion: null }],
+  });
+  try {
+    const response = await worker.fetch(
+      new Request('https://example.com/destinations/latest.svg'),
+      { GH_TOKEN: 'test-token', CI_RESULTS: new MemoryKv() },
+      { waitUntil() {} },
+    );
+    const svg = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(svg, />pending<\/text>/);
+    assert.match(svg, /#007ec6/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('loads failed steps only for a failing run', async () => {
