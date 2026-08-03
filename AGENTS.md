@@ -16,6 +16,12 @@ feat(market): add candle query helper
 chore(release): update package metadata
 ```
 
+## Branch Cleanup
+
+- After a branch has been merged successfully, ask the user for confirmation
+  before deleting that branch locally and on the remote. Delete it only after
+  the user confirms.
+
 ## Package Scope
 
 - This repository is the standalone `handelsrepublik` package.
