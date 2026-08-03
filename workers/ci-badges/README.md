@@ -3,7 +3,9 @@
 This Cloudflare Worker renders compact status-only SVG badges for the
 allowlisted workflows in the private `openinstruments-xyz/handelsrepublik`
 repository.
-Passing, running, and unknown badges remain one line tall. A failing badge
+Badges use four visible states: passing, pending, failing, and unknown. Pending
+badges are blue and cover queued or running workflows. Unknown is reserved for
+jobs that have not produced a run yet. A failing badge
 expands downward with up to five failed checks; additional failures are
 summarized on a final line. The unified live-validation workflow publishes
 separate structured case results for each live badge alias, which the Worker

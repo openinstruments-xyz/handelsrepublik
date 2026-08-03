@@ -37,10 +37,7 @@ const COLORS = Object.freeze({
   success: '#4c1',
   failure: '#e05d44',
   failureDetails: '#24292f',
-  running: '#007ec6',
-  cancelled: '#9f9f9f',
-  skipped: '#9f9f9f',
-  neutral: '#dfb317',
+  pending: '#007ec6',
   unknown: '#9f9f9f',
 });
 
@@ -57,23 +54,11 @@ function badgeState(run) {
   }
 
   if (run.status !== 'completed') {
-    return { message: 'running', color: COLORS.running };
+    return { message: 'pending', color: COLORS.pending };
   }
 
   if (run.conclusion === 'success') {
     return { message: 'passing', color: COLORS.success };
-  }
-
-  if (run.conclusion === 'cancelled') {
-    return { message: 'cancelled', color: COLORS.cancelled };
-  }
-
-  if (run.conclusion === 'skipped') {
-    return { message: 'skipped', color: COLORS.skipped };
-  }
-
-  if (run.conclusion === 'neutral') {
-    return { message: 'neutral', color: COLORS.neutral };
   }
 
   return { message: 'failing', color: COLORS.failure };
@@ -525,7 +510,11 @@ export default {
     if (STORED_RESULT_WORKFLOWS.has(selection.workflowAlias)) {
       try {
         const report = await loadStoredReport(selection, env);
-        const run = report ? storedReportAsRun(report) : undefined;
+        const run = report
+          ? storedReportAsRun(report)
+          : env.GH_TOKEN
+            ? await loadLatestRun(selection, env.GH_TOKEN)
+            : undefined;
         if (selection.responseKind === 'run-link') {
           return runLinkResponse(run, request.method);
         }

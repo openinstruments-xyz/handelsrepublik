@@ -26,6 +26,12 @@ These notes are for coding agents working in this package.
 - Always use conventional commits for this package.
 - Preferred format: `<type>(<scope>): <summary>`.
 - Use concise, lowercase summaries.
+
+## Branch Cleanup
+
+- After a branch has been merged successfully, ask the user for confirmation
+  before deleting that branch locally and on the remote. Delete it only after
+  the user confirms.
 - Examples:
 
 ```text
