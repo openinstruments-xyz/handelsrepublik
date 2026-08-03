@@ -333,7 +333,7 @@ async function assertCandleMatrix(
 }
 
 function candleProbeRange(timeframe: CandleTimeframe): '1d' | '5d' | '1m' | '6m' | '1y' {
-  if (timeframe === '1m') return '1d';
+  if (timeframe === '1m') return '5d';
   if (['3m', '5m', '10m', '15m', '20m', '30m', '45m'].includes(timeframe)) return '5d';
   if (['1h', '2h', '4h'].includes(timeframe)) return '1m';
   if (timeframe === '1d') return '6m';

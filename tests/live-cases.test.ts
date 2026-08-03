@@ -159,6 +159,31 @@ describe('live integration case manifest', () => {
       'bond', 'crypto', 'derivative', 'etf', 'fund', 'mutualFund', 'privateFund', 'stock', 'synthetic',
     ]);
   });
+
+  it('queries enough one-minute history to cross a closed weekend', async () => {
+    const testCase = liveCases.find((candidate) => candidate.id === 'candles.standard-aapl');
+    assert.ok(testCase);
+    const requests: Array<{ timeframe: string; range: string }> = [];
+    const client = {
+      market: {
+        candles: async (request: { timeframe: string; range: string }) => {
+          requests.push(request);
+          return [{
+            time: '2026-07-31T15:30:00.000Z',
+            open: 1,
+            high: 1,
+            low: 1,
+            close: 1,
+            volume: 1,
+          }];
+        },
+      },
+    } as unknown as TradeRepublicClient;
+
+    await testCase.run({ client, note: async () => undefined });
+
+    assert.equal(requests.find((request) => request.timeframe === '1m')?.range, '5d');
+  });
 });
 
 function escapeRegex(value: string): string {
