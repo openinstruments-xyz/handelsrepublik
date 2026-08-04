@@ -122,14 +122,22 @@ describe('live integration case manifest', () => {
     assert.doesNotMatch(source, /refreshSession|saveSession|clearSession/);
   });
 
-  it('refreshes the shared session every 20 minutes only while no other workflow is active', () => {
+  it('refreshes the shared session off the hour only while idle and stops after six failures', () => {
     const source = readFileSync(join(process.cwd(), '.github', 'workflows', 'refresh-session.yml'), 'utf8');
-    assert.match(source, /cron: "\*\/20 \* \* \* \*"/);
+    assert.match(source, /cron: "7,27,47 \* \* \* \*"/);
     assert.match(source, /actions: read/);
+    assert.match(source, /name: pause after six failed session refreshes/);
+    assert.match(source, /for workflow in refresh-session\.yml live-validation\.yml/);
+    assert.match(source, /gh api --paginate/);
+    assert.match(source, /refresh Trade Republic session once/);
+    assert.match(source, /name: session refresh circuit breaker is open/);
+    assert.match(source, /case "\$conclusion" in\s+paused\)/);
+    assert.match(source, /\[ "\$failed_count" -eq 6 \]/);
+    assert.match(source, /Run npm run ci:reauth from a maintainer machine/);
     assert.match(source, /actions\/runs\?status=in_progress&per_page=100/);
     assert.match(source, /select\(\.id != \$GITHUB_RUN_ID\)/);
-    assert.match(source, /needs: check_activity/);
-    assert.match(source, /if: needs\.check_activity\.outputs\.should_refresh == 'true'/);
+    assert.match(source, /needs: \[check_activity, check_refresh_streak\]/);
+    assert.match(source, /needs\.check_activity\.outputs\.should_refresh == 'true' && needs\.check_refresh_streak\.outputs\.should_refresh == 'true'/);
     assert.match(source, /group: live-integration-tests-main/);
     assert.match(source, /id: confirm_idle/);
     assert.match(source, /if: steps\.confirm_idle\.outputs\.should_refresh == 'true'/);

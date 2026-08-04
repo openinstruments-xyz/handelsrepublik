@@ -127,6 +127,13 @@ updates the repository secret in `openinstruments-xyz/handelsrepublik` and
 dispatches `live-validation.yml` on `main`. The new session remains in memory;
 it is not written to the checkout.
 
+The scheduled refresh runs at minutes 7, 27, and 47 to avoid GitHub's busiest
+minute. Before refreshing, it inspects the actual refresh steps from both the
+refresh and live-validation workflows. Six consecutive refresh-step failures
+pause scheduled attempts; skipped guard runs do not reset the streak. A
+successful manual refresh or the live validation dispatched by `ci:reauth`
+resets it.
+
 The rotation workflow also requires
 `GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION`, scoped to update Actions repository
 secrets for this repository.

@@ -2,7 +2,8 @@ name: refresh Trade Republic session
 
 on:
   schedule:
-    - cron: "*/20 * * * *"
+    # Avoid minute zero, when GitHub warns scheduled runs are most likely to be delayed or dropped.
+    - cron: "7,27,47 * * * *"
       timezone: Europe/Berlin
   workflow_dispatch:
 
@@ -11,6 +12,65 @@ permissions:
   contents: read
 
 jobs:
+  check_refresh_streak:
+    name: pause after six failed session refreshes
+    runs-on: ubuntu-latest
+    outputs:
+      should_refresh: ${{ steps.refresh_streak.outputs.should_refresh }}
+    steps:
+      - name: check recent session refresh outcomes
+        id: refresh_streak
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+            echo "should_refresh=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          candidate_runs="$(
+            for workflow in refresh-session.yml live-validation.yml; do
+              gh api --paginate \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?status=completed&per_page=100" \
+                --jq '.workflow_runs[] | [.created_at, (.id | tostring)] | @tsv'
+            done | sort -r
+          )"
+
+          failed_count=0
+          while IFS=$'\t' read -r _ run_id; do
+            [ -n "$run_id" ] || continue
+            conclusion="$(
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?per_page=100" \
+                --jq 'if ([.jobs[].steps[]? | select(.name == "session refresh circuit breaker is open" and .conclusion == "success")] | length) > 0 then "paused" else ([.jobs[].steps[]? | select(.name == "refresh Trade Republic session" or .name == "refresh Trade Republic session once") | .conclusion][0] // "none") end'
+            )"
+            case "$conclusion" in
+              paused)
+                echo "should_refresh=false" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              success)
+                echo "should_refresh=true" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              failure)
+                failed_count=$((failed_count + 1))
+                if [ "$failed_count" -eq 6 ]; then
+                  echo "should_refresh=false" >> "$GITHUB_OUTPUT"
+                  echo "The previous six session refresh attempts failed; pausing scheduled refreshes. Run npm run ci:reauth from a maintainer machine to replace the session and dispatch live validation." >> "$GITHUB_STEP_SUMMARY"
+                  exit 0
+                fi
+                ;;
+            esac
+          done <<< "$candidate_runs"
+
+          echo "should_refresh=true" >> "$GITHUB_OUTPUT"
+
+      - name: session refresh circuit breaker is open
+        if: steps.refresh_streak.outputs.should_refresh == 'false'
+        run: echo "Scheduled refreshes remain paused until npm run ci:reauth or a manual refresh succeeds." >> "$GITHUB_STEP_SUMMARY"
+
   check_activity:
     name: skip refresh while another workflow is running
     if: github.ref == 'refs/heads/main'
@@ -36,8 +96,8 @@ jobs:
 
   refresh-session:
     name: refresh and verify the live session
-    needs: check_activity
-    if: needs.check_activity.outputs.should_refresh == 'true'
+    needs: [check_activity, check_refresh_streak]
+    if: needs.check_activity.outputs.should_refresh == 'true' && needs.check_refresh_streak.outputs.should_refresh == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
