@@ -43,6 +43,18 @@ mapper calls live in `src/operation-specs.ts`; domain adapters live in
 
 ## Live integration tests
 
+The `Live integration tests` workflow starts automatically when a maintainer
+approves a same-repository pull request targeting `main`. It runs the
+non-ordering integration suite against the protected `Live Integration Tests`
+environment. The manual order suite stays excluded because it can place a real
+order.
+
+`Refresh live session` runs every two hours and updates that environment's
+`TR_SESSION_JSON` secret. It also needs the environment secret
+`SESSION_SECRET_WRITE_TOKEN`, a narrowly scoped token allowed to update that
+environment secret. Neither secret is available to ordinary pull-request
+checks or fork pull requests.
+
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.
 An empty endpoint list is valid where the endpoint permits it; it does not prove

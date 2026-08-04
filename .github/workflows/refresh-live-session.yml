@@ -1,0 +1,45 @@
+name: Refresh live session
+
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-integration-tests-main
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: Live Integration Tests
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: materialize the saved session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: |
+          umask 077
+          printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
+      - name: refresh the saved session
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run ci:reauth
+      - name: store the refreshed session
+        env:
+          GH_TOKEN: ${{ secrets.SESSION_SECRET_WRITE_TOKEN }}
+        run: gh secret set TR_SESSION_JSON --env "Live Integration Tests" --body "$(cat "$RUNNER_TEMP/tr-session.json")"
+      - name: delete the saved session
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tr-session.json"
