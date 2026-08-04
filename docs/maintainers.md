@@ -55,6 +55,20 @@ order.
 update that repository secret. Neither secret is available to ordinary
 pull-request checks or fork pull requests.
 
+To replace a missing or expired CI session, authenticate the GitHub CLI, then
+run the interactive enrollment from the repository root:
+
+```powershell
+npm run ci:reauth
+```
+
+With no `TR_SESSION_FILE`, the command opens a browser to collect the WAF token,
+prints rotating QR codes for approval in the Trade Republic app, and writes the
+new session directly to the repository `TR_SESSION_JSON` secret. It does not
+print the session or leave a new session file on disk. The scheduled workflow
+sets `TR_SESSION_FILE`, which switches the same command to non-interactive
+refresh mode.
+
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.
 An empty endpoint list is valid where the endpoint permits it; it does not prove

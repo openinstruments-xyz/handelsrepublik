@@ -28,7 +28,7 @@
     "test": "node --import tsx --test tests/*.test.ts tests/unit/*.test.ts",
     "test:integration": "node --import tsx --test --test-concurrency=1 tests/integration/*.integration.test.ts",
     "test:integration:manual": "node --import tsx --test tests/integration/manual/limit-buy.integration.test.ts",
-    "ci:reauth": "node --import tsx scripts/refresh-ci-session.mjs",
+    "ci:reauth": "node --import tsx scripts/reauth-ci.ts",
     "typecheck": "tsc --noEmit",
     "schemas:doc": "node --import tsx scripts/generate-schema-catalog.ts"
   },
