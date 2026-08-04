@@ -960,7 +960,7 @@ async function l2Venues(assetId) {
 function l2(assetId, exchangeId) {
   assetId ??= EXAMPLE_ASSET_ID;
   exchangeId ??= EXAMPLE_L2_EXCHANGE_ID;
-  return client.market.subscribeL2OrderBook({ assetId, exchangeId });
+  return client.market.subscribeL2OrderBook(assetId, exchangeId);
 }
 
 async function next(subscription, options = {}) {

@@ -18,7 +18,6 @@ import type {
   CandleSeries,
   CandleTimeframe,
   L2OrderBook,
-  L2OrderBookOptions,
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,
@@ -117,7 +116,10 @@ export const liveFeedSpec: StreamSpec<LiveFeedOptions, LiveFeedEvent> = {
   normalize: (raw) => normalizeLiveFeedEvent(raw),
 };
 
-export const l2OrderBookSpec: ProtobufStreamSpec<L2OrderBookOptions, L2OrderBook> = {
+export const l2OrderBookSpec: ProtobufStreamSpec<{
+  assetId: string;
+  exchangeId: string;
+}, L2OrderBook> = {
   schemaName: 'market.l2OrderBook',
   topic: 'L2',
   request: (params) => ({ instrumentId: { isin: params.assetId, exchangeId: params.exchangeId } }),

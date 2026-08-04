@@ -76,7 +76,6 @@ import type {
   IbanInfo,
   InstrumentNewsItem,
   L2OrderBook,
-  L2OrderBookOptions,
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,
@@ -1346,12 +1345,21 @@ export class MarketApi {
     return this.resources.query(availableL2BooksSpec, { assetId });
   }
 
-  subscribeL2OrderBook(options: L2OrderBookOptions): Subscription<L2OrderBook> {
-    return this.resources.protobufStream(l2OrderBookSpec, options);
+  subscribeL2OrderBook(assetId: string, exchangeId: string): Subscription<L2OrderBook> {
+    return this.resources.protobufStream(l2OrderBookSpec, { assetId, exchangeId });
   }
 
-  l2OrderBook(assetId: string, exchangeId: string, options: Omit<L2OrderBookOptions, 'assetId' | 'exchangeId'> = {}): Subscription<L2OrderBook> {
-    return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
+  async snapshotL2OrderBook(assetId: string, exchangeId: string): Promise<L2OrderBook> {
+    const subscription = this.subscribeL2OrderBook(assetId, exchangeId);
+    try {
+      const snapshot = await subscription[Symbol.asyncIterator]().next();
+      if (snapshot.done) {
+        throw new TradeRepublicProtocolError('Trade Republic closed the L2 order book stream before sending a snapshot.');
+      }
+      return snapshot.value;
+    } finally {
+      subscription.close();
+    }
   }
 
   private async resolveCandleSource(options: CandleDownloadOptions): Promise<'standard' | 'light' | 'bond'> {

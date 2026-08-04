@@ -73,7 +73,6 @@ export type {
   InstrumentStatus,
   InstantLoginChallenge,
   L2OrderBook,
-  L2OrderBookOptions,
   L2Venue,
   LiveFeedEvent,
   LiveFeedOptions,

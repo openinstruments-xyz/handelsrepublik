@@ -846,11 +846,6 @@ export interface MarketQuote {
   raw: unknown;
 }
 
-export interface L2OrderBookOptions {
-  assetId: string;
-  exchangeId: string;
-}
-
 export interface L2Venue {
   exchangeId: string;
   name?: string | undefined;

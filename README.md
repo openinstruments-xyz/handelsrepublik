@@ -4,20 +4,12 @@
 
 # Don't use, it's still in heavy development and will contain bugs. 
 
-**Workflow status**
+**GitHub Actions**
 
-| Workflow | Latest | Scheduled | Manual |
-|---|:---:|:---:|:---:|
-| [Package checks](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/quality.yml)<br><details><summary><sub>typecheck, build, distribution</sub></summary><sub>Checks that the TypeScript source has no type errors, builds the installable package, and confirms that the committed <code>dist/</code> files exactly match a fresh build.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual/run) |
-| [Unit tests](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/unit-tests.yml)<br><details><summary><sub>client, schemas, transports, normalizers, sessions, venues, WAF</sub></summary><sub>Runs the mocked test suite without using a live brokerage account. It checks login and session behavior, request headers, response validation, data normalization, order safety and recovery, websocket reconnection, market helpers, venue metadata, WAF-token handling, and the live-test infrastructure itself.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual/run) |
-| [Live: account, market data, and reversible mutations](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>account reads, assets, market data, streaming, alerts, watchlist</sub></summary><sub>Uses the shared one-refresh executor and independently reports account and market-data reads, reversible alert/watchlist mutations, and—during weekday Berlin market hours—open-market quote, L2, ticker, and tape checks. It persists the refreshed session once after all blocks finish and publishes the structured case results to the badge Worker.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/account-market-mutations/manual/run) |
-| [Live: trading availability when markets are closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>destinations, exchange schedule, instrument status, quotation</sub></summary><sub>Runs during the Berlin overnight window and checks the live venue state without placing an order. For each supported asset class it reads the available order destinations and expects ordinary exchange-traded assets not to expose an open destination. It also validates the LSX schedule, Apple's closed instrument status, and a closed-market quotation. Continuously available or differently traded classes such as crypto are allowed to remain open.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/destinations/manual/run) |
-| [Live: limit order rejected while market is closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>closed venue must reject a deeply priced limit order</sub></summary><sub>Runs only during weekday Berlin overnights and confirms that LSX reports closed. It then tries to submit a one-share Apple limit buy at EUR 1 and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. Weekend acceptance is covered separately.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/limit-rejection/manual/run) |
-| [Live: market order rejected while market is closed](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>closed venue must reject a market order</sub></summary><sub>Runs only from the trusted merge queue or after an explicit owner dispatch and confirmation, plus the Berlin overnight time gate. It confirms that LSX reports closed, then tries to submit an amount-based EUR 1 Apple market buy and waits for the broker response. The test passes only when the broker rejects the request with the expected <code>exchangeClosed</code> error details. If the venue unexpectedly accepts the order, the test immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/market-rejection/manual/run) |
-| [Live: submit, replace, and cancel a limit order](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>submit, observe, replace, cancel, and clean up a limit order</sub></summary><sub>Runs on weekdays during the Berlin market window, selects NVIDIA, Apple, or Microsoft on an explicitly open destination, and requires a bid of at least EUR 10. It opens the order-update stream, submits one share at a deliberately non-marketable EUR 1 limit, verifies the created/open update, replaces the order at EUR 0.50, verifies the cancellation and replacement updates, then cancels the replacement and verifies its cancellation. Cleanup is retried in all cases, although any real order carries some execution risk.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/lifecycle/manual/run) |
-| [Live: limit order rejected on weekends](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/live-validation.yml)<br><details><summary><sub>weekend venue must reject a deeply priced limit order</sub></summary><sub>Runs on Saturday and Sunday in Europe/Berlin. It confirms that LSX reports closed, submits a one-share Apple limit buy at EUR 1, and passes only when Trade Republic rejects the request with <code>exchangeClosed</code>. If the venue unexpectedly accepts the order, cleanup immediately attempts to cancel it.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/latest/run) | [![scheduled](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/scheduled.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/scheduled/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/weekend-rejection/manual/run) |
-| [Manual: buy up to €5 of an instrument](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/execute-market-buy-on-live-account.yml)<br><details><summary><sub>confirmed real purchase of a custom instrument</sub></summary><sub>Runs only when the repository owner manually supplies an ISIN, a gross budget of at most EUR 5, and explicit confirmation. It selects an open market-order venue, reads the current ask, calculates how many whole units fit within the budget, submits the real market buy, and waits for execution. The purchased position is intentionally left in the account; there is no automatic sell, and the broker's expected EUR 1 order fee is additional.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/buy/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/buy/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/buy/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/buy/manual/run) |
-| [Manual: sell whole units of an instrument](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/execute-market-sell-on-live-account.yml)<br><details><summary><sub>confirmed real sale of an exact whole-unit quantity</sub></summary><sub>Runs only when the repository owner manually supplies the same ISIN as a preceding buy, an exact positive whole-unit quantity, and explicit confirmation. It selects an open market-order venue, reads the current bid, submits the sell, and waits for execution. It never discovers or sells an entire existing position automatically.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/sell/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/sell/latest/run) | — | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/sell/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/sell/manual/run) |
+| Workflow | Scope |
+|---|---|
+| [Package checks](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/quality.yml) | Typecheck, build, and verify the committed distribution. |
+| [Unit tests](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/unit-tests.yml) | Run the mocked test suite without live-account credentials. |
 
 ## Contents
 
@@ -1335,10 +1327,15 @@ console.log(VENUE_DISPLAY_NAMES.TIB); // Best Price
 console.log(venueDisplayName('XETR')); // Xetra
 console.log(MARKET_DATA_STREAM_TOPICS); // { bidAsk: 'tickerV3', orderBook: 'L2' }
 
-// L2 uses the mapper's protobuf order-book stream. Xetra's exchange ID is
-// XETR. Venues such as LSX that do not publish L2 may return a protocol error
-// through the async iterator; close every stream in a finally block.
-const orderBook = tr.market.l2OrderBook('US0378331005', 'XETR');
+const assetId = 'US0378331005';
+const venues = await tr.market.availableL2Books(assetId);
+const venue = venues[0];
+if (!venue) throw new Error('No L2 venue is advertised for this instrument.');
+
+const snapshot = await tr.market.snapshotL2OrderBook(assetId, venue.exchangeId);
+console.log(snapshot.bids, snapshot.asks);
+
+const orderBook = tr.market.subscribeL2OrderBook(assetId, venue.exchangeId);
 try {
   for await (const book of orderBook) {
     console.log(book.instrumentId, book.currency, book.bids, book.asks);
@@ -1348,19 +1345,18 @@ try {
 }
 ```
 
-`liveFeed(assetId, options)` and `l2OrderBook(assetId, exchangeId, options)` are
-the concise convenience forms. Their object-parameter counterparts remain
-available when options are already assembled as objects:
+`availableL2Books()` reports venues advertised by the instrument metadata. It
+does not guarantee that the account is entitled to the feed or that L2 data is
+currently available. Check `entitlements('L2', ...)` when entitlement status
+matters, and handle protocol errors from both snapshot and streaming requests.
+
+`liveFeed(assetId, options)` is the concise form of the object-parameter
+`subscribeLiveFeed()` method:
 
 ```ts
 const feed = tr.market.subscribeLiveFeed({
   assetId: 'US0378331005',
   exchangeId: 'LSX',
-});
-
-const orderBook = tr.market.subscribeL2OrderBook({
-  assetId: 'US0378331005',
-  exchangeId: 'XETR',
 });
 ```
 

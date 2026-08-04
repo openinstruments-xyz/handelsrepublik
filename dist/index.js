@@ -4895,11 +4895,20 @@ var MarketApi = class {
   availableL2Books(assetId) {
     return this.resources.query(availableL2BooksSpec, { assetId });
   }
-  subscribeL2OrderBook(options) {
-    return this.resources.protobufStream(l2OrderBookSpec, options);
+  subscribeL2OrderBook(assetId, exchangeId) {
+    return this.resources.protobufStream(l2OrderBookSpec, { assetId, exchangeId });
   }
-  l2OrderBook(assetId, exchangeId, options = {}) {
-    return this.subscribeL2OrderBook({ ...options, assetId, exchangeId });
+  async snapshotL2OrderBook(assetId, exchangeId) {
+    const subscription = this.subscribeL2OrderBook(assetId, exchangeId);
+    try {
+      const snapshot = await subscription[Symbol.asyncIterator]().next();
+      if (snapshot.done) {
+        throw new TradeRepublicProtocolError("Trade Republic closed the L2 order book stream before sending a snapshot.");
+      }
+      return snapshot.value;
+    } finally {
+      subscription.close();
+    }
   }
   async resolveCandleSource(options) {
     const type = options.instrumentType;
