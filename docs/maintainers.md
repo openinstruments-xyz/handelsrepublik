@@ -49,11 +49,11 @@ non-ordering integration suite against the protected `Live Integration Tests`
 environment. The manual order suite stays excluded because it can place a real
 order.
 
-`Refresh live session` runs every two hours and updates that environment's
-`TR_SESSION_JSON` secret. It also needs the environment secret
-`SESSION_SECRET_WRITE_TOKEN`, a narrowly scoped token allowed to update that
-environment secret. Neither secret is available to ordinary pull-request
-checks or fork pull requests.
+`Refresh live session` runs every two hours and updates the repository
+`TR_SESSION_JSON` secret. It uses
+`GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION`, a narrowly scoped token allowed to
+update that repository secret. Neither secret is available to ordinary
+pull-request checks or fork pull requests.
 
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.
