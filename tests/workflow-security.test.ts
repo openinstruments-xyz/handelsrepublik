@@ -39,7 +39,7 @@ describe('GitHub Actions trust boundaries', () => {
       assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), true);
       assert.equal(hasTopLevelTrigger(workflow.source, 'merge_group'), true);
       assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_call'), false);
-      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_dispatch'), false);
+      assert.equal(hasTopLevelTrigger(workflow.source, 'workflow_dispatch'), true);
       assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request_target'), false);
     }
   });
@@ -86,7 +86,8 @@ describe('GitHub Actions trust boundaries', () => {
     assert.equal(hasTopLevelTrigger(refresh.source, 'workflow_dispatch'), true);
     assert.match(refresh.source, /^\s+environment: Live Integration Tests\r?$/m);
     assert.match(refresh.source, /^\s+run: npm run ci:reauth\r?$/m);
-    assert.match(refresh.source, /gh secret set TR_SESSION_JSON --env "Live Integration Tests"/);
+    assert.match(refresh.source, /gh secret set TR_SESSION_JSON --body/);
+    assert.match(refresh.source, /secrets\.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.match(refresh.source, /^\s+persist-credentials: false\r?$/m);
     assert.doesNotMatch(refresh.source, /echo .*TR_SESSION_JSON/);
   });
