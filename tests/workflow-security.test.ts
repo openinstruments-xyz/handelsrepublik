@@ -10,6 +10,7 @@ const workflows = readdirSync(workflowDirectory)
     file,
     source: readFileSync(join(workflowDirectory, file), 'utf8'),
   }));
+const publicWorkflows = workflows.filter((workflow) => ['quality.yml', 'unit-tests.yml'].includes(workflow.file));
 
 function hasTopLevelTrigger(source: string, trigger: string): boolean {
   const lines = source.split(/\r?\n/);
@@ -24,15 +25,15 @@ function hasTopLevelTrigger(source: string, trigger: string): boolean {
 }
 
 describe('GitHub Actions trust boundaries', () => {
-  it('keeps only unit tests and package checks', () => {
+  it('keeps unit tests and package checks as the only public workflows', () => {
     assert.deepEqual(
-      workflows.map((workflow) => workflow.file).sort(),
+      publicWorkflows.map((workflow) => workflow.file).sort(),
       ['quality.yml', 'unit-tests.yml'],
     );
   });
 
   it('runs both checks directly for main, pull requests, and merge candidates', () => {
-    for (const workflow of workflows) {
+    for (const workflow of publicWorkflows) {
       assert.match(workflow.source, /^name: (?:Package checks|Unit tests)$/m);
       assert.equal(hasTopLevelTrigger(workflow.source, 'push'), true);
       assert.equal(hasTopLevelTrigger(workflow.source, 'pull_request'), true);
@@ -44,7 +45,7 @@ describe('GitHub Actions trust boundaries', () => {
   });
 
   it('keeps both checks secret-free and read-only', () => {
-    for (const workflow of workflows) {
+    for (const workflow of publicWorkflows) {
       assert.match(workflow.source, /^permissions:\r?\n  contents: read\r?$/m);
       assert.doesNotMatch(workflow.source, /\$\{\{\s*secrets\./);
       assert.doesNotMatch(workflow.source, /^\s+environment:/m);
@@ -62,5 +63,31 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(quality?.source ?? '', /^\s+run: npm run typecheck\r?$/m);
     assert.match(quality?.source ?? '', /^\s+run: npm run build\r?$/m);
     assert.match(quality?.source ?? '', /^\s+run: git diff --exit-code -- dist\r?$/m);
+  });
+
+  it('limits live integration tests to approved same-repository pull requests', () => {
+    const live = workflows.find((workflow) => workflow.file === 'live-integration.yml');
+    assert.ok(live);
+    assert.equal(hasTopLevelTrigger(live.source, 'pull_request_review'), true);
+    assert.doesNotMatch(live.source, /pull_request_target/);
+    assert.match(live.source, /github\.event\.review\.state == 'approved'/);
+    assert.match(live.source, /github\.event\.review\.author_association/);
+    assert.match(live.source, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+    assert.match(live.source, /^\s+environment: Live Integration Tests\r?$/m);
+    assert.match(live.source, /^\s+run: npm run test:integration\r?$/m);
+    assert.doesNotMatch(live.source, /test:integration:manual/);
+    assert.match(live.source, /^\s+persist-credentials: false\r?$/m);
+  });
+
+  it('refreshes the protected live session without exposing it in output', () => {
+    const refresh = workflows.find((workflow) => workflow.file === 'refresh-live-session.yml');
+    assert.ok(refresh);
+    assert.equal(hasTopLevelTrigger(refresh.source, 'schedule'), true);
+    assert.equal(hasTopLevelTrigger(refresh.source, 'workflow_dispatch'), true);
+    assert.match(refresh.source, /^\s+environment: Live Integration Tests\r?$/m);
+    assert.match(refresh.source, /^\s+run: npm run ci:reauth\r?$/m);
+    assert.match(refresh.source, /gh secret set TR_SESSION_JSON --env "Live Integration Tests"/);
+    assert.match(refresh.source, /^\s+persist-credentials: false\r?$/m);
+    assert.doesNotMatch(refresh.source, /echo .*TR_SESSION_JSON/);
   });
 });

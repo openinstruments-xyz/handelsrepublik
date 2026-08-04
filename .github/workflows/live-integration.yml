@@ -1,0 +1,50 @@
+# Runs only for approved, same-repository pull requests. This workflow uses the
+# protected Live Integration Tests environment, never repository-level secrets.
+name: Live integration tests
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-integration-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    if: >-
+      github.event.review.state == 'approved' &&
+      (github.event.review.author_association == 'OWNER' ||
+      github.event.review.author_association == 'MEMBER' ||
+      github.event.review.author_association == 'COLLABORATOR') &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: Live Integration Tests
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: materialize the saved session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: |
+          umask 077
+          printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
+      - name: run the live integration suite
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run test:integration
+      - name: delete the saved session
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tr-session.json"
