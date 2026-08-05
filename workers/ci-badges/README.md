@@ -1,7 +1,7 @@
 # CI badge Worker
 
 This Cloudflare Worker renders compact status-only SVG badges for the
-allowlisted workflows in the private `VIEWVIEWVIEW/handelsrepublik`
+allowlisted workflows in the private `openinstruments-xyz/handelsrepublik`
 repository.
 Badges use four visible states: passing, pending, failing, and unknown. Pending
 badges are blue and cover queued or running workflows. Unknown is reserved for

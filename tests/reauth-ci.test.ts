@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { runCiReauth } from '../scripts/reauth-ci.js';
 
 const options = {
-  repo: 'VIEWVIEWVIEW/handelsrepublik',
+  repo: 'openinstruments-xyz/handelsrepublik',
   secret: 'TR_SESSION_JSON',
   deviceName: 'test',
   timeoutMs: 1_000,

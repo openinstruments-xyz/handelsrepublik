@@ -1,4 +1,4 @@
-const OWNER = 'VIEWVIEWVIEW';
+const OWNER = 'openinstruments-xyz';
 const REPOSITORY = 'handelsrepublik';
 const BRANCH = 'main';
 const API_VERSION = '2026-03-10';
@@ -360,7 +360,7 @@ function validateStoredReport(value, expectedWorkflow) {
     || !Number.isSafeInteger(result.runAttempt)
     || result.runAttempt <= 0
     || typeof result.runUrl !== 'string'
-    || !result.runUrl.startsWith('https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/runs/')
+    || !result.runUrl.startsWith('https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/')
     || !['push', 'schedule', 'workflow_dispatch'].includes(result.event)
     || typeof result.sha !== 'string'
     || result.sha.length < 7

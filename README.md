@@ -1,6 +1,6 @@
 # handelsrepublik
 
-<sub>[Maintainer documentation](https://github.com/VIEWVIEWVIEW/handelsrepublik/blob/main/docs/maintainers.md)</sub>
+<sub>[Maintainer documentation](https://github.com/openinstruments-xyz/handelsrepublik/blob/main/docs/maintainers.md)</sub>
 
 # Don't use, it's still in heavy development and will contain bugs. 
 
@@ -8,8 +8,8 @@
 
 | Workflow | Latest | Manual | Scheduled |
 |---|:---:|:---:|:---:|
-| [Package checks](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/quality.yml)<br><details><summary><sub>typecheck, build, distribution</sub></summary><sub>Checks that the TypeScript source has no type errors, builds the installable package, and confirms that the committed <code>dist/</code> files exactly match a fresh build.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual/run) | — |
-| [Unit tests](https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/workflows/unit-tests.yml)<br><details><summary><sub>client, schemas, transports, normalizers, sessions, venues, WAF</sub></summary><sub>Runs the mocked test suite without using a live brokerage account. It checks login and session behavior, request headers, response validation, data normalization, order safety and recovery, websocket reconnection, market helpers, venue metadata, WAF-token handling, and the live-test infrastructure itself.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual/run) | — |
+| [Package checks](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/quality.yml)<br><details><summary><sub>typecheck, build, distribution</sub></summary><sub>Checks that the TypeScript source has no type errors, builds the installable package, and confirms that the committed <code>dist/</code> files exactly match a fresh build.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/latest/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/quality/manual/run) | — |
+| [Unit tests](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/unit-tests.yml)<br><details><summary><sub>client, schemas, transports, normalizers, sessions, venues, WAF</sub></summary><sub>Runs the mocked test suite without using a live brokerage account. It checks login and session behavior, request headers, response validation, data normalization, order safety and recovery, websocket reconnection, market helpers, venue metadata, WAF-token handling, and the live-test infrastructure itself.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/latest/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/unit/manual/run) | — |
 
 ## Contents
 
@@ -1559,4 +1559,4 @@ as a general SDK demo.
 
 Repository development, live-test operations, CI session renewal, and the
 GitHub Actions trust boundary are documented in
-[the maintainer documentation](https://github.com/VIEWVIEWVIEW/handelsrepublik/blob/main/docs/maintainers.md).
+[the maintainer documentation](https://github.com/openinstruments-xyz/handelsrepublik/blob/main/docs/maintainers.md).
