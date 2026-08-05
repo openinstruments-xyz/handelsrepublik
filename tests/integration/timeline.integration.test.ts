@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import { assertArray, assertRecord, withLiveClient } from './support.js';
 
 describe('timeline integration', () => {

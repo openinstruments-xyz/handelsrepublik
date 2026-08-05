@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import { assetClasses, assertArray, assertRecord, firstAsset, withLiveClient } from './support.js';
 
 describe('assets integration', () => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import type { AssetSearchType } from '../../src/index.js';
 import { APPLE, assertArray, firstAsset, withLiveClient } from './support.js';
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import { APPLE, assertArray, withLiveClient } from './support.js';
 
-describe('price alarms integration', () => {
+describe('price alarms integration', { concurrency: false }, () => {
   it('reads notifications', { timeout: 90_000 }, () => withLiveClient('price-alarms', async (client) => {
     assertArray(await client.priceAlarms.list(), 'priceAlarms.list');
     assertArray(await client.priceAlarms.notifications(), 'priceAlarms.notifications');

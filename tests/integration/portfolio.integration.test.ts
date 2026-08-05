@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import { assertArray, assertRecord, callOptionalAccountResource, resolveSecuritiesAccountNumber, withLiveClient } from './support.js';
 
 describe('portfolio integration', () => {

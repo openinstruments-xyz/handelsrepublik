@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import { APPLE, DEFAULT_WATCHLIST, assertArray, withLiveClient } from './support.js';
 
-describe('watchlist integration', () => {
+describe('watchlist integration', { concurrency: false }, () => {
   it('reads the default watchlist', { timeout: 90_000 }, () => withLiveClient('watchlist', async (client) => {
     const watchlists = await client.discovery.watchlists();
     assertArray(watchlists, 'discovery.watchlists');
