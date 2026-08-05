@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-integration-tests-${{ github.ref }}
+  group: trade-republic-live-session
   cancel-in-progress: false
 
 jobs:

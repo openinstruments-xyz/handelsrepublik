@@ -1,0 +1,34 @@
+# Report the required merge-queue context without executing pull-request code.
+# The actual live integration tests run on GitHub's merge candidate.
+name: Merge queue readiness
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: merge-queue-readiness-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    name: ready for merge queue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: report readiness on the pull-request head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f "name=Merge gate / merge gate" \
+            -f "head_sha=$HEAD_SHA" \
+            -f "status=completed" \
+            -f "conclusion=success" \
+            -f "output[title]=Ready for merge queue" \
+            -f "output[summary]=Live integration tests will run on the merge candidate before it can be merged."
