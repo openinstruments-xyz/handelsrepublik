@@ -1,5 +1,5 @@
 # Validate the exact merge candidate before GitHub adds it to main.
-name: Merge gate
+name: Merge queue
 
 on:
   merge_group:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: merge-gate-${{ github.ref }}
+  group: merge-queue-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -17,8 +17,8 @@ jobs:
     name: live integration tests
     uses: ./.github/workflows/live-integration.yml
 
-  merge-gate:
-    name: Merge gate / merge gate
+  merge-queue:
+    name: Merge queue / merge queue
     if: ${{ always() }}
     needs: [live]
     runs-on: ubuntu-latest
