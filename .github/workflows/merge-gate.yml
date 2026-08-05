@@ -1,0 +1,80 @@
+# The pull-request job is intentionally secret-free. Live account access is
+# deferred until GitHub has created a merge candidate after maintainer approval.
+name: Merge gate
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  approval:
+    name: maintainer approval
+    if: ${{ github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: Merge Gate
+      deployment: false
+    steps:
+      - name: report approval on the pull-request head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f "name=Merge gate / merge gate" \
+            -f "head_sha=$HEAD_SHA" \
+            -f "status=completed" \
+            -f "conclusion=success" \
+            -f "output[title]=Maintainer approval recorded" \
+            -f "output[summary]=This pull request is approved to enter the merge queue."
+
+  live:
+    name: live integration tests
+    if: ${{ github.event_name == 'merge_group' }}
+    uses: ./.github/workflows/live-integration.yml
+
+  merge-gate:
+    name: merge gate
+    if: ${{ always() && github.event_name != 'pull_request_target' }}
+    needs: [approval, live]
+    runs-on: ubuntu-latest
+    steps:
+      - name: require the checks selected for this event
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          APPROVAL_RESULT: ${{ needs.approval.result }}
+          LIVE_RESULT: ${{ needs.live.result }}
+        run: |
+          set -eu
+
+          require_result() {
+            label="$1"
+            actual="$2"
+            expected="$3"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$label concluded '$actual'; expected '$expected'."
+              return 1
+            fi
+          }
+
+          require_result "maintainer approval" "$APPROVAL_RESULT" "skipped"
+
+          expected_live_result="skipped"
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            expected_live_result="success"
+          fi
+          require_result "live integration tests" "$LIVE_RESULT" "$expected_live_result"

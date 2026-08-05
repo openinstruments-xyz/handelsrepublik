@@ -2,7 +2,7 @@ name: Refresh live session
 
 on:
   schedule:
-    - cron: '17 */2 * * *'
+    - cron: "17 */2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,10 +36,17 @@ jobs:
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
         run: npm run ci:reauth
-      - name: store the refreshed session
+      - name: store the refreshed protected-environment secrets
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
-        run: gh secret set TR_SESSION_JSON --body "$(cat "$RUNNER_TEMP/tr-session.json")"
+          TR_SESSION_MANAGEMENT_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
+        run: |
+          gh secret set TR_SESSION_JSON \
+            --body "$(cat "$RUNNER_TEMP/tr-session.json")" \
+            --env "Live Integration Tests"
+          gh secret set GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION \
+            --body "$TR_SESSION_MANAGEMENT_TOKEN" \
+            --env "Live Integration Tests"
       - name: delete the saved session
         if: always()
         run: rm -f "$RUNNER_TEMP/tr-session.json"
