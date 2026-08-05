@@ -74,7 +74,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.equal(hasTopLevelTrigger(readiness.source, 'merge_group'), false);
     assert.equal(hasTopLevelTrigger(readiness.source, 'workflow_dispatch'), false);
     assert.match(readiness.source, /^\s+name: ready for merge queue\r?$/m);
-    assert.match(readiness.source, /^\s+-f "name=Merge gate \/ merge gate" \\\r?$/m);
+    assert.match(readiness.source, /^\s+-f "name=Merge queue \/ merge queue" \\\r?$/m);
     assert.doesNotMatch(readiness.source, /^\s+environment:/m);
     assert.doesNotMatch(readiness.source, /\$\{\{\s*secrets\./);
     assert.doesNotMatch(readiness.source, /actions\/checkout|npm (?:ci|run|test)/);
@@ -85,20 +85,20 @@ describe('GitHub Actions trust boundaries', () => {
   });
 
   it('requires successful live integration tests for merge candidates', () => {
-    const gate = workflows.find((workflow) => workflow.file === 'merge-gate.yml');
-    assert.ok(gate);
-    assert.equal(hasTopLevelTrigger(gate.source, 'push'), false);
-    assert.equal(hasTopLevelTrigger(gate.source, 'pull_request'), false);
-    assert.equal(hasTopLevelTrigger(gate.source, 'pull_request_target'), false);
-    assert.equal(hasTopLevelTrigger(gate.source, 'merge_group'), true);
-    assert.equal(hasTopLevelTrigger(gate.source, 'workflow_dispatch'), false);
-    assert.doesNotMatch(gate.source, /maintainer approval|name: Merge Gate|deployment: false/);
-    assert.match(gate.source, /^\s+name: Merge gate \/ merge gate\r?$/m);
-    assert.match(gate.source, /uses: \.\/\.github\/workflows\/live-integration\.yml/);
-    assert.match(gate.source, /LIVE_RESULT/);
-    assert.match(gate.source, /expected 'success'/);
-    assert.doesNotMatch(gate.source, /\$\{\{\s*secrets\./);
-    assert.doesNotMatch(gate.source, /actions\/checkout|npm (?:ci|run|test)/);
+    const queue = workflows.find((workflow) => workflow.file === 'merge-queue.yml');
+    assert.ok(queue);
+    assert.equal(hasTopLevelTrigger(queue.source, 'push'), false);
+    assert.equal(hasTopLevelTrigger(queue.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(queue.source, 'pull_request_target'), false);
+    assert.equal(hasTopLevelTrigger(queue.source, 'merge_group'), true);
+    assert.equal(hasTopLevelTrigger(queue.source, 'workflow_dispatch'), false);
+    assert.doesNotMatch(queue.source, /merge gate|maintainer approval|deployment: false/i);
+    assert.match(queue.source, /^\s+name: Merge queue \/ merge queue\r?$/m);
+    assert.match(queue.source, /uses: \.\/\.github\/workflows\/live-integration\.yml/);
+    assert.match(queue.source, /LIVE_RESULT/);
+    assert.match(queue.source, /expected 'success'/);
+    assert.doesNotMatch(queue.source, /\$\{\{\s*secrets\./);
+    assert.doesNotMatch(queue.source, /actions\/checkout|npm (?:ci|run|test)/);
   });
 
   it('limits live integration tests to merge candidates and maintainer dispatches', () => {

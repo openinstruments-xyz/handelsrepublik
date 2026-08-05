@@ -26,7 +26,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
-            -f "name=Merge gate / merge gate" \
+            -f "name=Merge queue / merge queue" \
             -f "head_sha=$HEAD_SHA" \
             -f "status=completed" \
             -f "conclusion=success" \
