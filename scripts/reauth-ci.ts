@@ -10,7 +10,7 @@ import {
   TradeRepublicClient,
   toTradeRepublicWafToken,
 } from '../src/index.js';
-import type { Session, TradeRepublicBrowserLike } from '../src/index.js';
+import type { Session, TradeRepublicBrowserLike, TradeRepublicWebContext } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
 const qrcodeTerminal = require('qrcode-terminal') as {
@@ -43,14 +43,23 @@ interface ReauthOperations {
   enroll(options: Options): Promise<void>;
 }
 
+type CiReauthMode = 'enroll' | 'refresh';
+
+interface ParsedOptions {
+  options: Options;
+  mode: CiReauthMode;
+}
+
 const DEFAULT_REPOSITORY = 'openinstruments-xyz/handelsrepublik';
 
 export async function runCiReauth(
   sessionPath: string | undefined,
   options: Options,
   operations: ReauthOperations,
+  mode: CiReauthMode = 'enroll',
 ): Promise<void> {
-  if (sessionPath) {
+  if (mode === 'refresh') {
+    assert.ok(sessionPath, 'TR_SESSION_FILE is required for --refresh.');
     await operations.refresh(sessionPath);
     return;
   }
@@ -91,7 +100,10 @@ async function enrollRepositorySession(options: Options): Promise<void> {
       wafToken: toTradeRepublicWafToken(webContext),
     });
 
-    const session = await loginWithRotatingQr(client, options);
+    const authenticatedSession = await loginWithRotatingQr(client, options);
+    const session = completeFreshEnrollmentSession(authenticatedSession, webContext);
+    client.setSession(session);
+    await client.auth.saveSession(session);
     assertAuthMaterial(session);
     console.log('Trade Republic login approved.');
 
@@ -105,6 +117,19 @@ async function enrollRepositorySession(options: Options): Promise<void> {
     client?.close();
     await browser.close().catch(() => undefined);
   }
+}
+
+export function completeFreshEnrollmentSession(
+  session: Session,
+  webContext: TradeRepublicWebContext,
+): Session {
+  const completeSession = {
+    ...session,
+    webContext: structuredClone(webContext),
+  };
+  assertAuthMaterial(completeSession);
+  assertCompleteWebContext(completeSession.webContext);
+  return completeSession;
 }
 
 async function loginWithRotatingQr(
@@ -191,7 +216,7 @@ function gh(args: string[], input?: string): Promise<void> {
   });
 }
 
-function parseOptions(args: string[]): Options | undefined {
+function parseOptions(args: string[]): ParsedOptions | undefined {
   const options: Options = {
     repo: DEFAULT_REPOSITORY,
     secret: 'TR_SESSION_JSON',
@@ -200,10 +225,12 @@ function parseOptions(args: string[]): Options | undefined {
     timeoutMs: 10 * 60_000,
     debug: false,
   };
+  let mode: CiReauthMode = 'enroll';
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
-    if (argument === '--debug') options.debug = true;
+    if (argument === '--refresh') mode = 'refresh';
+    else if (argument === '--debug') options.debug = true;
     else if (argument === '--repo') options.repo = requiredValue(args, ++index, argument);
     else if (argument === '--secret') options.secret = requiredValue(args, ++index, argument);
     else if (argument === '--environment') options.environment = requiredValue(args, ++index, argument);
@@ -215,10 +242,12 @@ function parseOptions(args: string[]): Options | undefined {
     } else if (argument === '--help' || argument === '-h') {
       console.log(`Usage: npm run ci:reauth -- -- [options]
 
-With TR_SESSION_FILE set, refreshes that saved session for GitHub Actions.
-Without TR_SESSION_FILE, opens an interactive QR login and updates the environment secret.
+Starts a fresh interactive QR enrollment and updates the environment secret.
+It ignores TR_SESSION_FILE so that an old partial session cannot be reused.
+Use --refresh only for the scheduled GitHub Actions refresh workflow.
 
 Options:
+  --refresh                Refresh TR_SESSION_FILE instead of interactive enrollment
   --repo OWNER/REPO       GitHub repository (default: ${DEFAULT_REPOSITORY})
   --secret NAME           Environment secret (default: TR_SESSION_JSON)
   --environment NAME      GitHub environment (default: Live Integration Tests)
@@ -230,7 +259,7 @@ Options:
       throw new Error(`Unknown option: ${argument}`);
     }
   }
-  return options;
+  return { options, mode };
 }
 
 function requiredValue(args: string[], index: number, option: string): string {
@@ -247,17 +276,24 @@ function assertAuthMaterial(session: Session): void {
   assert.ok(session.deviceInfo, 'The new Trade Republic session contains no device profile.');
 }
 
+function assertCompleteWebContext(webContext: TradeRepublicWebContext | undefined): void {
+  assert.ok(webContext, 'The new Trade Republic session contains no browser web context.');
+  toTradeRepublicWafToken(webContext);
+  const hasCookies = Boolean(webContext.cookieHeader || Object.keys(webContext.cookies ?? {}).length > 0);
+  assert.ok(hasCookies, 'The new Trade Republic session browser context contains no cookies.');
+}
+
 function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => typeof value === 'string' && value.length > 0);
 }
 
 async function main(): Promise<void> {
-  const options = parseOptions(process.argv.slice(2));
-  if (!options) return;
-  await runCiReauth(process.env.TR_SESSION_FILE, options, {
+  const parsed = parseOptions(process.argv.slice(2));
+  if (!parsed) return;
+  await runCiReauth(process.env.TR_SESSION_FILE, parsed.options, {
     refresh: refreshSavedSession,
     enroll: enrollRepositorySession,
-  });
+  }, parsed.mode);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

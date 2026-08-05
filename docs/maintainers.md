@@ -69,14 +69,15 @@ run the interactive enrollment from the repository root:
 npm run ci:reauth
 ```
 
-With no `TR_SESSION_FILE`, the command opens a browser to collect the complete
-web context (including WAF/XSRF proof, relevant headers, and cookies), prints
-rotating QR codes for approval in the Trade Republic app, and writes the new
-session with that context directly to the `Live Integration Tests` environment's
-`TR_SESSION_JSON` secret. It does not print the session or leave a new session
-file on disk. The scheduled workflow
-sets `TR_SESSION_FILE`, which switches the same command to non-interactive
-refresh mode.
+The command always opens a fresh browser to collect the complete web context
+(including WAF/XSRF proof, relevant headers, and cookies), prints rotating QR
+codes for approval in the Trade Republic app, and writes the new session with
+exactly that context directly to the `Live Integration Tests` environment's
+`TR_SESSION_JSON` secret. It ignores a locally inherited `TR_SESSION_FILE`, so
+an old partial session cannot replace the new enrollment. It does not print the
+session or leave a new session file on disk. Only the scheduled workflow passes
+its explicit `--refresh` mode together with `TR_SESSION_FILE` for unattended
+refreshes.
 
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.

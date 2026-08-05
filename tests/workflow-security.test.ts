@@ -107,7 +107,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.equal(hasTopLevelTrigger(refresh.source, 'schedule'), true);
     assert.equal(hasTopLevelTrigger(refresh.source, 'workflow_dispatch'), true);
     assert.match(refresh.source, /^\s+environment: Live Integration Tests\r?$/m);
-    assert.match(refresh.source, /^\s+run: npm run ci:reauth\r?$/m);
+    assert.match(refresh.source, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
     assert.match(refresh.source, /gh secret set TR_SESSION_JSON\s+\\?\s*--body/);
     assert.match(refresh.source, /--env "Live Integration Tests"/);
     assert.match(refresh.source, /gh secret set GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);

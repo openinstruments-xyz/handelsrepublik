@@ -35,7 +35,7 @@ jobs:
       - name: refresh the saved session
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
-        run: npm run ci:reauth
+        run: npm run ci:reauth -- --refresh
       - name: store the refreshed protected-environment secrets
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
