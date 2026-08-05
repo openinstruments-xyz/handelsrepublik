@@ -83,13 +83,17 @@ fields or incompatible types fail the invoking test before normalization.
 An empty endpoint list is valid where the endpoint permits it; it does not prove
 an unseen item schema.
 
-Run the namespace integration tests sequentially. This includes reversible
-price-alarm and watchlist mutations, both of which clean up in `finally`:
+Run the namespace integration tests sequentially. This explicitly requested
+live path includes reversible watchlist and price-alarm mutations. Both use a
+disposable test resource and remove it in `finally`; a cleanup failure fails
+the test and must be reconciled before another run:
 
 ```powershell
 $env:TR_SESSION_FILE = './demo/.demo-session.json'
 npm run test:integration
 ```
+
+The protected CI live workflow runs the same suite.
 
 The order test is deliberately separate. It submits one share at a EUR 1 limit
 only at an explicitly open venue whose current bid is at least EUR 10, verifies
