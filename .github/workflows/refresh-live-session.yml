@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-integration-tests-main
+  group: trade-republic-live-session
   cancel-in-progress: false
 
 jobs:
