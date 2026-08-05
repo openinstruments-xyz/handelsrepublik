@@ -31,6 +31,7 @@ const { PNG } = require('pngjs') as {
 interface Options {
   repo: string;
   secret: string;
+  environment: string;
   deviceName: string;
   timeoutMs: number;
   debug: boolean;
@@ -89,9 +90,9 @@ async function enrollRepositorySession(options: Options): Promise<void> {
     assertAuthMaterial(session);
     console.log('Trade Republic login approved.');
 
-    console.log(`Updating repository secret ${options.repo}/${options.secret}...`);
+    console.log(`Updating environment secret ${options.repo}/${options.environment}/${options.secret}...`);
     await gh(
-      ['secret', 'set', options.secret, '--repo', options.repo],
+      ['secret', 'set', options.secret, '--repo', options.repo, '--env', options.environment],
       `${JSON.stringify(session, null, 2)}\n`,
     );
     console.log('GitHub Actions session updated.');
@@ -189,6 +190,7 @@ function parseOptions(args: string[]): Options | undefined {
   const options: Options = {
     repo: DEFAULT_REPOSITORY,
     secret: 'TR_SESSION_JSON',
+    environment: 'Live Integration Tests',
     deviceName: 'handelsrepublik github actions',
     timeoutMs: 10 * 60_000,
     debug: false,
@@ -199,6 +201,7 @@ function parseOptions(args: string[]): Options | undefined {
     if (argument === '--debug') options.debug = true;
     else if (argument === '--repo') options.repo = requiredValue(args, ++index, argument);
     else if (argument === '--secret') options.secret = requiredValue(args, ++index, argument);
+    else if (argument === '--environment') options.environment = requiredValue(args, ++index, argument);
     else if (argument === '--device-name') options.deviceName = requiredValue(args, ++index, argument);
     else if (argument === '--timeout-minutes') {
       const minutes = Number(requiredValue(args, ++index, argument));
@@ -208,11 +211,12 @@ function parseOptions(args: string[]): Options | undefined {
       console.log(`Usage: npm run ci:reauth -- -- [options]
 
 With TR_SESSION_FILE set, refreshes that saved session for GitHub Actions.
-Without TR_SESSION_FILE, opens an interactive QR login and updates the repository secret.
+Without TR_SESSION_FILE, opens an interactive QR login and updates the environment secret.
 
 Options:
   --repo OWNER/REPO       GitHub repository (default: ${DEFAULT_REPOSITORY})
-  --secret NAME           Repository secret (default: TR_SESSION_JSON)
+  --secret NAME           Environment secret (default: TR_SESSION_JSON)
+  --environment NAME      GitHub environment (default: Live Integration Tests)
   --device-name NAME      Trade Republic device label
   --timeout-minutes N     QR approval timeout (default: 10)
   --debug                 Print SDK authentication diagnostics`);

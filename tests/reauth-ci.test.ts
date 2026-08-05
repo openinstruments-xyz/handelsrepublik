@@ -5,6 +5,7 @@ import { runCiReauth } from '../scripts/reauth-ci.js';
 const options = {
   repo: 'openinstruments-xyz/handelsrepublik',
   secret: 'TR_SESSION_JSON',
+  environment: 'Live Integration Tests',
   deviceName: 'test',
   timeoutMs: 1_000,
   debug: false,

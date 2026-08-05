@@ -1,34 +1,26 @@
-# Runs only for approved, same-repository pull requests. This workflow uses the
-# protected Live Integration Tests environment, never repository-level secrets.
+# Called only for merge candidates or by an explicit maintainer dispatch. The
+# protected environment contains the live-session secrets.
 name: Live integration tests
 
 on:
-  pull_request_review:
-    types: [submitted]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: live-integration-tests-${{ github.event.pull_request.number }}
+  group: live-integration-tests-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   integration:
-    if: >-
-      github.event.review.state == 'approved' &&
-      (github.event.review.author_association == 'OWNER' ||
-      github.event.review.author_association == 'MEMBER' ||
-      github.event.review.author_association == 'COLLABORATOR') &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: Live Integration Tests
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:

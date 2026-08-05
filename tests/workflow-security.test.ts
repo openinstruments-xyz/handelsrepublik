@@ -65,14 +65,36 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(quality?.source ?? '', /^\s+run: git diff --exit-code -- dist\r?$/m);
   });
 
-  it('limits live integration tests to approved same-repository pull requests', () => {
+  it('requires maintainer approval before pull requests enter the merge queue', () => {
+    const gate = workflows.find((workflow) => workflow.file === 'merge-gate.yml');
+    assert.ok(gate);
+    assert.equal(hasTopLevelTrigger(gate.source, 'push'), true);
+    assert.equal(hasTopLevelTrigger(gate.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(gate.source, 'pull_request_target'), true);
+    assert.equal(hasTopLevelTrigger(gate.source, 'merge_group'), true);
+    assert.equal(hasTopLevelTrigger(gate.source, 'workflow_dispatch'), true);
+    assert.match(gate.source, /^\s+name: maintainer approval\r?$/m);
+    assert.match(gate.source, /^\s+name: Merge Gate\r?$/m);
+    assert.match(gate.source, /^\s+deployment: false\r?$/m);
+    assert.match(gate.source, /^\s+name: merge gate\r?$/m);
+    assert.match(gate.source, /github\.event_name == 'merge_group'/);
+    assert.match(gate.source, /uses: \.\/\.github\/workflows\/live-integration\.yml/);
+    assert.doesNotMatch(gate.source, /\$\{\{\s*secrets\./);
+    assert.doesNotMatch(gate.source, /actions\/checkout|npm (?:ci|run|test)/);
+    assert.match(gate.source, /^\s+checks: write\r?$/m);
+    assert.match(gate.source, /github\.event\.pull_request\.head\.sha/);
+    assert.match(gate.source, /check-runs/);
+  });
+
+  it('limits live integration tests to merge candidates and maintainer dispatches', () => {
     const live = workflows.find((workflow) => workflow.file === 'live-integration.yml');
     assert.ok(live);
-    assert.equal(hasTopLevelTrigger(live.source, 'pull_request_review'), true);
+    assert.equal(hasTopLevelTrigger(live.source, 'workflow_call'), true);
+    assert.equal(hasTopLevelTrigger(live.source, 'workflow_dispatch'), true);
+    assert.equal(hasTopLevelTrigger(live.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(live.source, 'pull_request_review'), false);
+    assert.equal(hasTopLevelTrigger(live.source, 'merge_group'), false);
     assert.doesNotMatch(live.source, /pull_request_target/);
-    assert.match(live.source, /github\.event\.review\.state == 'approved'/);
-    assert.match(live.source, /github\.event\.review\.author_association/);
-    assert.match(live.source, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
     assert.match(live.source, /^\s+environment: Live Integration Tests\r?$/m);
     assert.match(live.source, /^\s+run: npm run test:integration\r?$/m);
     assert.doesNotMatch(live.source, /test:integration:manual/);
@@ -86,7 +108,9 @@ describe('GitHub Actions trust boundaries', () => {
     assert.equal(hasTopLevelTrigger(refresh.source, 'workflow_dispatch'), true);
     assert.match(refresh.source, /^\s+environment: Live Integration Tests\r?$/m);
     assert.match(refresh.source, /^\s+run: npm run ci:reauth\r?$/m);
-    assert.match(refresh.source, /gh secret set TR_SESSION_JSON --body/);
+    assert.match(refresh.source, /gh secret set TR_SESSION_JSON\s+\\?\s*--body/);
+    assert.match(refresh.source, /--env "Live Integration Tests"/);
+    assert.match(refresh.source, /gh secret set GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.match(refresh.source, /secrets\.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.match(refresh.source, /^\s+persist-credentials: false\r?$/m);
     assert.doesNotMatch(refresh.source, /echo .*TR_SESSION_JSON/);
