@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'acorn';
 import qrcodeTerminal from 'qrcode-terminal';
 import { collectTradeRepublicWafToken, FileSessionStore, TradeRepublicClient } from '../dist/index.js';
+import { readDemoClientOptions } from './client-options.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sessionPath = process.env.TR_SESSION_FILE || join(here, '.demo-session.json');
@@ -1967,24 +1968,4 @@ function delay(ms) {
 
 function formatErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function readDemoClientOptions() {
-  return {
-    websocketMode: process.env.TR_WEBSOCKET_MODE === 'isolated' ? 'isolated' : 'shared',
-    websocketReconnectDelayMs: positiveInteger(process.env.TR_WEBSOCKET_RECONNECT_MS, 250),
-    rawSchemaValidation: schemaValidationMode(process.env.TR_RAW_SCHEMA_VALIDATION),
-  };
-}
-
-function schemaValidationMode(value) {
-  const normalized = cleanString(value)?.toLowerCase();
-  if (normalized === undefined) return 'passthrough';
-  if (normalized === 'throw' || normalized === 'passthrough' || normalized === 'off') return normalized;
-  throw new TypeError('TR_RAW_SCHEMA_VALIDATION must be "throw", "passthrough", or "off".');
-}
-
-function positiveInteger(value, fallback) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }

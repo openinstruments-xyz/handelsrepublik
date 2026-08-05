@@ -1550,7 +1550,9 @@ session, so that file can be reused for local REST and mapper debugging. Its
 cookies, browser headers, and WAF data are secrets: keep the file local, do not
 print, share, or commit it. For a durable debug session, set
 `TR_SESSION_FILE` to a user-only path outside the worktree before launching the
-TUI. The separate `demo:scratchpad` script is
+TUI. The TUI and REPL default to strict raw-schema validation (`throw`); set
+`TR_RAW_SCHEMA_VALIDATION` to `passthrough` or `off` only for deliberate local
+diagnostics. The separate `demo:scratchpad` script is
 maintainer-specific and currently submits a real order; do not run it as a
 general SDK demo.
 
