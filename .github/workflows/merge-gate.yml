@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/live-integration.yml
 
   merge-gate:
-    name: merge gate
+    name: Merge gate / merge gate
     if: ${{ always() && github.event_name != 'pull_request_target' }}
     needs: [approval, live]
     runs-on: ubuntu-latest
