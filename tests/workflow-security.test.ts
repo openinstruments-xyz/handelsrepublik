@@ -76,7 +76,7 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(gate.source, /^\s+name: maintainer approval\r?$/m);
     assert.match(gate.source, /^\s+name: Merge Gate\r?$/m);
     assert.match(gate.source, /^\s+deployment: false\r?$/m);
-    assert.match(gate.source, /^\s+name: merge gate\r?$/m);
+    assert.match(gate.source, /^\s+name: Merge gate \/ merge gate\r?$/m);
     assert.match(gate.source, /github\.event_name == 'merge_group'/);
     assert.match(gate.source, /uses: \.\/\.github\/workflows\/live-integration\.yml/);
     assert.doesNotMatch(gate.source, /\$\{\{\s*secrets\./);
