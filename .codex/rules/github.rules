@@ -8,7 +8,7 @@ prefix_rule(
         "gh run list --limit 10",
         "gh run view 29468822669 --log-failed",
         "gh workflow run test.yml --ref main",
-        "gh secret set TR_SESSION_JSON --env trade-republic-tests --repo VIEWVIEWVIEW/handelsrepublik",
+        "gh secret set TR_SESSION_JSON --env trade-republic-tests --repo openinstruments-xyz/handelsrepublik",
     ],
     not_match = [
         "gh pr merge 123",
