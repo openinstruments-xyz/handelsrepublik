@@ -6,7 +6,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspect } from 'node:util';
 import { PNG } from 'pngjs';
-import { FileSessionStore, TradeRepublicClient, collectTradeRepublicWafToken } from '../dist/index.js';
+import {
+  FileSessionStore,
+  TradeRepublicClient,
+  collectTradeRepublicWebContext,
+  toTradeRepublicWafToken,
+} from '../dist/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sessionPath = process.env.TR_SESSION_FILE || join(here, '.demo-session.json');
@@ -15,7 +20,7 @@ const deviceName = cleanString(process.env.TR_DEVICE_NAME) || 'handelsrepublik t
 const loginPhoneNumber = cleanString(process.env.TR_PHONE_NUMBER);
 const loginPin = cleanString(process.env.TR_PIN);
 const demoClientOptions = readDemoClientOptions();
-const wafLoadingFrames = ['Collecting WAF.', 'Collecting WAF..', 'Collecting WAF...'];
+const browserContextLoadingFrames = ['Collecting browser context.', 'Collecting browser context..', 'Collecting browser context...'];
 const l2ProbeTimeoutMs = 5_000;
 const searchDebounceMs = 300;
 const searchAssetClasses = [
@@ -40,12 +45,12 @@ const sessionStore = new FileSessionStore(sessionPath);
 
 const state = {
   phase: 'booting',
-  status: 'Booting browser in the background and collecting the WAF token.',
+  status: 'Booting browser in the background and collecting the browser context.',
   error: '',
   schemaWarning: '',
   client: undefined,
   browser: undefined,
-  wafToken: undefined,
+  webContext: undefined,
   session: undefined,
   reloginInFlight: false,
   sessionRecoveryInFlight: false,
@@ -771,22 +776,22 @@ async function boot() {
     }
 
     state.browser = await launchBrowser();
-    const stopWafLoading = startWafLoading();
+    const stopBrowserContextLoading = startBrowserContextLoading();
     try {
-      state.wafToken = await collectTradeRepublicWafToken(state.browser, {
+      state.webContext = await collectTradeRepublicWebContext(state.browser, {
         timeoutMs: 20_000,
         settleMs: 0,
       });
-      state.client.setWafToken(state.wafToken);
+      applyBrowserContext(state.webContext);
     } finally {
-      stopWafLoading();
+      stopBrowserContextLoading();
     }
     await state.browser.close().catch(() => undefined);
     state.browser = undefined;
 
     state.status = hasPinLoginConfig()
-      ? 'WAF token is ready. Starting phone and PIN login.'
-      : 'WAF token is ready. Requesting a QR login challenge.';
+      ? 'Browser context is ready. Starting phone and PIN login.'
+      : 'Browser context is ready. Requesting a QR login challenge.';
     state.phase = 'login';
     showLogin();
     render();
@@ -816,10 +821,10 @@ async function launchBrowser() {
   }
 }
 
-function startWafLoading() {
+function startBrowserContextLoading() {
   let index = 0;
   const tick = () => {
-    state.status = wafLoadingFrames[index % wafLoadingFrames.length];
+    state.status = browserContextLoadingFrames[index % browserContextLoadingFrames.length];
     index += 1;
     render();
   };
@@ -854,8 +859,14 @@ async function validateRestoredSession() {
 async function discardSavedSession() {
   if (!state.client) return;
   await state.client.auth.clearSession().catch(() => undefined);
-  if (state.wafToken) state.client.setWafToken(state.wafToken);
+  if (state.webContext) applyBrowserContext(state.webContext);
   state.session = undefined;
+}
+
+function applyBrowserContext(webContext) {
+  if (!state.client) return;
+  state.client.useWebContext(webContext);
+  state.client.setWafToken(toTradeRepublicWafToken(webContext));
 }
 
 async function handleUnauthorized(error) {

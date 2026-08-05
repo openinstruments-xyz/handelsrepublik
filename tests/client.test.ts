@@ -21,12 +21,6 @@ describe('TradeRepublicClient', () => {
   it('attaches web context per client and preserves it when saving sessions', async () => {
     const saved: unknown[] = [];
     const first = TradeRepublicClient.create({
-      webContext: {
-        awsWafToken: 'waf-token',
-        cookies: {
-          tr_session: 'web-session',
-        },
-      },
       deviceInfo: {
         stableDeviceId: 'captured-fingerprint',
         browser: 'Firefox',
@@ -45,6 +39,12 @@ describe('TradeRepublicClient', () => {
     });
     const second = TradeRepublicClient.create();
 
+    first.useWebContext({
+      awsWafToken: 'waf-token',
+      cookies: {
+        tr_session: 'web-session',
+      },
+    });
     first.setSession({
       accessToken: 'login-token',
     });
