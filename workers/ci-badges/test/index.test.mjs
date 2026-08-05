@@ -24,7 +24,7 @@ function resultReport(overrides = {}) {
     workflow: 'account-market-mutations',
     runId: 123,
     runAttempt: 1,
-    runUrl: 'https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/runs/123',
+    runUrl: 'https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/123',
     event: 'schedule',
     sha: 'abcdef1234567890',
     createdAt: '2026-07-24T21:45:00Z',
@@ -327,7 +327,7 @@ test('redirects each badge link to the run selected for its event', async () => 
     const report = resultReport({
       runId,
       event,
-      runUrl: `https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/runs/${runId}`,
+      runUrl: `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
     });
     kv.values.set(`result:account-market-mutations:${alias}`, JSON.stringify(report));
     const response = await worker.fetch(
@@ -339,7 +339,7 @@ test('redirects each badge link to the run selected for its event', async () => 
     assert.equal(response.status, 302);
     assert.equal(
       response.headers.get('location'),
-      `https://github.com/VIEWVIEWVIEW/handelsrepublik/actions/runs/${runId}`,
+      `https://github.com/openinstruments-xyz/handelsrepublik/actions/runs/${runId}`,
     );
     assert.equal(response.headers.get('cache-control'), 'no-store');
   }

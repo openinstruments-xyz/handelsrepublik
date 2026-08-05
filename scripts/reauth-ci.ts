@@ -41,7 +41,7 @@ interface ReauthOperations {
   enroll(options: Options): Promise<void>;
 }
 
-const DEFAULT_REPOSITORY = 'VIEWVIEWVIEW/handelsrepublik';
+const DEFAULT_REPOSITORY = 'openinstruments-xyz/handelsrepublik';
 
 export async function runCiReauth(
   sessionPath: string | undefined,

@@ -47,7 +47,7 @@ chore(release): update package metadata
 - Keep package-facing documentation aligned with GitHub installation:
 
 ```bash
-npm install github:VIEWVIEWVIEW/handelsrepublik
+npm install github:openinstruments-xyz/handelsrepublik
 ```
 
 - Do not commit local sessions, cookies, WAF tokens, captures, `.env` files,
