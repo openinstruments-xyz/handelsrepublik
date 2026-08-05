@@ -97,6 +97,17 @@ describe('GitHub Actions trust boundaries', () => {
     assert.doesNotMatch(live.source, /pull_request_target/);
     assert.match(live.source, /^\s+environment: Live Integration Tests\r?$/m);
     assert.match(live.source, /^\s+run: npm run test:integration\r?$/m);
+    assert.match(live.source, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
+    assert.match(live.source, /secrets\.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
+    assert.match(live.source, /^\s+gh secret set TR_SESSION_JSON \\\r?$/m);
+    assert.match(live.source, /^\s+--repo "\$GITHUB_REPOSITORY" \\\r?$/m);
+    assert.match(live.source, /^\s+--env "Live Integration Tests" \\\r?$/m);
+    assert.match(live.source, /^\s+< "\$RUNNER_TEMP\/tr-session\.json"\r?$/m);
+    const refreshIndex = live.source.indexOf('run: npm run ci:reauth -- --refresh');
+    const persistIndex = live.source.indexOf('gh secret set TR_SESSION_JSON');
+    const testIndex = live.source.indexOf('run: npm run test:integration');
+    assert.ok(refreshIndex < persistIndex && persistIndex < testIndex);
+    assert.doesNotMatch(live.source, /echo .*TR_SESSION_JSON/);
     assert.doesNotMatch(live.source, /test:integration:manual/);
     assert.match(live.source, /^\s+persist-credentials: false\r?$/m);
   });

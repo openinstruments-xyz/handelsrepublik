@@ -53,8 +53,10 @@ mapper calls live in `src/operation-specs.ts`; domain adapters live in
 The `Live integration tests` workflow runs for merge candidates after the pull
 request's merge-gate approval, or from an explicit maintainer dispatch. It runs
 the non-ordering integration suite against the protected `Live Integration
-Tests` environment. The manual order suite stays excluded because it can place
-a real order.
+Tests` environment. Before the suite starts, the workflow refreshes the saved
+session and writes the refreshed browser and WAF context back to the
+environment's `TR_SESSION_JSON` secret. The manual order suite stays excluded
+because it can place a real order.
 
 `Refresh live session` runs every two hours and updates the `TR_SESSION_JSON`
 secret in the `Live Integration Tests` environment. It uses the environment's
@@ -75,9 +77,9 @@ codes for approval in the Trade Republic app, and writes the new session with
 exactly that context directly to the `Live Integration Tests` environment's
 `TR_SESSION_JSON` secret. It ignores a locally inherited `TR_SESSION_FILE`, so
 an old partial session cannot replace the new enrollment. It does not print the
-session or leave a new session file on disk. Only the scheduled workflow passes
-its explicit `--refresh` mode together with `TR_SESSION_FILE` for unattended
-refreshes.
+session or leave a new session file on disk. Only the scheduled and live-test
+workflows pass explicit `--refresh` mode together with `TR_SESSION_FILE` for
+unattended refreshes.
 
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.

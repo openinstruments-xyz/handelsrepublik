@@ -33,6 +33,18 @@ jobs:
         run: |
           umask 077
           printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
+      - name: refresh the saved session
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run ci:reauth -- --refresh
+      - name: persist the refreshed session
+        env:
+          GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
+        run: |
+          gh secret set TR_SESSION_JSON \
+            --repo "$GITHUB_REPOSITORY" \
+            --env "Live Integration Tests" \
+            < "$RUNNER_TEMP/tr-session.json"
       - name: run the live integration suite
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
