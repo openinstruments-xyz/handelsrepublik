@@ -12,6 +12,7 @@ import {
 import { withLiveDiagnostics } from '../live-diagnostics.js';
 
 export const APPLE = 'US0378331005';
+export const NVIDIA = 'US67066G1040';
 export const DEFAULT_EXCHANGE = process.env.TR_INTEGRATION_EXCHANGE ?? 'LSX';
 export const TIB = 'TIB';
 export const BITCOIN = 'XF000BTC0017';
@@ -130,15 +131,13 @@ export function isOpenBerlinWindow(now = new Date()): boolean {
   return weekday >= 1 && weekday <= 5 && minutes >= 7 * 60 && minutes < 22 * 60 + 40;
 }
 
-export async function selectLimitOrderCandidate(
+export async function selectNvidiaLimitOrderCandidate(
   client: TradeRepublicClient,
 ): Promise<{ instrumentId: string; destination: OrderDestination } | undefined> {
-  for (const instrumentId of ['US67066G1040', APPLE, 'US5949181045']) {
-    for (const destination of await client.trading.orderDestinations(instrumentId)) {
-      if (destination.open !== true || destination.orderModes?.some((mode) => mode.toLowerCase() === 'limit') !== true) continue;
-      const quote = await client.market.quote(instrumentId, destination.id);
-      if (quote.bid !== undefined && quote.bid >= 10) return { instrumentId, destination };
-    }
+  for (const destination of await client.trading.orderDestinations(NVIDIA)) {
+    if (destination.open !== true || destination.orderModes?.some((mode) => mode.toLowerCase() === 'limit') !== true) continue;
+    const quote = await client.market.quote(NVIDIA, destination.id);
+    if (quote.bid !== undefined && quote.bid >= 10) return { instrumentId: NVIDIA, destination };
   }
   return undefined;
 }

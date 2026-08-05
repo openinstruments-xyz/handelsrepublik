@@ -4,7 +4,7 @@ import { MapperRequestError, TradeRepublicClient } from '../../src/index.js';
 import { decodeMapperProtobufRequest, encodeMapperProtobufDataEnvelope, encodeMapperProtobufTopicPayload } from '../../src/mapper-protobuf.js';
 import { FakeSocket } from '../fake-socket.js';
 import { TEST_DEVICE_INFO, preparedReplacement, mockFetch, mockFetchSequence, expectOrderCall, parseSubPayload, accountPairsPayload, jsonResponse, EventEmitterOnlySocket } from './test-helpers.js';
-import { isOpenBerlinWindow, selectLimitOrderCandidate } from '../integration/support.js';
+import { isOpenBerlinWindow, selectNvidiaLimitOrderCandidate } from '../integration/support.js';
 
 describe('orders namespace', () => {
   it('lists orders through the web-trading customer orders endpoint', async () => {
@@ -708,10 +708,11 @@ describe('orders namespace', () => {
     assert.equal(isOpenBerlinWindow(new Date('2026-07-25T10:00:00Z')), false);
   });
 
-  it('selects only an open limit venue with a bid of at least EUR 10', async () => {
+  it('selects only an open Nvidia limit venue with a bid of at least EUR 10', async () => {
     const client = {
       trading: {
-        async orderDestinations() {
+        async orderDestinations(instrumentId: string) {
+          assert.equal(instrumentId, 'US67066G1040');
           return [
             { id: 'CLOSED', open: false, orderModes: ['limit'] },
             { id: 'OPEN', open: true, orderModes: ['limit'] },
@@ -725,7 +726,7 @@ describe('orders namespace', () => {
       },
     } as unknown as TradeRepublicClient;
 
-    assert.deepEqual(await selectLimitOrderCandidate(client), {
+    assert.deepEqual(await selectNvidiaLimitOrderCandidate(client), {
       instrumentId: 'US67066G1040',
       destination: { id: 'OPEN', open: true, orderModes: ['limit'] },
     });
