@@ -21,7 +21,7 @@ export {
   candleResolutionMs,
   candleResolutionsForInstrumentType,
 } from './candle-resolutions.js';
-export { collectTradeRepublicWafToken } from './waf.js';
+export { collectTradeRepublicWafToken, collectTradeRepublicWebContext, toTradeRepublicWafToken } from './waf.js';
 export { schemaCatalogMarkdown, schemaRegistry, validateRawResponse } from './schemas/registry.js';
 export { MapperRequestError } from './mapper-connection.js';
 export { classifyMapperOperation } from './raw.js';

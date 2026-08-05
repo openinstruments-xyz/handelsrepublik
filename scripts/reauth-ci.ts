@@ -4,10 +4,11 @@ import { access } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import {
-  collectTradeRepublicWafToken,
+  collectTradeRepublicWebContext,
   FileSessionStore,
   MemorySessionStore,
   TradeRepublicClient,
+  toTradeRepublicWafToken,
 } from '../src/index.js';
 import type { Session, TradeRepublicBrowserLike } from '../src/index.js';
 
@@ -79,12 +80,16 @@ async function enrollRepositorySession(options: Options): Promise<void> {
   let client: TradeRepublicClient | undefined;
 
   try {
-    console.log('Collecting the Trade Republic WAF token...');
-    const wafToken = await collectTradeRepublicWafToken(browser, {
+    console.log('Collecting the Trade Republic web context...');
+    const webContext = await collectTradeRepublicWebContext(browser, {
       timeoutMs: 60_000,
       settleMs: 1_000,
     });
-    client = TradeRepublicClient.create({ sessionStore, wafToken });
+    client = TradeRepublicClient.create({
+      sessionStore,
+      webContext,
+      wafToken: toTradeRepublicWafToken(webContext),
+    });
 
     const session = await loginWithRotatingQr(client, options);
     assertAuthMaterial(session);

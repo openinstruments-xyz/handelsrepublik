@@ -59,7 +59,7 @@ const RELEVANT_HEADER_NAMES = new Set([
   'x-tr-platform',
 ]);
 
-async function collectTradeRepublicBrowserContext(
+export async function collectTradeRepublicWebContext(
   browser: TradeRepublicBrowserLike,
   options: CollectTradeRepublicWafTokenOptions = {},
 ): Promise<TradeRepublicWebContext> {
@@ -101,7 +101,7 @@ export async function collectTradeRepublicWafToken(
   browser: TradeRepublicBrowserLike,
   options: CollectTradeRepublicWafTokenOptions = {},
 ): Promise<TradeRepublicWafToken> {
-  return toTradeRepublicWafToken(await collectTradeRepublicBrowserContext(browser, options));
+  return toTradeRepublicWafToken(await collectTradeRepublicWebContext(browser, options));
 }
 
 export function toTradeRepublicWafToken(context: TradeRepublicWebContext): TradeRepublicWafToken {

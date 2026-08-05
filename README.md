@@ -476,6 +476,10 @@ Both `collectWafToken()` and `collectTradeRepublicWafToken()` return only the
 shareable WAF token; their result contains no account cookies or captured
 browser headers.
 
+For a full browser context that must remain associated with a session, use
+`collectTradeRepublicWebContext()`. Its headers and cookies are sensitive; keep
+the result in a secure session store and never print or commit it.
+
 ## Authentication workflows
 
 Instant login creates a challenge that the user approves in the Trade Republic
@@ -1519,7 +1523,8 @@ bytes.
 
 The package also exports focused lower-level helpers:
 
-- WAF-token/browser collection: `collectTradeRepublicWafToken()`.
+- WAF-token/browser collection: `collectTradeRepublicWafToken()` and the
+  sensitive `collectTradeRepublicWebContext()`.
 - Session handling: `FileSessionStore`, `MemorySessionStore`, and
   `redactSession()`.
 - Candles: `CandleQuery`, resolution constants, `candleResolutionMs()`, and

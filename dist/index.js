@@ -765,7 +765,7 @@ var RELEVANT_HEADER_NAMES = /* @__PURE__ */ new Set([
   "x-tr-device-info",
   "x-tr-platform"
 ]);
-async function collectTradeRepublicBrowserContext(browser, options = {}) {
+async function collectTradeRepublicWebContext(browser, options = {}) {
   const appUrl = options.appUrl ?? DEFAULT_APP_URL;
   const apiUrl = options.apiUrl ?? DEFAULT_API_URL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -799,7 +799,7 @@ async function collectTradeRepublicBrowserContext(browser, options = {}) {
   }
 }
 async function collectTradeRepublicWafToken(browser, options = {}) {
-  return toTradeRepublicWafToken(await collectTradeRepublicBrowserContext(browser, options));
+  return toTradeRepublicWafToken(await collectTradeRepublicWebContext(browser, options));
 }
 function toTradeRepublicWafToken(context) {
   const normalized = normalizeTradeRepublicWebContext(context);
@@ -5417,9 +5417,11 @@ export {
   candleResolutionsForInstrumentType,
   classifyMapperOperation,
   collectTradeRepublicWafToken,
+  collectTradeRepublicWebContext,
   redactSession,
   schemaCatalogMarkdown,
   schemaRegistry,
+  toTradeRepublicWafToken,
   validateRawResponse,
   venueDisplayName
 };
