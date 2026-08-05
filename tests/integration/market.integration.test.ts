@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from './runner.js';
 import {
   BOND_CANDLE_RESOLUTIONS,
   DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS,
