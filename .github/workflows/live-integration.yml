@@ -1,0 +1,91 @@
+# This trusted workflow is loaded from the default branch. For a fork pull
+# request, approving the secret-free Pull request workflow is the explicit
+# decision to trust that exact head commit with the live session.
+name: Approved live integration
+
+on:
+  workflow_run:
+    workflows: [Pull request]
+    types: [completed]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: approved-live-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  live-integration:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    name: Approved live integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: Live Integration Tests
+    env:
+      APPROVED_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+      APPROVED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      LIVE_STATUS_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: report live integration pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/statuses/$APPROVED_HEAD_SHA" \
+            -f state=pending \
+            -f context='Live Integration' \
+            -f description='Approved live integration is running' \
+            -f target_url="$LIVE_STATUS_URL"
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: verify the approved commit
+        run: test "$(git rev-parse HEAD)" = "$APPROVED_HEAD_SHA"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: materialize the saved session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: |
+          umask 077
+          test -n "$TR_SESSION_JSON"
+          printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
+      - name: refresh the saved session locally
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run ci:reauth -- --refresh
+      - name: run live integration tests
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run test:integration
+      - name: delete the saved session
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tr-session.json"
+      - name: report live integration result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_RESULT: ${{ job.status }}
+        run: |
+          if [ "$LIVE_RESULT" = success ]; then
+            state=success
+            description='Approved live integration passed'
+          else
+            state=failure
+            description='Approved live integration failed'
+          fi
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/statuses/$APPROVED_HEAD_SHA" \
+            -f state="$state" \
+            -f context='Live Integration' \
+            -f description="$description" \
+            -f target_url="$LIVE_STATUS_URL"

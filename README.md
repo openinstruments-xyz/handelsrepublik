@@ -8,7 +8,7 @@
 
 | Workflow | Latest | Manual | Scheduled |
 |---|:---:|:---:|:---:|
-| [Pull request](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/pull-request.yml)<br><details><summary><sub>quality, unit tests, approved live integration</sub></summary><sub>Runs typecheck, build, distribution verification, and mocked tests without live access. After both jobs succeed, the repository owner must approve the protected deployment before the live integration suite can use its environment secrets.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/latest/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/manual/run) | — |
+| [Pull request](https://github.com/openinstruments-xyz/handelsrepublik/actions/workflows/pull-request.yml)<br><details><summary><sub>quality, unit tests, approved live integration</sub></summary><sub>Runs typecheck, build, distribution verification, and mocked tests without live access. Approving an external pull-request workflow authorizes a trusted follow-up workflow to run the exact approved commit against the live session after both secret-free jobs pass.</sub></details> | [![latest](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/latest.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/latest/run) | [![manual](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/manual.svg)](https://handelsrepublik-ci-badges.99o.workers.dev/pull-request/manual/run) | — |
 
 ## Contents
 

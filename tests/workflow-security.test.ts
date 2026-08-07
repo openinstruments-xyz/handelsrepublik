@@ -29,18 +29,23 @@ function getJob(source: string, job: string): string {
 
 describe('GitHub Actions trust boundaries', () => {
   const pullRequest = workflows.find((workflow) => workflow.file === 'pull-request.yml');
+  const liveIntegration = workflows.find((workflow) => workflow.file === 'live-integration.yml');
 
-  it('uses one pull-request workflow and removes the superseded gate workflows', () => {
+  it('uses a secret-free pull-request workflow and a trusted follow-up workflow', () => {
     assert.ok(pullRequest);
+    assert.ok(liveIntegration);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'pull_request'), true);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'workflow_dispatch'), true);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'push'), false);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'merge_group'), false);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'pull_request_target'), false);
+    assert.equal(hasTopLevelTrigger(liveIntegration.source, 'workflow_run'), true);
+    assert.equal(hasTopLevelTrigger(liveIntegration.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(liveIntegration.source, 'pull_request_target'), false);
+    assert.match(liveIntegration.source, /^    workflows: \[Pull request\]\r?$/m);
     for (const file of [
       'quality.yml',
       'unit-tests.yml',
-      'live-integration.yml',
       'merge-queue.yml',
       'merge-queue-readiness.yml',
     ]) {
@@ -66,21 +71,29 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+- run: npm run build\r?$/m);
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+run: git diff --exit-code -- dist\r?$/m);
     assert.match(getJob(pullRequest.source, 'unit-tests'), /^\s+- run: npm test\r?$/m);
+    assert.doesNotMatch(pullRequest.source, /secrets\./);
+    assert.doesNotMatch(pullRequest.source, /^\s+environment:/m);
   });
 
-  it('gates live access behind both checks and the protected environment', () => {
-    assert.ok(pullRequest);
-    const live = getJob(pullRequest.source, 'live-integration');
-    assert.match(live, /^    name: Live Integration\r?$/m);
-    assert.match(live, /^    needs: \[quality, unit-tests\]\r?$/m);
+  it('runs the exact approved commit only after the secret-free workflow succeeds', () => {
+    assert.ok(liveIntegration);
+    const live = getJob(liveIntegration.source, 'live-integration');
+    assert.match(live, /workflow_run\.event == 'pull_request'/);
+    assert.match(live, /workflow_run\.conclusion == 'success'/);
     assert.match(live, /^    environment: Live Integration Tests\r?$/m);
+    assert.match(live, /repository: \$\{\{ github\.event\.workflow_run\.head_repository\.full_name \}\}/);
+    assert.match(live, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+    assert.match(live, /test "\$\(git rev-parse HEAD\)" = "\$APPROVED_HEAD_SHA"/);
     assert.match(live, /secrets\.TR_SESSION_JSON/);
-    assert.match(live, /secrets\.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.match(live, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
     assert.match(live, /^\s+run: npm run test:integration\r?$/m);
-    assert.match(live, /^\s+gh secret set TR_SESSION_JSON \\\r?$/m);
+    assert.match(liveIntegration.source, /^  statuses: write\r?$/m);
+    assert.match(live, /context='Live Integration'/);
+    assert.doesNotMatch(live, /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
+    assert.doesNotMatch(live, /gh secret set/);
     assert.doesNotMatch(live, /echo .*TR_SESSION_JSON/);
     assert.doesNotMatch(live, /test:integration:manual/);
+    assert.ok(live.indexOf('- run: npm ci') < live.indexOf('TR_SESSION_JSON:'));
   });
 
   it('keeps protected environment access limited to live testing and session refresh', () => {
@@ -88,7 +101,7 @@ describe('GitHub Actions trust boundaries', () => {
       workflows.filter((workflow) => /^\s+environment: Live Integration Tests\r?$/m.test(workflow.source))
         .map((workflow) => workflow.file)
         .sort(),
-      ['pull-request.yml', 'refresh-live-session.yml'],
+      ['live-integration.yml', 'refresh-live-session.yml'],
     );
   });
 
