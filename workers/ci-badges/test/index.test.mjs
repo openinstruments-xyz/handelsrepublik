@@ -155,7 +155,7 @@ test('accepts structured weekend rejection results from the unified workflow', a
 
 test('returns an unknown badge without exposing configuration errors', async () => {
   const response = await worker.fetch(
-    new Request('https://example.com/quality/latest.svg'),
+    new Request('https://example.com/pull-request/latest.svg'),
     {},
     { waitUntil() {} },
   );

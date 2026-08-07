@@ -9,7 +9,7 @@ jobs that have not produced a run yet. A failing badge
 expands downward with up to five failed checks; additional failures are
 summarized on a final line. The unified live-validation workflow publishes
 separate structured case results for each live badge alias, which the Worker
-stores as latest, scheduled, and manual records in KV. Package, unit, buy, and
+stores as latest, scheduled, and manual records in KV. Pull-request, buy, and
 sell workflows still resolve their status and failed Actions steps through
 GitHub. Each badge's SVG title includes
 the run start in Berlin time, such as `passing - 24/7 23:45`.
@@ -43,7 +43,7 @@ That endpoint redirects to the exact latest run for the selected category.
 `scheduled` selects the latest `schedule` run, while `manual` selects the latest
 `workflow_dispatch` run.
 
-The fixed workflow aliases are `quality`, `unit`, `account-market-mutations`,
+The fixed workflow aliases are `pull-request`, `account-market-mutations`,
 `destinations`, `limit-rejection`, `market-rejection`, `lifecycle`,
 `weekend-rejection`, `buy`, and `sell`.
 
@@ -55,7 +55,7 @@ deployment.
 For example:
 
 ```md
-[![status](https://WORKER_SUBDOMAIN/quality/latest.svg)](https://WORKER_SUBDOMAIN/quality/latest/run)
+[![status](https://WORKER_SUBDOMAIN/pull-request/latest.svg)](https://WORKER_SUBDOMAIN/pull-request/latest/run)
 ```
 
 The badge endpoint is intentionally public, but it exposes only the latest
