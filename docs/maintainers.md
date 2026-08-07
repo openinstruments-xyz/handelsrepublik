@@ -69,8 +69,10 @@ GitHub:
    live job references only `TR_SESSION_JSON`; the separate refresh automation
    alone references the management token.
 3. Protect `main` with GitHub's native branch protection. Require pull requests,
-   require the merge queue with the repository's squash merge method, and require
-   these exact checks after they have appeared:
+   require the merge queue with the repository's squash merge method, limit both
+   build concurrency and the maximum pull requests per merge to one, keep
+   **Only merge non-failing pull requests** enabled, and require these exact
+   checks after they have appeared:
    - `Quality`
    - `Unit Tests`
    - `Live Integration`
