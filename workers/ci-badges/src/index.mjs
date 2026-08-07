@@ -6,8 +6,7 @@ const BADGE_TIME_ZONE = 'Europe/Berlin';
 const MAX_RESULT_BODY_BYTES = 256 * 1024;
 
 const WORKFLOWS = Object.freeze({
-  quality: 'quality.yml',
-  unit: 'unit-tests.yml',
+  'pull-request': 'pull-request.yml',
   'account-market-mutations': 'live-validation.yml',
   destinations: 'live-validation.yml',
   'limit-rejection': 'live-validation.yml',
