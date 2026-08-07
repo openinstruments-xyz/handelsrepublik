@@ -29,9 +29,8 @@ Demo authentication state belongs under `demo/` and must not be committed. The
 
 Every opened, reopened, or updated pull request runs the `Pull request`
 workflow. For an external fork, GitHub first waits for the repository owner to
-press **Approve and run workflows**. That approval is the explicit decision to
-trust the exact pull-request commit with the live session if the secret-free
-checks pass.
+press **Approve and run workflows**. That approval starts only the secret-free
+pull-request checks; it does not expose the live session.
 
 The workflow's `Quality` and `Unit Tests` jobs run in parallel, install locked
 dependencies, typecheck, test, build, and confirm that the committed `dist`
@@ -43,20 +42,17 @@ build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to the `Quality` or `Unit Tests`
 jobs.
 
-After both jobs succeed, the trusted `Approved live integration` workflow from
-`main` runs through `workflow_run`. It checks out exactly the repository and SHA
-recorded by the approved run, verifies the checkout, refreshes the saved session
-locally, and runs the live suite. It posts `Live Integration` directly to that
-SHA. The job can read `TR_SESSION_JSON`, but it never receives or references the
-session-management token and never writes PR-produced session data back to
-GitHub. A new external pull-request commit creates a new unapproved run, so the
-owner must review and approve that commit separately.
+After review, a maintainer adds the pull request to GitHub's native merge queue.
+GitHub creates a temporary merge-group commit and runs `Quality`, `Unit Tests`,
+and `Live Integration` against that exact commit. Only the merge-group workflow
+can read `TR_SESSION_JSON`. GitHub merges the pull request only when all three
+required checks succeed; a failed check removes it from the queue without
+merging it.
 
-Approving an external workflow deliberately trusts the complete pull-request
-code with the brokerage session. Review lifecycle scripts, dependencies, tests,
-and runtime code before pressing the button. The privileged workflow definition
-itself is always loaded from `main`; pull-request changes to workflow files do
-not alter the running privileged workflow.
+Queueing a pull request deliberately trusts the complete merge-group code with
+the brokerage session. Review lifecycle scripts, dependencies, tests, and
+runtime code before adding it to the queue. Never execute fork code in a
+privileged `workflow_run` or `pull_request_target` workflow.
 
 ### Repository settings
 
@@ -69,17 +65,20 @@ GitHub:
    exact commit.
 2. Under **Settings → Environments → Live Integration Tests**, store
    `TR_SESSION_JSON` and `GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION` as environment
-   secrets, but configure no required reviewer or wait timer. The PR live
-   workflow references only `TR_SESSION_JSON`; the separate refresh automation
+   secrets, but configure no required reviewer or wait timer. The merge-queue
+   live job references only `TR_SESSION_JSON`; the separate refresh automation
    alone references the management token.
-3. Protect `main` under **Settings → Rules → Rulesets** (or branch protection),
-   require the branch to be up to date, and require these exact checks after
-   they have appeared on a pull request:
+3. Protect `main` with GitHub's native branch protection. Require pull requests,
+   require the merge queue with the repository's squash merge method, limit both
+   build concurrency and the maximum pull requests per merge to one, keep
+   **Only merge non-failing pull requests** enabled, and require these exact
+   checks after they have appeared:
    - `Quality`
    - `Unit Tests`
    - `Live Integration`
-4. Remove the superseded `Merge queue / merge queue`, `unit tests`, and
-   `typecheck, build, and verify committed distribution` required contexts.
+4. Do not configure a custom readiness status or a second environment approval.
+   Remove superseded contexts such as `Merge queue / merge queue`, `unit tests`,
+   and `typecheck, build, and verify committed distribution`.
 
 The SDK is a modular monolith: `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution; declarative REST and
@@ -88,10 +87,10 @@ mapper calls live in `src/operation-specs.ts`; domain adapters live in
 
 ## Live integration tests
 
-The trusted follow-up workflow runs the non-ordering integration suite against
-the `Live Integration Tests` environment after the approved secret-free run
-succeeds. Before the suite starts, the job refreshes its private session file
-locally. It does not persist that PR-derived file. The manual order suite stays
+The native merge-group workflow runs the non-ordering integration suite against
+the `Live Integration Tests` environment after its secret-free jobs succeed.
+Before the suite starts, the job refreshes its private session file locally. It
+does not persist that merge-group-derived file. The manual order suite stays
 excluded because it can place a real order.
 
 The separate `Refresh live session` automation remains in place. It runs every

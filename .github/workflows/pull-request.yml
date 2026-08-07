@@ -1,5 +1,5 @@
-# Fork approval authorizes this secret-free workflow. A trusted workflow_run
-# workflow performs live integration only after both jobs succeed.
+# Fork approval authorizes only this secret-free workflow. Live access is
+# reserved for GitHub's native merge queue after a maintainer queues the PR.
 name: Pull request
 
 on:

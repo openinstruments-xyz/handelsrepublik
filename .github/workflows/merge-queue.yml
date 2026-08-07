@@ -1,0 +1,82 @@
+# GitHub creates this trusted merge-group ref only after a maintainer adds a
+# pull request to the native merge queue. All required checks run on that ref.
+name: Merge queue
+
+on:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-queue-${{ github.event.merge_group.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: verify committed distribution
+        run: git diff --exit-code -- dist
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  live-integration:
+    name: Live Integration
+    needs: [quality, unit-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: Live Integration Tests
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: materialize the saved session
+        env:
+          TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
+        run: |
+          umask 077
+          test -n "$TR_SESSION_JSON"
+          printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
+      - name: refresh the saved session locally
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run ci:reauth -- --refresh
+      - name: run live integration tests
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+        run: npm run test:integration
+      - name: delete the saved session
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tr-session.json"
