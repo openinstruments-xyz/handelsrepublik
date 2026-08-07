@@ -36,12 +36,11 @@ Treat pull-request code as untrusted, including lifecycle scripts, tests, and
 build scripts. Never add secrets, deployments, write permissions, privileged
 external services, or `pull_request_target` to these workflows.
 
-The final `Merge gate / merge gate` check waits for a maintainer to approve the
-secret-free `Merge Gate` environment job. Once the other required checks pass,
-that approval admits the pull request to the merge queue. Merge candidates run
-the live integration suite before the same final check can pass again. The
-approval workflow runs from the trusted default branch, never checks out pull-
-request code, and reports its result on the approved pull-request commit.
+Once the required pull-request checks pass, GitHub's merge queue builds the
+exact merge candidate. That candidate deploys to the protected `Live
+Integration Tests` environment and waits for its required reviewer before any
+session secret is released. The deployment must succeed before GitHub merges
+the candidate. Ordinary pull-request workflows never enter that environment.
 
 The SDK is a modular monolith: `ClientRuntime` owns shared transport,
 schema-validation, and securities-account resolution; declarative REST and
@@ -50,13 +49,12 @@ mapper calls live in `src/operation-specs.ts`; domain adapters live in
 
 ## Live integration tests
 
-The `Live integration tests` workflow runs for merge candidates after the pull
-request's merge-gate approval, or from an explicit maintainer dispatch. It runs
-the non-ordering integration suite against the protected `Live Integration
-Tests` environment. Before the suite starts, the workflow refreshes the saved
-session and writes the refreshed browser and WAF context back to the
-environment's `TR_SESSION_JSON` secret. The manual order suite stays excluded
-because it can place a real order.
+The `Live integration tests` workflow runs for merge candidates, or from an
+explicit maintainer dispatch. It runs the non-ordering integration suite
+against the protected `Live Integration Tests` environment. Before the suite
+starts, the workflow refreshes the saved session and writes the refreshed
+browser and WAF context back to the environment's `TR_SESSION_JSON` secret.
+The manual order suite stays excluded because it can place a real order.
 
 `Refresh live session` runs every two hours and updates the `TR_SESSION_JSON`
 secret in the `Live Integration Tests` environment. It uses the environment's
