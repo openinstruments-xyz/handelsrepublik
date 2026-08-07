@@ -55,10 +55,6 @@ describe('GitHub Actions trust boundaries', () => {
 
   it('runs quality and unit tests without secrets or an environment', () => {
     assert.ok(pullRequest);
-    const secretFreePullRequest = pullRequest.source.replace(
-      getJob(pullRequest.source, 'live-integration-bootstrap'),
-      '',
-    );
     assert.match(pullRequest.source, /^permissions:\r?\n  contents: read\r?$/m);
     assert.doesNotMatch(pullRequest.source, /pull_request_target/);
     for (const [jobName, expectedName] of [
@@ -75,8 +71,8 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+- run: npm run build\r?$/m);
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+run: git diff --exit-code -- dist\r?$/m);
     assert.match(getJob(pullRequest.source, 'unit-tests'), /^\s+- run: npm test\r?$/m);
-    assert.doesNotMatch(secretFreePullRequest, /secrets\./);
-    assert.doesNotMatch(secretFreePullRequest, /^\s+environment:/m);
+    assert.doesNotMatch(pullRequest.source, /secrets\./);
+    assert.doesNotMatch(pullRequest.source, /^\s+environment:/m);
   });
 
   it('runs the exact approved commit only after the secret-free workflow succeeds', () => {
@@ -105,7 +101,7 @@ describe('GitHub Actions trust boundaries', () => {
       workflows.filter((workflow) => /^\s+environment: Live Integration Tests\r?$/m.test(workflow.source))
         .map((workflow) => workflow.file)
         .sort(),
-      ['live-integration.yml', 'pull-request.yml', 'refresh-live-session.yml'],
+      ['live-integration.yml', 'refresh-live-session.yml'],
     );
   });
 
