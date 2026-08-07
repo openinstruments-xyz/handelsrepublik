@@ -1,5 +1,5 @@
-# Quality and unit tests run without live access. The protected environment is
-# entered only after both jobs succeed and a required reviewer approves it.
+# Fork approval authorizes this secret-free workflow. A trusted workflow_run
+# workflow performs live integration only after both jobs succeed.
 name: Pull request
 
 on:
@@ -49,7 +49,10 @@ jobs:
       - run: npm ci
       - run: npm test
 
-  live-integration:
+  # Bootstrap only: this lets the transition PR satisfy the existing protected
+  # Live Integration context before live-integration.yml exists on main.
+  # Remove this job immediately after the workflow_run workflow is merged.
+  live-integration-bootstrap:
     name: Live Integration
     needs: [quality, unit-tests]
     runs-on: ubuntu-latest
@@ -69,19 +72,12 @@ jobs:
           TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
         run: |
           umask 077
+          test -n "$TR_SESSION_JSON"
           printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
-      - name: refresh the saved session
+      - name: refresh the saved session locally
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
         run: npm run ci:reauth -- --refresh
-      - name: persist the refreshed session
-        env:
-          GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}
-        run: |
-          gh secret set TR_SESSION_JSON \
-            --repo "$GITHUB_REPOSITORY" \
-            --env "Live Integration Tests" \
-            < "$RUNNER_TEMP/tr-session.json"
       - name: run live integration tests
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
