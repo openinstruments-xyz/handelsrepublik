@@ -1,5 +1,5 @@
-# Validate the exact merge candidate before GitHub adds it to main.
-name: Merge queue
+# Run the protected deployment for the exact merge candidate.
+name: Live integration tests
 
 on:
   merge_group:
@@ -16,18 +16,3 @@ jobs:
   live:
     name: live integration tests
     uses: ./.github/workflows/live-integration.yml
-
-  merge-queue:
-    name: Merge queue / merge queue
-    if: ${{ always() }}
-    needs: [live]
-    runs-on: ubuntu-latest
-    steps:
-      - name: require successful live integration tests
-        env:
-          LIVE_RESULT: ${{ needs.live.result }}
-        run: |
-          if [ "$LIVE_RESULT" != "success" ]; then
-            echo "::error::live integration tests concluded '$LIVE_RESULT'; expected 'success'."
-            exit 1
-          fi
