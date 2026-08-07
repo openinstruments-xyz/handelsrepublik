@@ -29,26 +29,22 @@ function getJob(source: string, job: string): string {
 
 describe('GitHub Actions trust boundaries', () => {
   const pullRequest = workflows.find((workflow) => workflow.file === 'pull-request.yml');
-  const liveIntegration = workflows.find((workflow) => workflow.file === 'live-integration.yml');
+  const mergeQueue = workflows.find((workflow) => workflow.file === 'merge-queue.yml');
 
-  it('uses a secret-free pull-request workflow and a trusted follow-up workflow', () => {
+  it('uses a secret-free pull-request workflow and GitHub native merge groups', () => {
     assert.ok(pullRequest);
-    assert.ok(liveIntegration);
+    assert.ok(mergeQueue);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'pull_request'), true);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'workflow_dispatch'), true);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'push'), false);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'merge_group'), false);
     assert.equal(hasTopLevelTrigger(pullRequest.source, 'pull_request_target'), false);
-    assert.equal(hasTopLevelTrigger(liveIntegration.source, 'workflow_run'), true);
-    assert.equal(hasTopLevelTrigger(liveIntegration.source, 'pull_request'), false);
-    assert.equal(hasTopLevelTrigger(liveIntegration.source, 'pull_request_target'), false);
-    assert.match(liveIntegration.source, /^    workflows: \[Pull request\]\r?$/m);
-    for (const file of [
-      'quality.yml',
-      'unit-tests.yml',
-      'merge-queue.yml',
-      'merge-queue-readiness.yml',
-    ]) {
+    assert.equal(hasTopLevelTrigger(mergeQueue.source, 'merge_group'), true);
+    assert.equal(hasTopLevelTrigger(mergeQueue.source, 'workflow_run'), false);
+    assert.equal(hasTopLevelTrigger(mergeQueue.source, 'pull_request'), false);
+    assert.equal(hasTopLevelTrigger(mergeQueue.source, 'pull_request_target'), false);
+    assert.match(mergeQueue.source, /^    types: \[checks_requested\]\r?$/m);
+    for (const file of ['quality.yml', 'unit-tests.yml', 'live-integration.yml', 'merge-queue-readiness.yml']) {
       assert.equal(workflows.some((workflow) => workflow.file === file), false);
     }
   });
@@ -75,22 +71,23 @@ describe('GitHub Actions trust boundaries', () => {
     assert.doesNotMatch(pullRequest.source, /^\s+environment:/m);
   });
 
-  it('runs the exact approved commit only after the secret-free workflow succeeds', () => {
-    assert.ok(liveIntegration);
-    const live = getJob(liveIntegration.source, 'live-integration');
-    assert.match(live, /workflow_run\.event == 'pull_request'/);
-    assert.match(live, /workflow_run\.conclusion == 'success'/);
+  it('runs all required checks on the native merge-group commit', () => {
+    assert.ok(mergeQueue);
+    const quality = getJob(mergeQueue.source, 'quality');
+    const unitTests = getJob(mergeQueue.source, 'unit-tests');
+    const live = getJob(mergeQueue.source, 'live-integration');
+    assert.match(quality, /^    name: Quality\r?$/m);
+    assert.match(unitTests, /^    name: Unit Tests\r?$/m);
+    assert.match(live, /^    name: Live Integration\r?$/m);
+    assert.match(live, /^    needs: \[quality, unit-tests\]\r?$/m);
     assert.match(live, /^    environment: Live Integration Tests\r?$/m);
-    assert.match(live, /repository: \$\{\{ github\.event\.workflow_run\.head_repository\.full_name \}\}/);
-    assert.match(live, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
-    assert.match(live, /test "\$\(git rev-parse HEAD\)" = "\$APPROVED_HEAD_SHA"/);
     assert.match(live, /secrets\.TR_SESSION_JSON/);
     assert.match(live, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
     assert.match(live, /^\s+run: npm run test:integration\r?$/m);
-    assert.match(liveIntegration.source, /^  statuses: write\r?$/m);
-    assert.match(live, /context='Live Integration'/);
     assert.doesNotMatch(live, /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.doesNotMatch(live, /gh secret set/);
+    assert.doesNotMatch(mergeQueue.source, /workflow_run/);
+    assert.doesNotMatch(mergeQueue.source, /allow-unsafe-pr-checkout/);
     assert.doesNotMatch(live, /echo .*TR_SESSION_JSON/);
     assert.doesNotMatch(live, /test:integration:manual/);
     assert.ok(live.indexOf('- run: npm ci') < live.indexOf('TR_SESSION_JSON:'));
@@ -101,7 +98,7 @@ describe('GitHub Actions trust boundaries', () => {
       workflows.filter((workflow) => /^\s+environment: Live Integration Tests\r?$/m.test(workflow.source))
         .map((workflow) => workflow.file)
         .sort(),
-      ['live-integration.yml', 'refresh-live-session.yml'],
+      ['merge-queue.yml', 'refresh-live-session.yml'],
     );
   });
 
