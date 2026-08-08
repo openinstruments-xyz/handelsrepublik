@@ -1,5 +1,9 @@
 # Fork approval authorizes only this secret-free workflow. Live access is
 # reserved for GitHub's native merge queue after a maintainer queues the PR.
+#
+# Required status checks are global in GitHub; they are not scoped by event.
+# The explicit Live Integration job below is therefore a non-privileged,
+# successful deferral marker. The actual live suite runs only in merge-queue.yml.
 name: Pull request
 
 on:
@@ -16,6 +20,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   quality:
     name: Quality
     runs-on: ubuntu-latest
@@ -34,26 +53,10 @@ jobs:
       - name: verify committed distribution
         run: git diff --exit-code -- dist
 
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-
   live-integration:
     name: Live Integration
-    needs: [quality, unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - name: defer trusted live integration to the merge queue
-        run: echo "The required live test runs on the trusted merge-group ref."
+      - name: defer privileged live integration to the merge queue
+        run: echo "Live Integration runs only for the trusted merge-group commit."

@@ -54,8 +54,8 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(pullRequest.source, /^permissions:\r?\n  contents: read\r?$/m);
     assert.doesNotMatch(pullRequest.source, /pull_request_target/);
     for (const [jobName, expectedName] of [
+      ['unit', 'Unit Tests'],
       ['quality', 'Quality'],
-      ['unit-tests', 'Unit Tests'],
     ] as const) {
       const job = getJob(pullRequest.source, jobName);
       assert.match(job, new RegExp(`^    name: ${expectedName}\\r?$`, 'm'));
@@ -66,7 +66,9 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+- run: npm run typecheck\r?$/m);
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+- run: npm run build\r?$/m);
     assert.match(getJob(pullRequest.source, 'quality'), /^\s+run: git diff --exit-code -- dist\r?$/m);
-    assert.match(getJob(pullRequest.source, 'unit-tests'), /^\s+- run: npm test\r?$/m);
+    assert.match(getJob(pullRequest.source, 'unit'), /^\s+- run: npm test\r?$/m);
+    assert.match(getJob(pullRequest.source, 'live-integration'), /^    name: Live Integration\r?$/m);
+    assert.doesNotMatch(getJob(pullRequest.source, 'live-integration'), /actions\/checkout|npm (?:ci|run|test)|secrets\.|environment:/);
     assert.doesNotMatch(pullRequest.source, /secrets\./);
     assert.doesNotMatch(pullRequest.source, /^\s+environment:/m);
   });
@@ -74,13 +76,16 @@ describe('GitHub Actions trust boundaries', () => {
   it('runs all required checks on the native merge-group commit', () => {
     assert.ok(mergeQueue);
     const quality = getJob(mergeQueue.source, 'quality');
-    const unitTests = getJob(mergeQueue.source, 'unit-tests');
+    const unit = getJob(mergeQueue.source, 'unit');
     const live = getJob(mergeQueue.source, 'live-integration');
     assert.match(quality, /^    name: Quality\r?$/m);
-    assert.match(unitTests, /^    name: Unit Tests\r?$/m);
+    assert.match(unit, /^    name: Unit Tests\r?$/m);
     assert.match(live, /^    name: Live Integration\r?$/m);
-    assert.match(live, /^    needs: \[quality, unit-tests\]\r?$/m);
+    assert.match(live, /^    needs: \[unit, quality\]\r?$/m);
     assert.match(live, /^    environment: Live Integration Tests\r?$/m);
+    assert.match(quality, /^\s+ref: \$\{\{ github.sha \}\}\r?$/m);
+    assert.match(unit, /^\s+ref: \$\{\{ github.sha \}\}\r?$/m);
+    assert.match(live, /^\s+ref: \$\{\{ github.sha \}\}\r?$/m);
     assert.match(live, /secrets\.TR_SESSION_JSON/);
     assert.match(live, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
     assert.match(live, /^\s+run: npm run test:integration\r?$/m);
