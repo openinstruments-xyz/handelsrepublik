@@ -1,5 +1,5 @@
-# Fork approval authorizes this secret-free workflow. A trusted workflow_run
-# workflow performs live integration only after both jobs succeed.
+# Fork approval authorizes only this secret-free workflow. Live access is
+# reserved for GitHub's native merge queue after a maintainer queues the PR.
 name: Pull request
 
 on:
@@ -48,3 +48,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+
+  live-integration:
+    name: Live Integration
+    needs: [quality, unit-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: defer trusted live integration to the merge queue
+        run: echo "The required live test runs on the trusted merge-group ref."
