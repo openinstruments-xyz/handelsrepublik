@@ -49,7 +49,7 @@ export const BOND_CANDLE_RESOLUTIONS: readonly CandleTimeframe[] = [
 
 export function candleResolutionsForInstrumentType(instrumentType: string | undefined): CandleTimeframe[] {
   const normalized = instrumentType?.trim().toLowerCase();
-  if (normalized === 'derivative' || normalized === 'crypto') {
+  if (normalized === 'derivative' || normalized === 'crypto' || normalized === 'mutualfund') {
     return [...DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS];
   }
   if (normalized === 'bond') return [...BOND_CANDLE_RESOLUTIONS];
