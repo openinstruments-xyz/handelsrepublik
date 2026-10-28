@@ -255,9 +255,9 @@ const resolutions = await tr.market.availableCandleResolutions({
 });
 ```
 
-The observed web-client policy is:
+The SDK exposes these type-based resolution groups:
 
-- derivatives and crypto: `10m`, `1h`, `4h`, `1d`, `1w`
+- derivatives, crypto and mutual funds: `10m`, `1h`, `4h`, `1d`, `1w`
 - bonds: `1d`, `1w`
 - other instruments: `1m`, `3m`, `5m`, `10m`, `15m`, `20m`, `30m`, `45m`,
   `1h`, `2h`, `4h`, `1d`, `1w`, `1M`
@@ -265,4 +265,11 @@ The observed web-client policy is:
 This is why the short-gold derivative in the capture only offered 10 minutes,
 1 hour, 4 hours, 1 day, and 1 week. The list is instrument-specific through
 `typeId`, but it is a client-side broker rule rather than a list returned by the
-candle server.
+candle server. Mutual-fund support for all five light-history resolutions was
+also verified with live requests.
+
+Mutual funds (`instrumentType: 'mutualFund'`, including Vestima/VST) use
+`aggregateHistoryLightV2`. Live checks on Amundi and DWS funds returned daily
+NAV history through this resource, while `tradeAggregateHistory` returned empty
+arrays for the same instruments and dates. Stocks and ETFs continue to use
+`tradeAggregateHistory`.

@@ -129,7 +129,7 @@ export const l2OrderBookSpec: ProtobufStreamSpec<{
 function lightCandleResource(params: CandleDownloadOptions): Record<string, unknown> {
   const resolution = candleResolutionMs(params.timeframe);
   if (![600_000, 3_600_000, 14_400_000, 86_400_000, 604_800_000].includes(resolution)) {
-    throw new TypeError('Derivative and crypto candles support only 10m, 1h, 4h, 1d, and 1w resolutions.');
+    throw new TypeError('Derivative, crypto and mutual fund candles support only 10m, 1h, 4h, 1d, and 1w resolutions.');
   }
   return {
     type: 'aggregateHistoryLightV2',

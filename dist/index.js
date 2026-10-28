@@ -1595,7 +1595,7 @@ var BOND_CANDLE_RESOLUTIONS = [
 ];
 function candleResolutionsForInstrumentType(instrumentType) {
   const normalized = instrumentType?.trim().toLowerCase();
-  if (normalized === "derivative" || normalized === "crypto") {
+  if (normalized === "derivative" || normalized === "crypto" || normalized === "mutualfund") {
     return [...DERIVATIVE_AND_CRYPTO_CANDLE_RESOLUTIONS];
   }
   if (normalized === "bond") return [...BOND_CANDLE_RESOLUTIONS];
@@ -2182,8 +2182,8 @@ var schemaRegistry = [
   entry("portfolio.fixedSavingsValuation", "Fixed savings valuation", "websocket", "read", "fixedSavingsValuation", jsonValue),
   entry("market.subscriptions", "Market subscriptions", "rest", "read", "GET /api-gateway/subscriptions/api/v1/subscriptions", z.array(marketSubscriptionSchema)),
   entry("market.entitlements", "Market topic entitlements", "rest", "read", "GET /api-gateway/subscriptions/api/v1/entitlements/topics/{topic}", marketEntitlementsSchema),
-  entry("market.candles.standard", "Stock, ETF and fund price history candles", "websocket", "read", "tradeAggregateHistory", standardCandlesResponseSchema, { variants: ["stock", "etf", "fund", "mutualFund"] }),
-  entry("market.candles.light", "Derivative and crypto price history candles", "websocket", "read", "aggregateHistoryLightV2", lightCandlesResponseSchema, { variants: ["derivative", "crypto"] }),
+  entry("market.candles.standard", "Stock and ETF price history candles", "websocket", "read", "tradeAggregateHistory", standardCandlesResponseSchema, { variants: ["stock", "etf", "fund"] }),
+  entry("market.candles.light", "Derivative, crypto and mutual fund price history candles", "websocket", "read", "aggregateHistoryLightV2", lightCandlesResponseSchema, { variants: ["derivative", "crypto", "mutualFund"] }),
   entry("market.candles.bond", "Bond yield history candles", "rest", "read", "GET /api-gateway/quotes-api/v1/instruments/{isin}.{exchangeId}/ytm/aggregateHistory", bondCandlesResponseSchema, { variants: ["bond"] }),
   entry("market.quote", "Market quote", "websocket", "read", "ticker", jsonValue, { variants: ["stock", "crypto"] }),
   entry("market.liveFeed", "Live quote feed", "websocket", "read", "tickerV3", jsonValue, { variants: ["stock", "crypto"], live: { sample: "stream" } }),
@@ -3620,7 +3620,7 @@ var l2OrderBookSpec = {
 function lightCandleResource(params) {
   const resolution = candleResolutionMs(params.timeframe);
   if (![6e5, 36e5, 144e5, 864e5, 6048e5].includes(resolution)) {
-    throw new TypeError("Derivative and crypto candles support only 10m, 1h, 4h, 1d, and 1w resolutions.");
+    throw new TypeError("Derivative, crypto and mutual fund candles support only 10m, 1h, 4h, 1d, and 1w resolutions.");
   }
   return {
     type: "aggregateHistoryLightV2",
@@ -4913,7 +4913,7 @@ var MarketApi = class {
   async resolveCandleSource(options) {
     const type = options.instrumentType;
     if (type === "bond") return "bond";
-    if (type === "crypto" || type === "derivative") return "light";
+    if (type === "crypto" || type === "derivative" || type === "mutualFund") return "light";
     if (type) return "standard";
     const resolutions = await this.availableCandleResolutions({ assetId: options.assetId });
     if (resolutions.length === 2 && resolutions.includes("1d") && resolutions.includes("1w")) return "bond";

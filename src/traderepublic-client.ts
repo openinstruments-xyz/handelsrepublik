@@ -1365,7 +1365,7 @@ export class MarketApi {
   private async resolveCandleSource(options: CandleDownloadOptions): Promise<'standard' | 'light' | 'bond'> {
     const type = options.instrumentType;
     if (type === 'bond') return 'bond';
-    if (type === 'crypto' || type === 'derivative') return 'light';
+    if (type === 'crypto' || type === 'derivative' || type === 'mutualFund') return 'light';
     if (type) return 'standard';
     const resolutions = await this.availableCandleResolutions({ assetId: options.assetId });
     if (resolutions.length === 2 && resolutions.includes('1d') && resolutions.includes('1w')) return 'bond';

@@ -104,6 +104,37 @@ describe('market namespace', () => {
     ]);
   });
 
+  for (const instrumentType of ['mutualFund', undefined] as const) {
+    it(`routes mutual fund candles through light history with ${instrumentType ? 'an explicit' : 'an inferred'} type`, async () => {
+      const payloads: Array<Record<string, unknown>> = [];
+      const client = TradeRepublicClient.create({
+        websocketFactory: () => {
+          const socket = new FakeSocket((payload, id) => {
+            payloads.push(payload);
+            const response = payload.type === 'instrument'
+              ? { isin: 'LU1883872332', typeId: 'mutualFund' }
+              : { resolution: 86_400_000, unit: 'EUR', aggregates: [{ time: 1_784_160_000_000, open: '28.31', high: '28.31', low: '28.31', close: '28.31' }] };
+            socket.emit('message', `${id} A ${JSON.stringify(response)}`);
+          });
+          return socket;
+        },
+      });
+      try {
+        const options = { assetId: 'LU1883872332', exchangeId: 'VST', instrumentType, timeframe: '1d' as const, range: '6m' };
+        const candles = await client.market.candles(options);
+        assert.equal(candles.length, 1);
+        assert.equal(candles[0]?.close, 28.31);
+        assert.equal(candles[0]?.volume, undefined);
+        const series = await client.market.candleSeries(options);
+        assert.equal(series.resolutionMs, 86_400_000);
+        assert.deepEqual(series.candles, candles);
+        assert.deepEqual(payloads.filter(payload => payload.type !== 'instrument'), Array.from({ length: 2 }, () => ({
+          type: 'aggregateHistoryLightV2', isin: 'LU1883872332', exchangeId: 'VST', resolution: 86_400_000, range: '6m', unit: 'EUR',
+        })));
+      } finally { client.close(); }
+    });
+  }
+
   it('routes bond candles through yield history and aggregates calendar weeks', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const client = TradeRepublicClient.create({
@@ -466,6 +497,7 @@ describe('market namespace', () => {
             CRYPTO: 'crypto',
             BOND: 'bond',
             STOCK: 'stock',
+            MUTUAL_FUND: 'mutualFund',
           };
           socket.emit('message', `${id} A ${JSON.stringify({
             isin: payload.id,
@@ -481,6 +513,8 @@ describe('market namespace', () => {
       .resolves.toEqual(['10m', '1h', '4h', '1d', '1w']);
     await expect(client.market.availableCandleResolutions({ assetId: 'CRYPTO' }))
       .resolves.toEqual(['10m', '1h', '4h', '1d', '1w']);
+    await expect(client.market.availableCandleResolutions({ assetId: 'MUTUAL_FUND' }))
+      .resolves.toEqual(['10m', '1h', '4h', '1d', '1w']);
     await expect(client.market.availableCandleResolutions({ assetId: 'BOND' }))
       .resolves.toEqual(['1d', '1w']);
     await expect(client.market.availableCandleResolutions({ assetId: 'STOCK' }))
@@ -491,6 +525,7 @@ describe('market namespace', () => {
     expect(payloads).toEqual([
       { type: 'instrument', id: 'DERIVATIVE' },
       { type: 'instrument', id: 'CRYPTO' },
+      { type: 'instrument', id: 'MUTUAL_FUND' },
       { type: 'instrument', id: 'BOND' },
       { type: 'instrument', id: 'STOCK' },
     ]);
