@@ -1111,7 +1111,7 @@ var AuthApi = class {
     throw new Error("Timed out while waiting for Trade Republic instant login approval.");
   }
   async startLoginWithPin(options) {
-    const raw = await this.http.request(
+    const response = await this.http.requestDetailed(
       "POST",
       this.endpoints.resolve("auth.login"),
       {
@@ -1124,7 +1124,8 @@ var AuthApi = class {
         headers: options.otpLess ? { "X-TR-OTP-Less": "true" } : void 0
       }
     );
-    return extractLoginProgressState(raw);
+    rememberProgressSession(this.getSession(), extractCookieSession(response.headers), this.setSession);
+    return extractLoginProgressState(response.body);
   }
   async loginWithPin(options) {
     const progress = await this.startLoginWithPin(options);

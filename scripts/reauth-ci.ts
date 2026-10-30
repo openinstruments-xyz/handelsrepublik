@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { appendFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import {
@@ -8,6 +8,7 @@ import {
   FileSessionStore,
   MemorySessionStore,
   TradeRepublicClient,
+  TradeRepublicHttpError,
   toTradeRepublicWafToken,
 } from '../src/index.js';
 import type { Session, TradeRepublicBrowserLike, TradeRepublicWebContext } from '../src/index.js';
@@ -41,9 +42,10 @@ interface Options {
 interface ReauthOperations {
   refresh(sessionPath: string): Promise<void>;
   enroll(options: Options): Promise<void>;
+  pin?(sessionPath: string): Promise<boolean>;
 }
 
-type CiReauthMode = 'enroll' | 'refresh';
+type CiReauthMode = 'enroll' | 'refresh' | 'check-session' | 'pin';
 
 interface ParsedOptions {
   options: Options;
@@ -52,28 +54,130 @@ interface ParsedOptions {
 
 const DEFAULT_REPOSITORY = 'openinstruments-xyz/handelsrepublik';
 
+export class SavedSessionUnavailableError extends Error {}
+
+export async function checkCiSession(refresh: () => Promise<void>): Promise<boolean> {
+  try {
+    await refresh();
+    return true;
+  } catch (error) {
+    if (error instanceof SavedSessionUnavailableError
+      || (error instanceof TradeRepublicHttpError && error.status === 401)) {
+      console.log('Saved CI session unavailable or expired; skipping authenticated tests without starting a login.');
+      return false;
+    }
+    throw error;
+  }
+}
+
+export function isCiPinLoginAllowed(
+  context: { eventName?: string; schedule?: string; runAttempt?: string },
+  now = new Date(),
+): boolean {
+  const localTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(now);
+  // Ignore reruns, manual requests, and schedules delayed beyond the phone-approval window.
+  return context.eventName === 'schedule' && context.schedule === '0 15 * * *'
+    && context.runAttempt === '1' && /^(15|16|17):\d{2}$/.test(localTime);
+}
+
+function ciPinLoginAllowedNow(): boolean {
+  return process.env.GITHUB_ACTIONS !== 'true' || isCiPinLoginAllowed({
+    eventName: process.env.GITHUB_EVENT_NAME ?? '',
+    schedule: process.env.TR_LOGIN_SCHEDULE ?? '',
+    runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? '',
+  });
+}
+
 export async function runCiReauth(
   sessionPath: string | undefined,
   options: Options,
   operations: ReauthOperations,
   mode: CiReauthMode = 'enroll',
-): Promise<void> {
-  if (mode === 'refresh') {
-    assert.ok(sessionPath, 'TR_SESSION_FILE is required for --refresh.');
-    await operations.refresh(sessionPath);
+): Promise<boolean | void> {
+  if (mode === 'refresh' || mode === 'check-session' || mode === 'pin') {
+    assert.ok(sessionPath, `TR_SESSION_FILE is required for --${mode}.`);
+    if (mode === 'pin') {
+      assert.ok(operations.pin, 'PIN login operation is required.');
+      return operations.pin(sessionPath);
+    } else if (mode === 'check-session') {
+      return checkCiSession(() => operations.refresh(sessionPath));
+    } else {
+      await operations.refresh(sessionPath);
+    }
     return;
   }
   await operations.enroll(options);
 }
 
+export async function loginWithCiPin(
+  client: Pick<TradeRepublicClient, 'auth'>,
+  credentials: { phoneNumber?: string | undefined; pin?: string | undefined },
+): Promise<Session> {
+  const phoneNumber = credentials.phoneNumber?.trim();
+  const pin = credentials.pin?.trim();
+  assert.ok(phoneNumber && pin, 'TR_PHONE_NUMBER and TR_PIN are required for CI PIN login.');
+  console.log('Approve the Trade Republic login in the app within two minutes.');
+  try {
+    return await client.auth.loginWithPin({
+      phoneNumber,
+      pin,
+      otpLess: true,
+      timeoutMs: 120_000,
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (error) {
+    // Do not print API response bodies or causes from a credentialed login.
+    if (error instanceof TradeRepublicHttpError) {
+      throw new Error(`Trade Republic CI PIN login failed (HTTP ${error.status}).`);
+    }
+    throw new Error('Trade Republic CI PIN login was not approved or could not finish within two minutes.');
+  }
+}
+
+async function loginSavedSessionWithPin(sessionPath: string): Promise<boolean> {
+  if (!ciPinLoginAllowedNow()) {
+    console.log('Skipping PIN login: only the daily first scheduled run from 15:00 until 18:00 Europe/Berlin may request approval.');
+    return false;
+  }
+  assert.ok(process.env.TR_PHONE_NUMBER?.trim() && process.env.TR_PIN?.trim(),
+    'TR_PHONE_NUMBER and TR_PIN are required for CI PIN login.');
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true });
+  let client: TradeRepublicClient | undefined;
+  try {
+    const webContext = await collectTradeRepublicWebContext(browser, {
+      timeoutMs: 60_000,
+      settleMs: 1_000,
+    });
+    if (!ciPinLoginAllowedNow()) {
+      console.log('Skipping PIN login: browser setup finished outside the daily approval window.');
+      return false;
+    }
+    // Start with fresh browser proof and device information, without stale auth cookies.
+    client = TradeRepublicClient.create({ webContext, wafToken: toTradeRepublicWafToken(webContext) });
+    const authenticated = await loginWithCiPin(client, {
+      phoneNumber: process.env.TR_PHONE_NUMBER,
+      pin: process.env.TR_PIN,
+    });
+    const session = completeFreshEnrollmentSession(authenticated, webContext);
+    await new FileSessionStore(sessionPath).save(session);
+    console.log('Trade Republic CI PIN login approved; saved the new session.');
+    return true;
+  } finally {
+    client?.close();
+    await browser.close();
+  }
+}
+
 async function refreshSavedSession(sessionPath: string): Promise<void> {
-  await access(sessionPath);
   const client = TradeRepublicClient.create({
     sessionStore: new FileSessionStore(sessionPath),
   });
   try {
     const restored = await client.auth.restoreSession();
-    if (!restored) throw new Error('The saved CI session could not be restored.');
+    if (!restored) throw new SavedSessionUnavailableError('The saved CI session could not be restored.');
     await client.auth.refreshSession();
   } finally {
     client.close();
@@ -230,6 +334,8 @@ function parseOptions(args: string[]): ParsedOptions | undefined {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--refresh') mode = 'refresh';
+    else if (argument === '--check-session') mode = 'check-session';
+    else if (argument === '--pin') mode = 'pin';
     else if (argument === '--debug') options.debug = true;
     else if (argument === '--repo') options.repo = requiredValue(args, ++index, argument);
     else if (argument === '--secret') options.secret = requiredValue(args, ++index, argument);
@@ -248,6 +354,8 @@ Use --refresh only for the scheduled GitHub Actions refresh workflow.
 
 Options:
   --refresh                Refresh TR_SESSION_FILE instead of interactive enrollment
+  --check-session          Refresh without login; report session_valid=false for missing/expired sessions
+  --pin                    Log in with TR_PHONE_NUMBER/TR_PIN; wait at most two minutes
   --repo OWNER/REPO       GitHub repository (default: ${DEFAULT_REPOSITORY})
   --secret NAME           Environment secret (default: TR_SESSION_JSON)
   --environment NAME      GitHub environment (default: Live Integration Tests)
@@ -290,10 +398,14 @@ function firstString(...values: unknown[]): string | undefined {
 async function main(): Promise<void> {
   const parsed = parseOptions(process.argv.slice(2));
   if (!parsed) return;
-  await runCiReauth(process.env.TR_SESSION_FILE, parsed.options, {
+  const valid = await runCiReauth(process.env.TR_SESSION_FILE, parsed.options, {
     refresh: refreshSavedSession,
     enroll: enrollRepositorySession,
+    pin: loginSavedSessionWithPin,
   }, parsed.mode);
+  if (typeof valid === 'boolean' && process.env.GITHUB_OUTPUT) {
+    await appendFile(process.env.GITHUB_OUTPUT, `session_valid=${valid}\n`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

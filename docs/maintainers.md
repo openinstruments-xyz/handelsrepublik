@@ -123,8 +123,30 @@ exactly that context directly to the `Live Integration Tests` environment's
 `TR_SESSION_JSON` secret. It ignores a locally inherited `TR_SESSION_FILE`, so
 an old partial session cannot replace the new enrollment. It does not print the
 session or leave a new session file on disk. Only the scheduled and live-test
-workflows pass explicit `--refresh` mode together with `TR_SESSION_FILE` for
-unattended refreshes.
+workflows use `--check-session` with `TR_SESSION_FILE` for unattended refreshes.
+Missing sessions and HTTP 401 responses are reported as unavailable; other
+failures still fail CI. The merge-queue job skips its authenticated live tests
+when the saved session is unavailable and records the reason in its summary.
+It never starts a PIN or QR login and cannot access the phone/PIN secrets.
+
+The refresh workflow has an additional daily schedule at 15:00 in
+`Europe/Berlin`, including automatic summer/winter time adjustments. Only that
+schedule's first attempt may recover an unavailable session using
+`TR_PHONE_NUMBER` and `TR_PIN`. Approve the login in the app within two minutes.
+The script checks the actual Berlin time before browser setup and again before
+sending the login: it must be at or after 15:00 and before 18:00. Delayed jobs outside that window,
+reruns, manual workflow dispatches, and the regular two-hour refresh schedule
+cannot request approval. An unavailable session is otherwise left unchanged.
+This is phone/PIN login with push approval (`otpLess: true`), never QR login.
+An unapproved daily login fails its job without replacing the saved secret.
+
+The two-minute approval deadline starts after fresh browser proof has been
+collected. Local PIN enrollment remains available with `TR_SESSION_FILE`,
+`TR_PHONE_NUMBER`, and `TR_PIN` set in the environment:
+
+```powershell
+npm run ci:reauth -- --pin
+```
 
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.
