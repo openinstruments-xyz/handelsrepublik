@@ -73,24 +73,17 @@ jobs:
           printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
       - name: refresh the saved session locally
         id: refresh
-        continue-on-error: true
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
-        run: npm run ci:reauth -- --refresh
-      - name: install browser for PIN login
-        if: steps.refresh.outcome == 'failure'
-        run: npx playwright install --with-deps chromium
-      - name: log in with PIN and wait up to two minutes for app approval
-        if: steps.refresh.outcome == 'failure'
-        env:
-          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
-          TR_PHONE_NUMBER: ${{ secrets.TR_PHONE_NUMBER }}
-          TR_PIN: ${{ secrets.TR_PIN }}
-        run: npm run ci:reauth -- --pin
+        run: npm run ci:reauth -- --check-session
       - name: run live integration tests
+        if: steps.refresh.outputs.session_valid == 'true'
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
         run: npm run test:integration
+      - name: report skipped live tests
+        if: steps.refresh.outputs.session_valid == 'false'
+        run: echo "Live Integration skipped because the saved session is missing or expired. No login requested; recovery runs daily at 15:00 Europe/Berlin." >> "$GITHUB_STEP_SUMMARY"
       - name: delete the saved session
         if: always()
         run: rm -f "$RUNNER_TEMP/tr-session.json"

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { completeFreshEnrollmentSession, loginWithCiPin, runCiReauth } from '../scripts/reauth-ci.js';
+import {
+  checkCiSession, completeFreshEnrollmentSession, isCiPinLoginAllowed, loginWithCiPin,
+  runCiReauth, SavedSessionUnavailableError,
+} from '../scripts/reauth-ci.js';
 import { TradeRepublicClient, TradeRepublicHttpError } from '../src/index.js';
 
 const options = {
@@ -18,7 +21,7 @@ describe('CI session reauthentication mode', () => {
     await runCiReauth('ci-session.json', options, {
       async refresh() { calls.push('refresh'); },
       async enroll() { calls.push('enroll'); },
-      async pin(path) { calls.push(`pin:${path}`); },
+      async pin(path) { calls.push(`pin:${path}`); return true; },
     }, 'pin');
     assert.deepEqual(calls, ['pin:ci-session.json']);
   });
@@ -129,5 +132,44 @@ describe('CI session reauthentication mode', () => {
       }),
       /WAF token/,
     );
+  });
+});
+
+describe('CI session availability and daily approval policy', () => {
+  it('reports valid sessions without enrolling a new login', async () => {
+    let calls = 0;
+    const valid = await runCiReauth('ci-session.json', options, {
+      async refresh() { calls += 1; },
+      async enroll() { assert.fail('must not start QR login'); },
+      async pin() { assert.fail('must not start PIN login'); },
+    }, 'check-session');
+    assert.equal(valid, true);
+    assert.equal(calls, 1);
+  });
+
+  it('reports missing and rejected sessions as unavailable but preserves other failures', async () => {
+    for (const error of [new SavedSessionUnavailableError(), new TradeRepublicHttpError('unauthorized', 401, {})]) {
+      assert.equal(await checkCiSession(async () => { throw error; }), false);
+    }
+    for (const error of [new TradeRepublicHttpError('server error', 500, {}), new Error('network failure')]) {
+      await assert.rejects(() => checkCiSession(async () => { throw error; }), (actual) => actual === error);
+    }
+  });
+
+  const scheduled = { eventName: 'schedule', schedule: '0 15 * * *', runAttempt: '1' };
+
+  it('allows one scheduled approval window at 15:00 Berlin in winter and summer', () => {
+    assert.equal(isCiPinLoginAllowed(scheduled, new Date('2026-10-30T14:00:00Z')), true);
+    assert.equal(isCiPinLoginAllowed(scheduled, new Date('2026-07-30T13:09:59Z')), true);
+  });
+
+  it('rejects nighttime, early or delayed runs, manual dispatches, and reruns', () => {
+    for (const date of ['2026-10-30T02:00:00Z', '2026-10-30T13:59:59Z', '2026-10-30T14:10:00Z']) {
+      assert.equal(isCiPinLoginAllowed(scheduled, new Date(date)), false);
+    }
+    const now = new Date('2026-10-30T14:00:00Z');
+    assert.equal(isCiPinLoginAllowed({ ...scheduled, eventName: 'workflow_dispatch' }, now), false);
+    assert.equal(isCiPinLoginAllowed({ ...scheduled, schedule: '17 */2 * * *' }, now), false);
+    assert.equal(isCiPinLoginAllowed({ ...scheduled, runAttempt: '2' }, now), false);
   });
 });

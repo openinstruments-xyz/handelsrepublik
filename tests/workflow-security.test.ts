@@ -87,7 +87,10 @@ describe('GitHub Actions trust boundaries', () => {
     assert.match(unit, /^\s+ref: \$\{\{ github.sha \}\}\r?$/m);
     assert.match(live, /^\s+ref: \$\{\{ github.sha \}\}\r?$/m);
     assert.match(live, /secrets\.TR_SESSION_JSON/);
-    assert.match(live, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
+    assert.match(live, /^\s+run: npm run ci:reauth -- --check-session\r?$/m);
+    assert.doesNotMatch(live, /--pin|secrets\.TR_PHONE_NUMBER|secrets\.TR_PIN|playwright install/);
+    assert.match(live, /if: steps\.refresh\.outputs\.session_valid == 'true'/);
+    assert.match(live, /report skipped live tests/);
     assert.match(live, /^\s+run: npm run test:integration\r?$/m);
     assert.doesNotMatch(live, /GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.doesNotMatch(live, /gh secret set/);
@@ -113,7 +116,11 @@ describe('GitHub Actions trust boundaries', () => {
     assert.equal(hasTopLevelTrigger(refresh.source, 'schedule'), true);
     assert.equal(hasTopLevelTrigger(refresh.source, 'workflow_dispatch'), true);
     assert.match(refresh.source, /^\s+environment: Live Integration Tests\r?$/m);
-    assert.match(refresh.source, /^\s+run: npm run ci:reauth -- --refresh\r?$/m);
+    assert.match(refresh.source, /^\s+run: npm run ci:reauth -- --check-session\r?$/m);
+    assert.match(refresh.source, /cron: "0 15 \* \* \*"\r?\n\s+timezone: Europe\/Berlin/);
+    assert.doesNotMatch(refresh.source, /inputs\.pin_login|continue-on-error/);
+    assert.match(refresh.source, /github\.event_name == 'schedule'.*github\.event\.schedule == '0 15 \* \* \*'.*github\.run_attempt == 1/);
+    assert.match(refresh.source, /TR_LOGIN_SCHEDULE: \$\{\{ github\.event\.schedule \}\}/);
     assert.match(refresh.source, /secrets\.TR_SESSION_JSON/);
     assert.match(refresh.source, /secrets\.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION/);
     assert.doesNotMatch(refresh.source, /echo .*TR_SESSION_JSON/);
