@@ -8,6 +8,7 @@ import {
   FileSessionStore,
   MemorySessionStore,
   TradeRepublicClient,
+  TradeRepublicHttpError,
   toTradeRepublicWafToken,
 } from '../src/index.js';
 import type { Session, TradeRepublicBrowserLike, TradeRepublicWebContext } from '../src/index.js';
@@ -41,9 +42,10 @@ interface Options {
 interface ReauthOperations {
   refresh(sessionPath: string): Promise<void>;
   enroll(options: Options): Promise<void>;
+  pin?(sessionPath: string): Promise<void>;
 }
 
-type CiReauthMode = 'enroll' | 'refresh';
+type CiReauthMode = 'enroll' | 'refresh' | 'pin';
 
 interface ParsedOptions {
   options: Options;
@@ -58,12 +60,68 @@ export async function runCiReauth(
   operations: ReauthOperations,
   mode: CiReauthMode = 'enroll',
 ): Promise<void> {
-  if (mode === 'refresh') {
-    assert.ok(sessionPath, 'TR_SESSION_FILE is required for --refresh.');
-    await operations.refresh(sessionPath);
+  if (mode === 'refresh' || mode === 'pin') {
+    assert.ok(sessionPath, `TR_SESSION_FILE is required for --${mode}.`);
+    if (mode === 'pin') {
+      assert.ok(operations.pin, 'PIN login operation is required.');
+      await operations.pin(sessionPath);
+    } else {
+      await operations.refresh(sessionPath);
+    }
     return;
   }
   await operations.enroll(options);
+}
+
+export async function loginWithCiPin(
+  client: Pick<TradeRepublicClient, 'auth'>,
+  credentials: { phoneNumber?: string | undefined; pin?: string | undefined },
+): Promise<Session> {
+  const phoneNumber = credentials.phoneNumber?.trim();
+  const pin = credentials.pin?.trim();
+  assert.ok(phoneNumber && pin, 'TR_PHONE_NUMBER and TR_PIN are required for CI PIN login.');
+  console.log('Approve the Trade Republic login in the app within two minutes.');
+  try {
+    return await client.auth.loginWithPin({
+      phoneNumber,
+      pin,
+      otpLess: true,
+      timeoutMs: 120_000,
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (error) {
+    // Do not print API response bodies or causes from a credentialed login.
+    if (error instanceof TradeRepublicHttpError) {
+      throw new Error(`Trade Republic CI PIN login failed (HTTP ${error.status}).`);
+    }
+    throw new Error('Trade Republic CI PIN login was not approved or could not finish within two minutes.');
+  }
+}
+
+async function loginSavedSessionWithPin(sessionPath: string): Promise<void> {
+  assert.ok(process.env.TR_PHONE_NUMBER?.trim() && process.env.TR_PIN?.trim(),
+    'TR_PHONE_NUMBER and TR_PIN are required for CI PIN login.');
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true });
+  let client: TradeRepublicClient | undefined;
+  try {
+    const webContext = await collectTradeRepublicWebContext(browser, {
+      timeoutMs: 60_000,
+      settleMs: 1_000,
+    });
+    // Start with fresh browser proof and device information, without stale auth cookies.
+    client = TradeRepublicClient.create({ webContext, wafToken: toTradeRepublicWafToken(webContext) });
+    const authenticated = await loginWithCiPin(client, {
+      phoneNumber: process.env.TR_PHONE_NUMBER,
+      pin: process.env.TR_PIN,
+    });
+    const session = completeFreshEnrollmentSession(authenticated, webContext);
+    await new FileSessionStore(sessionPath).save(session);
+    console.log('Trade Republic CI PIN login approved; saved the new session.');
+  } finally {
+    client?.close();
+    await browser.close();
+  }
 }
 
 async function refreshSavedSession(sessionPath: string): Promise<void> {
@@ -230,6 +288,7 @@ function parseOptions(args: string[]): ParsedOptions | undefined {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--refresh') mode = 'refresh';
+    else if (argument === '--pin') mode = 'pin';
     else if (argument === '--debug') options.debug = true;
     else if (argument === '--repo') options.repo = requiredValue(args, ++index, argument);
     else if (argument === '--secret') options.secret = requiredValue(args, ++index, argument);
@@ -248,6 +307,7 @@ Use --refresh only for the scheduled GitHub Actions refresh workflow.
 
 Options:
   --refresh                Refresh TR_SESSION_FILE instead of interactive enrollment
+  --pin                    Log in with TR_PHONE_NUMBER/TR_PIN; wait at most two minutes
   --repo OWNER/REPO       GitHub repository (default: ${DEFAULT_REPOSITORY})
   --secret NAME           Environment secret (default: TR_SESSION_JSON)
   --environment NAME      GitHub environment (default: Live Integration Tests)
@@ -293,6 +353,7 @@ async function main(): Promise<void> {
   await runCiReauth(process.env.TR_SESSION_FILE, parsed.options, {
     refresh: refreshSavedSession,
     enroll: enrollRepositorySession,
+    pin: loginSavedSessionWithPin,
   }, parsed.mode);
 }
 

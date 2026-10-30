@@ -121,7 +121,7 @@ export class AuthApi {
   }
 
   async startLoginWithPin(options: StartLoginWithPinOptions): Promise<LoginProgressState> {
-    const raw = await this.http.request<unknown>(
+    const response = await this.http.requestDetailed<unknown>(
       'POST',
       this.endpoints.resolve('auth.login'),
       {
@@ -134,7 +134,8 @@ export class AuthApi {
         headers: options.otpLess ? { 'X-TR-OTP-Less': 'true' } : undefined,
       },
     );
-    return extractLoginProgressState(raw);
+    rememberProgressSession(this.getSession(), extractCookieSession(response.headers), this.setSession);
+    return extractLoginProgressState(response.body);
   }
 
   async loginWithPin(options: LoginWithPinOptions): Promise<Session> {

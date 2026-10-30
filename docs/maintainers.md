@@ -126,6 +126,23 @@ session or leave a new session file on disk. Only the scheduled and live-test
 workflows pass explicit `--refresh` mode together with `TR_SESSION_FILE` for
 unattended refreshes.
 
+If session refresh fails, both protected workflows start a fresh browser-backed
+PIN login using the environment secrets `TR_PHONE_NUMBER` and `TR_PIN`. Approve
+the login in the Trade Republic app within two minutes. Credentials are passed
+only to the PIN step; they are unavailable to the secret-free pull-request
+workflow. Failed or unapproved logins fail the job and do not replace the saved
+GitHub secret. Merge-queue logins stay local to that job, just like refreshes.
+The scheduled refresh workflow persists a successful replacement session.
+
+To request a fresh PIN login immediately, run `Refresh live session` manually
+with the `pin_login` input enabled. The two-minute approval deadline starts
+after fresh browser proof has been collected. Local use is also available with
+`TR_SESSION_FILE`, `TR_PHONE_NUMBER`, and `TR_PIN` set in the environment:
+
+```powershell
+npm run ci:reauth -- --pin
+```
+
 Live tests use a saved session and raw-response validation. Unknown response
 fields or incompatible types fail the invoking test before normalization.
 An empty endpoint list is valid where the endpoint permits it; it does not prove

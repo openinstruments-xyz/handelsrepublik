@@ -326,7 +326,9 @@ describe('auth namespace', () => {
     expect(calls[0]?.init.method).toBe('POST');
     expect(calls[0]?.init.body).toBe(JSON.stringify({ phoneNumber: '+491234567890', pin: '1234' }));
     expect(calls[1]?.url).toBe('https://api.traderepublic.com/api/v2/auth/web/login/processes/process-1');
+    expect((calls[1]?.init.headers as Record<string, string>).cookie).toContain('JSESSIONID=start-session');
     expect(calls[2]?.url).toBe('https://api.traderepublic.com/api/v1/auth/web/session');
+    expect((calls[2]?.init.headers as Record<string, string>).cookie).toContain('JSESSIONID=complete-session');
     expect(saved).toEqual([expect.objectContaining({ securitiesAccountNumber: '0000000001' })]);
   });
 

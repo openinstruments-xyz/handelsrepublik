@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "17 */2 * * *"
   workflow_dispatch:
+    inputs:
+      pin_login:
+        description: Start a fresh PIN login and wait up to two minutes for app approval
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,9 +38,22 @@ jobs:
           umask 077
           printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
       - name: refresh the saved session
+        id: refresh
+        if: inputs.pin_login != true
+        continue-on-error: true
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
         run: npm run ci:reauth -- --refresh
+      - name: install browser for PIN login
+        if: inputs.pin_login == true || steps.refresh.outcome == 'failure'
+        run: npx playwright install --with-deps chromium
+      - name: log in with PIN and wait up to two minutes for app approval
+        if: inputs.pin_login == true || steps.refresh.outcome == 'failure'
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+          TR_PHONE_NUMBER: ${{ secrets.TR_PHONE_NUMBER }}
+          TR_PIN: ${{ secrets.TR_PIN }}
+        run: npm run ci:reauth -- --pin
       - name: store the refreshed protected-environment secrets
         env:
           GH_TOKEN: ${{ secrets.GH_CLI_TOKEN_USED_TO_UPDATE_TR_SESSION }}

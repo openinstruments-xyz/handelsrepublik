@@ -70,12 +70,23 @@ jobs:
           TR_SESSION_JSON: ${{ secrets.TR_SESSION_JSON }}
         run: |
           umask 077
-          test -n "$TR_SESSION_JSON"
           printf '%s' "$TR_SESSION_JSON" > "$RUNNER_TEMP/tr-session.json"
       - name: refresh the saved session locally
+        id: refresh
+        continue-on-error: true
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
         run: npm run ci:reauth -- --refresh
+      - name: install browser for PIN login
+        if: steps.refresh.outcome == 'failure'
+        run: npx playwright install --with-deps chromium
+      - name: log in with PIN and wait up to two minutes for app approval
+        if: steps.refresh.outcome == 'failure'
+        env:
+          TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json
+          TR_PHONE_NUMBER: ${{ secrets.TR_PHONE_NUMBER }}
+          TR_PIN: ${{ secrets.TR_PIN }}
+        run: npm run ci:reauth -- --pin
       - name: run live integration tests
         env:
           TR_SESSION_FILE: ${{ runner.temp }}/tr-session.json

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { completeFreshEnrollmentSession, runCiReauth } from '../scripts/reauth-ci.js';
+import { completeFreshEnrollmentSession, loginWithCiPin, runCiReauth } from '../scripts/reauth-ci.js';
+import { TradeRepublicClient, TradeRepublicHttpError } from '../src/index.js';
 
 const options = {
   repo: 'openinstruments-xyz/handelsrepublik',
@@ -12,6 +13,47 @@ const options = {
 };
 
 describe('CI session reauthentication mode', () => {
+  it('runs explicit PIN login without attempting refresh or QR enrollment', async () => {
+    const calls: string[] = [];
+    await runCiReauth('ci-session.json', options, {
+      async refresh() { calls.push('refresh'); },
+      async enroll() { calls.push('enroll'); },
+      async pin(path) { calls.push(`pin:${path}`); },
+    }, 'pin');
+    assert.deepEqual(calls, ['pin:ci-session.json']);
+  });
+
+  it('requires both credentials before attempting PIN login', async () => {
+    const client = TradeRepublicClient.create();
+    try {
+      await assert.rejects(() => loginWithCiPin(client, { phoneNumber: '+491234567890' }),
+        /TR_PHONE_NUMBER and TR_PIN are required/);
+    } finally { client.close(); }
+  });
+
+  it('requests app approval with a two-minute deadline and never logs credentialed API errors', async () => {
+    const client = TradeRepublicClient.create();
+    let calls = 0;
+    client.auth.loginWithPin = async (login) => {
+      calls += 1;
+      assert.equal(login.phoneNumber, '+491234567890');
+      assert.equal(login.pin, '0000');
+      assert.equal(login.otpLess, true);
+      assert.equal(login.timeoutMs, 120_000);
+      assert.ok(login.signal);
+      throw new TradeRepublicHttpError('sensitive response', 401, { secret: 'do-not-log' });
+    };
+    try {
+      await assert.rejects(() => loginWithCiPin(client, { phoneNumber: ' +491234567890\n', pin: '0000\n' }),
+        (error: Error) => {
+          assert.equal(error.message, 'Trade Republic CI PIN login failed (HTTP 401).');
+          assert.equal(error.cause, undefined);
+          return true;
+        });
+      assert.equal(calls, 1);
+    } finally { client.close(); }
+  });
+
   it('starts interactive enrollment when TR_SESSION_FILE is absent', async () => {
     const calls: string[] = [];
     await runCiReauth(undefined, options, {
