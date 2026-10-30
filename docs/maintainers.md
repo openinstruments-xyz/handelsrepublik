@@ -134,9 +134,10 @@ The refresh workflow has an additional daily schedule at 15:00 in
 schedule's first attempt may recover an unavailable session using
 `TR_PHONE_NUMBER` and `TR_PIN`. Approve the login in the app within two minutes.
 The script checks the actual Berlin time before browser setup and again before
-sending the login: it must still be 15:00–15:09. Delayed jobs outside that window,
+sending the login: it must be at or after 15:00 and before 18:00. Delayed jobs outside that window,
 reruns, manual workflow dispatches, and the regular two-hour refresh schedule
 cannot request approval. An unavailable session is otherwise left unchanged.
+This is phone/PIN login with push approval (`otpLess: true`), never QR login.
 An unapproved daily login fails its job without replacing the saved secret.
 
 The two-minute approval deadline starts after fresh browser proof has been

@@ -161,10 +161,12 @@ describe('CI session availability and daily approval policy', () => {
   it('allows one scheduled approval window at 15:00 Berlin in winter and summer', () => {
     assert.equal(isCiPinLoginAllowed(scheduled, new Date('2026-10-30T14:00:00Z')), true);
     assert.equal(isCiPinLoginAllowed(scheduled, new Date('2026-07-30T13:09:59Z')), true);
+    assert.equal(isCiPinLoginAllowed(scheduled, new Date('2026-10-30T14:45:00Z')), true);
+    assert.equal(isCiPinLoginAllowed(scheduled, new Date('2026-10-30T16:59:59Z')), true);
   });
 
   it('rejects nighttime, early or delayed runs, manual dispatches, and reruns', () => {
-    for (const date of ['2026-10-30T02:00:00Z', '2026-10-30T13:59:59Z', '2026-10-30T14:10:00Z']) {
+    for (const date of ['2026-10-30T02:00:00Z', '2026-10-30T13:59:59Z', '2026-10-30T17:00:00Z']) {
       assert.equal(isCiPinLoginAllowed(scheduled, new Date(date)), false);
     }
     const now = new Date('2026-10-30T14:00:00Z');

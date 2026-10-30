@@ -79,7 +79,7 @@ export function isCiPinLoginAllowed(
   }).format(now);
   // Ignore reruns, manual requests, and schedules delayed beyond the phone-approval window.
   return context.eventName === 'schedule' && context.schedule === '0 15 * * *'
-    && context.runAttempt === '1' && /^15:0\d$/.test(localTime);
+    && context.runAttempt === '1' && /^(15|16|17):\d{2}$/.test(localTime);
 }
 
 function ciPinLoginAllowedNow(): boolean {
@@ -138,7 +138,7 @@ export async function loginWithCiPin(
 
 async function loginSavedSessionWithPin(sessionPath: string): Promise<boolean> {
   if (!ciPinLoginAllowedNow()) {
-    console.log('Skipping PIN login: only the daily first scheduled run at 15:00–15:09 Europe/Berlin may request approval.');
+    console.log('Skipping PIN login: only the daily first scheduled run from 15:00 until 18:00 Europe/Berlin may request approval.');
     return false;
   }
   assert.ok(process.env.TR_PHONE_NUMBER?.trim() && process.env.TR_PIN?.trim(),
